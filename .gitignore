@@ -1,0 +1,13 @@
+target/
+dependency-reduced-pom.xml
+*.class
+*.jar
+.DS_Store
+.idea/
+.vscode/
+*.iml
+.env
+venv/
+__pycache__/
+node_modules/
+build/

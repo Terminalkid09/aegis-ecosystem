@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  aegis-postgres:
+    image: postgres:15
+    container_name: aegis-postgres
+    environment:
+      POSTGRES_DB: aegis_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./infrastructure/postgres:/var/lib/postgresql/data
+
+  aegis-redis:
+    image: redis:7
+    container_name: aegis-redis
+    ports:
+      - "6379:6379"
+
+  aegis-link:
+    build: ./aegis-link
+    container_name: aegis-link
+    ports:
+      - "8080:8080"
+    depends_on:
+      - aegis-redis
+    environment:
+      SPRING_REDIS_HOST: aegis-redis
+
+  aegis-brain:
+    build: ./aegis-brain
+    container_name: aegis-brain
+    ports:
+      - "8000:8000"
+    depends_on:
+      - aegis-postgres
+      - aegis-redis
+    environment:
+      DATABASE_URL: postgresql://user:password@aegis-postgres:5432/aegis_db
+      REDIS_HOST: aegis-redis
