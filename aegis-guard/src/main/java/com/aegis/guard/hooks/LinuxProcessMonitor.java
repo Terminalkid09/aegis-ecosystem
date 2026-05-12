@@ -1,12 +1,5 @@
 package com.aegis.guard.hooks;
 
-import com.aegis.guard.models.SystemEvent;
-import com.aegis.guard.network.AegisClient;
-import com.aegis.guard.utils.Config;
-import com.aegis.guard.utils.HashCalculator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -15,6 +8,15 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.aegis.guard.models.SystemEvent;
+import com.aegis.guard.network.AegisClient;
+import com.aegis.guard.utils.Config;
+import com.aegis.guard.utils.HashCalculator;
+import com.aegis.guard.utils.SystemInfoCollector;
 
 /*
 Implementazione Linux di ProcessMonitor.
@@ -36,10 +38,15 @@ public class LinuxProcessMonitor implements ProcessMonitor {
     private volatile boolean     running = false;
     private final Set<Long>      knownPids = new HashSet<>();
 
+    private final String hostname;
+    private final String ipAddress;
+
     public LinuxProcessMonitor(AegisClient client, HashCalculator hasher, String agentId) {
         this.client  = client;
         this.hasher  = hasher;
         this.agentId = agentId;
+        this.hostname = SystemInfoCollector.getHostname();
+        this.ipAddress = SystemInfoCollector.getIpAddress();
     }
 
     // ProcessMonitor
@@ -107,6 +114,8 @@ public class LinuxProcessMonitor implements ProcessMonitor {
                 SystemEvent event = new SystemEvent(
                         agentId, pid, name, exePath, user, "Linux", "PROCESS_CREATED"
                 );
+                event.setHostname(hostname);
+                event.setIpAddress(ipAddress);
 
                 if (!exePath.isEmpty()) {
                     event.setFileHash(hasher.calculateHash(exePath));

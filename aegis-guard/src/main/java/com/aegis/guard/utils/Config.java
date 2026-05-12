@@ -13,7 +13,7 @@ public class Config {
 
     // ID univoco di questo agente
     public static final String AGENT_ID = getEnv(
-            "AEGIS_AGENT_ID", "agent-" + UUID.randomUUID().toString()
+            "AEGIS_AGENT_ID", "agent-gen-" + UUID.randomUUID().toString().substring(0, 8)
     );
 
     // URL di aegis-link dove inviare gli eventi

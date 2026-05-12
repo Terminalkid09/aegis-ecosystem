@@ -1,18 +1,20 @@
 package com.aegis.guard.hooks;
 
-import com.aegis.guard.models.SystemEvent;
-import com.aegis.guard.network.AegisClient;
-import com.aegis.guard.utils.Config;
-import com.aegis.guard.utils.HashCalculator;
-import com.sun.jna.Pointer;
-import com.sun.jna.platform.win32.WinDef.DWORD;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.aegis.guard.models.SystemEvent;
+import com.aegis.guard.network.AegisClient;
+import com.aegis.guard.utils.Config;
+import com.aegis.guard.utils.HashCalculator;
+import com.aegis.guard.utils.SystemInfoCollector;
+import com.sun.jna.Pointer;
+import com.sun.jna.platform.win32.WinDef.DWORD;
 
 /*
 Implementazione Windows di ProcessMonitor.
@@ -31,11 +33,16 @@ public class WindowsProcessMonitor implements ProcessMonitor {
 
     // PID visti nell'ultimo ciclo — usati per rilevare nuovi processi.
     private final Set<Long> knownPids = new HashSet<>();
+    
+    private final String hostname;
+    private final String ipAddress;
 
     public WindowsProcessMonitor(AegisClient client, HashCalculator hasher, String agentId) {
         this.client  = client;
         this.hasher  = hasher;
         this.agentId = agentId;
+        this.hostname = SystemInfoCollector.getHostname();
+        this.ipAddress = SystemInfoCollector.getIpAddress();
     }
 
     // ProcessMonitor
@@ -108,6 +115,9 @@ public class WindowsProcessMonitor implements ProcessMonitor {
                             "Windows",
                             "PROCESS_CREATED"
                     );
+                    event.setHostname(hostname);
+                    event.setIpAddress(ipAddress);
+
                     // Hash opzionale — solo se abbiamo il path
                     if (!event.getProcessPath().isEmpty()) {
                         event.setFileHash(hasher.calculateHash(event.getProcessPath()));

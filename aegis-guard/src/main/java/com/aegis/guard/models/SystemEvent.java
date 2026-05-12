@@ -17,6 +17,8 @@ public class SystemEvent {
     private String fileHash;
     private String eventType;
     private Instant timestamp;
+    private String hostname;
+    private String ipAddress;
 
     public SystemEvent() {}
 
@@ -31,6 +33,8 @@ public class SystemEvent {
         this.os = os;
         this.eventType = eventType;
         this.timestamp = Instant.now();
+        this.hostname = null;
+        this.ipAddress = null;
     }
 
     // Getters e Setters
@@ -59,11 +63,17 @@ public class SystemEvent {
     public void   setEventType(String v)    { this.eventType = v; }
 
     public Instant getTimestamp()           { return timestamp; }
-    public void    setTimestamp(Instant v)  { this.timestamp = v; }   
+    public void    setTimestamp(Instant v)  { this.timestamp = v; }
+
+    public String getHostname()             { return hostname; }
+    public void   setHostname(String v)     { this.hostname = v; }
+
+    public String getIpAddress()            { return ipAddress; }
+    public void   setIpAddress(String v)    { this.ipAddress = v; }
     
     @Override
     public String toString() {
-        return String.format("[%s] pid=%-6d %-30s os=%-8s user=%s",
-                eventType, pid, processName, os, user);
+        return String.format("[%s] pid=%-6d %-30s os=%-8s user=%s hostname=%s ip=%s",
+                eventType, pid, processName, os, user, hostname, ipAddress);
     }
 }

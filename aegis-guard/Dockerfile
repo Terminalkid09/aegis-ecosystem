@@ -1,5 +1,18 @@
-FROM openjdk:25-jdk-slim
+FROM eclipse-temurin:21-jdk-alpine AS build
+RUN apk add --no-cache maven
 WORKDIR /app
-COPY target/aegis-guard-1.0-SNAPSHOT.jar guard.jar
-# Note: Monitoring host processes from inside a container requires special flags (--pid=host)
-ENTRYPOINT ["java", "-jar", "guard.jar"]
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
+COPY src ./src
+RUN mvn clean package -Dmaven.test.skip=true -B
+
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+COPY --from=build /app/target/aegis-guard.jar app.jar
+
+# Security: Run as non-root user
+RUN addgroup -S aegis && adduser -S aegis -G aegis
+RUN chown aegis:aegis /app/app.jar
+USER aegis
+
+ENTRYPOINT ["java", "-jar", "app.jar"]

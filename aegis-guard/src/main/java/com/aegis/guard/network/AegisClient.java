@@ -6,6 +6,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonPrimitive;
 import com.google.gson.JsonSerializer;
+import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -31,12 +32,13 @@ public class AegisClient {
 
     private static final int MAX_RETRIES    = 3;
     private static final int RETRY_DELAY_MS = 500;
+    private static final String API_KEY = System.getenv("AEGIS_GUARD_API_KEY");
 
     private final Gson               gson;
     private final CloseableHttpClient httpClient;
 
     public AegisClient() {
-        // Configurazione GSON per gestire il tipo Instant (Java 25)
+        // Configurazione GSON per gestire il tipo Instant
         this.gson = new GsonBuilder()
                 .registerTypeAdapter(Instant.class, (JsonSerializer<Instant>) (src, typeOfSrc, context) -> 
                         new JsonPrimitive(DateTimeFormatter.ISO_INSTANT.format(src)))
@@ -65,6 +67,11 @@ public class AegisClient {
                 HttpPost request = new HttpPost(Config.GATEWAY_URL);
                 request.setEntity(new StringEntity(json, ContentType.APPLICATION_JSON));
                 request.setHeader("X-Agent-Id", event.getAgentId());
+                
+                // Aggiungi la API Key se configurata
+                if (API_KEY != null && !API_KEY.isBlank()) {
+                    request.setHeader("X-Api-Key", API_KEY);
+                }
 
                 httpClient.execute(request, response -> {
                     int status = response.getCode();
@@ -96,5 +103,39 @@ public class AegisClient {
         try { httpClient.close(); } catch (IOException e) {
             log.warn("Error closing HttpClient", e);
         }
+    }
+
+    /**
+     * Recupera un comando pendente dal gateway (polling).
+     */
+    public String fetchCommand(String agentId) {
+        String commandUrl = Config.GATEWAY_URL.replace("/events", "/commands");
+
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                HttpGet request = new HttpGet(commandUrl);
+                request.setHeader("X-Agent-Id", agentId);
+                if (API_KEY != null && !API_KEY.isBlank()) {
+                    request.setHeader("X-Api-Key", API_KEY);
+                }
+
+                return httpClient.execute(request, response -> {
+                    int status = response.getCode();
+                    if (status == 200) {
+                        return new String(response.getEntity().getContent().readAllBytes());
+                    }
+                    return null;
+                });
+            } catch (IOException e) {
+                log.warn("Fetch command attempt {}/{} failed: {}", attempt, MAX_RETRIES, e.getMessage());
+                if (attempt < MAX_RETRIES) {
+                    try { Thread.sleep(RETRY_DELAY_MS); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
+            }
+        }
+        return null;
     }
 }

@@ -1,20 +1,22 @@
 package com.aegis.guard.hooks;
 
-import com.aegis.guard.models.SystemEvent;
-import com.aegis.guard.network.AegisClient;
-import com.aegis.guard.utils.Config;
-import com.aegis.guard.utils.HashCalculator;
-import com.sun.jna.Library;
-import com.sun.jna.Memory;
-import com.sun.jna.Native;
-import com.sun.jna.Pointer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.aegis.guard.models.SystemEvent;
+import com.aegis.guard.network.AegisClient;
+import com.aegis.guard.utils.Config;
+import com.aegis.guard.utils.HashCalculator;
+import com.aegis.guard.utils.SystemInfoCollector;
+import com.sun.jna.Library;
+import com.sun.jna.Memory;
+import com.sun.jna.Native;
+import com.sun.jna.Pointer;
 
 /**
 Implementazione macOS di ProcessMonitor.
@@ -50,10 +52,15 @@ public class MacOSProcessMonitor implements ProcessMonitor {
     private volatile boolean     running = false;
     private final Set<Long>      knownPids = new HashSet<>();
 
+    private final String hostname;
+    private final String ipAddress;
+
     public MacOSProcessMonitor(AegisClient client, HashCalculator hasher, String agentId) {
         this.client  = client;
         this.hasher  = hasher;
         this.agentId = agentId;
+        this.hostname = SystemInfoCollector.getHostname();
+        this.ipAddress = SystemInfoCollector.getIpAddress();
     }
 
     // ProcessMonitor 
@@ -123,6 +130,8 @@ public class MacOSProcessMonitor implements ProcessMonitor {
             SystemEvent event = new SystemEvent(
                     agentId, pid, name, path, currentUser, "macOS", "PROCESS_CREATED"
             );
+            event.setHostname(hostname);
+            event.setIpAddress(ipAddress);
 
             if (!path.isEmpty()) {
                 event.setFileHash(hasher.calculateHash(path));
