@@ -1,6 +1,10 @@
 # Aegis EDR Ecosystem
 
-[![CI Status](https://github.com/aegis-ecosystem/aegis-ecosystem/actions/workflows/ci.yml/badge.svg)](https://github.com/aegis-ecosystem/aegis-ecosystem/actions)
+[![CI Pipeline](https://github.com/Terminalkid09/aegis-ecosystem/actions/workflows/ci.yml/badge.svg)](https://github.com/Terminalkid09/aegis-ecosystem/actions/workflows/ci.yml)
+![Java Version](https://img.shields.io/badge/Java-21-orange?logo=openjdk)
+![Python Version](https://img.shields.io/badge/Python-3.12-blue?logo=python)
+![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.3.5-brightgreen?logo=spring-boot)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115.5-009688?logo=fastapi)
 
 Aegis EDR Ecosystem is a modular detection, ingestion, and analysis stack for process telemetry. The repository includes an agent, a Redis-backed ingestion gateway, and a FastAPI-based analysis engine with a React frontend.
 

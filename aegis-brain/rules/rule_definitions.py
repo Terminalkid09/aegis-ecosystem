@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from api.schemas import EventSchema
 
