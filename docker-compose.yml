@@ -1,42 +1,96 @@
-version: '3.8'
-
 services:
   aegis-postgres:
-    image: postgres:15
+    image: postgres:16-alpine
     container_name: aegis-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: aegis_db
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - ./infrastructure/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   aegis-redis:
-    image: redis:7
+    image: redis:7-alpine
     container_name: aegis-redis
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT_EXTERNAL:-6379}:6379"
+    volumes:
+      - ./infrastructure/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   aegis-link:
     build: ./aegis-link
     container_name: aegis-link
+    restart: unless-stopped
     ports:
-      - "8080:8080"
-    depends_on:
-      - aegis-redis
+      - "${LINK_PORT_EXTERNAL:-8080}:8080"
     environment:
-      SPRING_REDIS_HOST: aegis-redis
+      SPRING_DATA_REDIS_HOST: aegis-redis
+      SPRING_DATA_REDIS_PORT: 6379
+      AEGIS_API_KEY: ${AEGIS_API_KEY}
+    depends_on:
+      aegis-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   aegis-brain:
     build: ./aegis-brain
     container_name: aegis-brain
+    restart: unless-stopped
     ports:
-      - "8000:8000"
-    depends_on:
-      - aegis-postgres
-      - aegis-redis
+      - "${BRAIN_PORT_EXTERNAL:-8000}:8000"
     environment:
-      DATABASE_URL: postgresql://user:password@aegis-postgres:5432/aegis_db
+      DATABASE_URL: ${DATABASE_URL}
       REDIS_HOST: aegis-redis
+      REDIS_PORT: 6379
+      AEGIS_API_KEY: ${AEGIS_API_KEY}
+    depends_on:
+      aegis-postgres:
+        condition: service_healthy
+      aegis-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # ─── aegis-guard (The Agent) ────────────────────────────────────────────────
+  aegis-guard:
+    build: ./aegis-guard
+    container_name: aegis-guard
+    restart: unless-stopped
+    environment:
+      AEGIS_AGENT_ID: ${AEGIS_AGENT_ID}
+      AEGIS_GATEWAY_URL: http://aegis-link:8080/api/v1/events
+      AEGIS_SCAN_INTERVAL_MS: ${AEGIS_SCAN_INTERVAL_MS}
+      AEGIS_GUARD_API_KEY: ${AEGIS_API_KEY}
+    depends_on:
+      aegis-link:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
