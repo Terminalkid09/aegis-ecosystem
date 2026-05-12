@@ -41,6 +41,8 @@ dependency-reduced-pom.xml
 
 # Python
 __pycache__/
+*.db
+*.sqlite3
 *.py[cod]
 *$py.class
 *.so
