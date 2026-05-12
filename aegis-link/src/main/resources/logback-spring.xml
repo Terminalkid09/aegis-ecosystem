@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!--
+        Configurazione Logback per aegis-link.
+
+        Pattern scelto:
+          [TIMESTAMP] [LIVELLO] [THREAD] LOGGER - MESSAGGIO
+
+        Esempio output:
+          2026-05-10 14:32:01 [INFO ] [http-nio-8080-exec-1] IngestionController - Event received: agent=abc process=notepad.exe pid=1234 os=Windows
+    -->
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss} [%-5level] [%thread] %logger{36} - %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- Silenziamo i log verbosi di Spring e Redis che non aggiungono valore -->
+    <logger name="org.springframework" level="WARN"/>
+    <logger name="io.lettuce"          level="WARN"/>
+
+    <!-- Log dettagliati per tutto il codice aegis -->
+    <logger name="com.aegis" level="DEBUG"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+</configuration>
