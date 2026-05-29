@@ -1,39 +1,106 @@
-name: CI Pipeline
+name: Aegis Ecosystem CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
     branches: [ main ]
 
 jobs:
-  test-aegis-brain:
+  brain-test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: aegis-brain
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Run Tests
-        run: pytest
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: aegis_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
-  test-aegis-guard:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: aegis-guard
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-      - name: Run Tests
-        run: mvn test
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r aegis-brain/requirements.txt
+
+    - name: Run security audit (Bandit)
+      run: |
+        pip install bandit
+        bandit -r aegis-brain/ -ll
+
+    - name: Run tests with pytest
+      env:
+        DATABASE_URL: postgresql+asyncpg://postgres:password@localhost:5432/aegis_test
+        REDIS_URL: redis://localhost:6379
+        JWT_SECRET: test-secret-only-for-ci
+        MASTER_KEY_B64: dGhpcyBpcyBhIHZlcnkgc2VjdXJlIDMyIGJ5dGUga2V5IQ==
+      run: |
+        cd aegis-brain
+        pytest --cov=. --cov-report=xml
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: ./aegis-brain/coverage.xml
+        fail_ci_if_error: false
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    - name: Install dependencies
+      run: npm ci
+      working-directory: frontend
+    - name: Build dashboard
+      run: npm run build
+      working-directory: frontend
+
+  java-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [aegis-link, aegis-guard]
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '21'
+        cache: maven
+    - name: Build and test
+      run: mvn test
+      working-directory: ${{ matrix.module }}

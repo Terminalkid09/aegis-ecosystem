@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Shield, Activity, TrendingUp } from 'lucide-react';
+import { AlertTriangle, Shield, Activity, TrendingUp, Cpu, HardDrive } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { statsAPI } from '../services/api';
 import { useDashboard } from '../context/DashboardContext';
 
 export default function DashboardOverview() {
   const { refreshTrigger, settings } = useDashboard();
   const [stats, setStats] = useState(null);
+  const [telemetry, setTelemetry] = useState([]);
+  const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -17,7 +20,11 @@ export default function DashboardOverview() {
     try {
       setLoading(true);
       const response = await statsAPI.getStats();
+      const telemetryResponse = await statsAPI.getRecentTelemetry({ limit: 8 });
+      const activityResponse = await statsAPI.getActivity({ limit: 10 });
       setStats(response.data);
+      setTelemetry(telemetryResponse.data || []);
+      setActivity(activityResponse.data || []);
       setError(null);
     } catch (err) {
       setError('Failed to load statistics');
@@ -26,6 +33,15 @@ export default function DashboardOverview() {
       setLoading(false);
     }
   };
+
+  const chartData = telemetry
+    .filter(t => t.agent_type.toLowerCase() === 'nodetrace' && t.cpu_usage !== null && t.ram_usage !== null)
+    .map(t => ({
+      time: new Date(t.timestamp).toLocaleTimeString(),
+      cpu: t.cpu_usage,
+      ram: t.ram_usage,
+      name: t.hostname || t.agent_id
+    })).reverse();
 
   const getThreatLevel = () => {
     if (!stats) return { level: 'UNKNOWN', color: 'text-slate-500', bgColor: 'bg-slate-900' };
@@ -159,6 +175,113 @@ export default function DashboardOverview() {
         </div>
       </div>
 
+      {/* Performance Metrics Chart */}
+      <div className={`${panelClass} rounded-lg p-6`}>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className={`text-lg font-bold ${settings.darkMode ? 'text-white' : 'text-slate-900'}`}>System Performance Metrics</h3>
+          <div className="flex gap-4 text-xs">
+            <div className="flex items-center gap-1"><div className="w-3 h-3 bg-cyan-500 rounded-full"/> <span className="text-slate-400">CPU Usage</span></div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 bg-purple-500 rounded-full"/> <span className="text-slate-400">RAM Usage</span></div>
+          </div>
+        </div>
+        <div className="h-80 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData}>
+              <defs>
+                <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="colorRam" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#a855f7" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+              <XAxis 
+                dataKey="time" 
+                stroke="#64748b" 
+                fontSize={10} 
+                tickLine={false}
+                axisLine={false}
+              />
+              <YAxis 
+                stroke="#64748b" 
+                fontSize={10} 
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(value) => `${value}%`}
+              />
+              <Tooltip 
+                contentStyle={{ 
+                  backgroundColor: '#0f172a', 
+                  border: '1px solid #334155',
+                  borderRadius: '8px',
+                  fontSize: '12px'
+                }}
+                itemStyle={{ padding: '2px 0' }}
+              />
+              <Area 
+                type="monotone" 
+                dataKey="cpu" 
+                stroke="#06b6d4" 
+                strokeWidth={2}
+                fillOpacity={1} 
+                fill="url(#colorCpu)" 
+                name="CPU Usage"
+              />
+              <Area 
+                type="monotone" 
+                dataKey="ram" 
+                stroke="#a855f7" 
+                strokeWidth={2}
+                fillOpacity={1} 
+                fill="url(#colorRam)" 
+                name="RAM Usage"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className={`${panelClass} rounded-lg p-6`}>
+          <h3 className={`text-lg font-bold mb-4 ${settings.darkMode ? 'text-white' : 'text-slate-900'}`}>Live Telemetry</h3>
+          <div className="space-y-3">
+            {telemetry.map(row => (
+              <div key={row.id} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                <div>
+                  <div className="text-sm font-bold">{row.hostname || row.agent_id}</div>
+                  <div className="text-[10px] uppercase tracking-widest text-slate-500">{row.agent_type || 'agent'} / {new Date(row.timestamp).toLocaleTimeString()}</div>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-slate-300">
+                  <span className="inline-flex items-center gap-1"><Cpu size={13}/>{Number(row.cpu_usage || 0).toFixed(1)}%</span>
+                  <span className="inline-flex items-center gap-1"><Activity size={13}/>{Number(row.ram_usage || 0).toFixed(1)}%</span>
+                  <span className="inline-flex items-center gap-1"><HardDrive size={13}/>{formatDisk(row.disk_free)}</span>
+                </div>
+              </div>
+            ))}
+            {telemetry.length === 0 && <div className="text-sm text-slate-500 italic">No telemetry samples received yet.</div>}
+          </div>
+        </div>
+
+        <div className={`${panelClass} rounded-lg p-6`}>
+          <h3 className={`text-lg font-bold mb-4 ${settings.darkMode ? 'text-white' : 'text-slate-900'}`}>Activity Stream</h3>
+          <div className="space-y-3">
+            {activity.map((item, index) => (
+              <div key={`${item.type}-${item.timestamp}-${index}`} className="flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                <div className={`mt-1 h-2.5 w-2.5 rounded-full ${item.type === 'alert' ? 'bg-red-500' : 'bg-green-500'}`} />
+                <div>
+                  <div className="text-sm">{item.summary}</div>
+                  <div className="text-[10px] uppercase tracking-widest text-slate-500">{item.hostname || item.agent_id} / {new Date(item.timestamp).toLocaleTimeString()}</div>
+                </div>
+              </div>
+            ))}
+            {activity.length === 0 && <div className="text-sm text-slate-500 italic">No agent activity received yet.</div>}
+          </div>
+        </div>
+      </div>
+
       {error && (
         <div className="bg-red-950 border border-red-700 rounded-lg p-4 text-red-400">
           {error}
@@ -166,6 +289,12 @@ export default function DashboardOverview() {
       )}
     </div>
   );
+}
+
+function formatDisk(value) {
+  if (!value) return 'n/a';
+  if (value > 1024) return `${(value / 1024).toFixed(1)} GB`;
+  return `${value} MB`;
 }
 
 function StatCard({ label, value, icon: Icon, color, iconColor, darkMode }) {
@@ -196,3 +325,4 @@ function SeverityItem({ label, count, color, textColor }) {
     </div>
   );
 }
+

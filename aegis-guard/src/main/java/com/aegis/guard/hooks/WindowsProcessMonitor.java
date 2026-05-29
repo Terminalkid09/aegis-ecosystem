@@ -13,6 +13,7 @@ import com.aegis.guard.network.AegisClient;
 import com.aegis.guard.utils.Config;
 import com.aegis.guard.utils.HashCalculator;
 import com.aegis.guard.utils.SystemInfoCollector;
+import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.platform.win32.WinDef.DWORD;
 
@@ -101,12 +102,12 @@ public class WindowsProcessMonitor implements ProcessMonitor {
 
         try {
             WindowsKernel32.PROCESSENTRY32 entry = new WindowsKernel32.PROCESSENTRY32();
-            entry.dwSize = new DWORD(entry.size());
+            entry.dwSize = entry.size();
 
             if (kernel32.Process32First(snapshot, entry)) {
                 do {
-                    String name = new String(entry.szExeFile).trim().replace("\0", "");
-                    long   pid  = entry.th32ProcessID.longValue();
+                    String name = Native.toString(entry.szExeFile);
+                    long   pid  = (long) entry.th32ProcessID;
 
                     SystemEvent event = new SystemEvent(
                             agentId, pid, name,

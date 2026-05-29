@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Cloud, Laptop, Clock } from 'lucide-react';
+import { Shield, Cloud, Laptop, Clock, Cpu, Zap, Activity } from 'lucide-react';
 import { agentsAPI } from '../services/api';
 import { useDashboard } from '../context/DashboardContext';
 
@@ -37,12 +37,15 @@ export default function AgentsList() {
     );
   });
 
+  const nodeTraceAgents = filteredAgents.filter(a => a.agent_type === 'nodetrace');
+  const aegisAgents = filteredAgents.filter(a => a.agent_type === 'aegis-guard');
+  const unknownAgents = filteredAgents.filter(a => !a.agent_type || !['nodetrace', 'aegis-guard'].includes(a.agent_type));
+
   const getOSIcon = (osType) => {
     if (!osType) return Laptop;
     const lower = osType.toLowerCase();
     if (lower.includes('windows')) return Laptop;
     if (lower.includes('linux')) return Cloud;
-    if (lower.includes('mac') || lower.includes('darwin')) return Laptop;
     return Laptop;
   };
 
@@ -51,128 +54,125 @@ export default function AgentsList() {
     const now = new Date();
     const lastSeenDate = new Date(lastSeen);
     const diffInMinutes = (now - lastSeenDate) / (1000 * 60);
-    return diffInMinutes < 10; // Active if seen in last 10 minutes
+    return diffInMinutes < 10;
   };
 
-  const containerClass = settings.darkMode ? 'text-white' : 'text-slate-900';
-  const panelClass = settings.darkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900';
-  const inputClass = settings.darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-slate-100 border-slate-300 text-slate-900 placeholder-slate-500';
+  const renderAgentCard = (agent) => {
+    const OSIcon = getOSIcon(agent.os_type);
+    const isActive = isAgentActive(agent.last_seen);
+    const isNodeTrace = agent.agent_type === 'nodetrace';
+
+    return (
+      <div
+        key={agent.agent_id}
+        className={`rounded-lg p-5 transition-all hover:shadow-lg border ${
+          settings.darkMode 
+            ? 'bg-slate-900 border-slate-700 hover:border-slate-500 text-white' 
+            : 'bg-white border-slate-200 hover:border-slate-400 text-slate-900'
+        }`}
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-lg ${isNodeTrace ? 'bg-purple-600' : 'bg-cyan-600'}`}>
+              <OSIcon size={20} className="text-white" />
+            </div>
+            <div>
+              <h3 className="font-bold truncate max-w-[150px]">{agent.hostname || 'Unknown'}</h3>
+              <p className="text-[10px] font-mono text-slate-500 truncate max-w-[120px]">{agent.agent_id}</p>
+            </div>
+          </div>
+          <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+            isActive ? 'bg-green-950 text-green-400 border-green-800' : 'bg-slate-800 text-slate-400 border-slate-700'
+          }`}>
+            {isActive ? 'ONLINE' : 'OFFLINE'}
+          </div>
+        </div>
+
+        <div className="space-y-2 text-xs">
+          <div className="flex justify-between">
+            <span className="text-slate-500">IP Address:</span>
+            <span className="font-mono text-cyan-500">{agent.ip_address || '127.0.0.1'}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">OS Platform:</span>
+            <span>{agent.os_type || 'Unknown'}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Agent Type:</span>
+            <span>{agent.agent_type || 'Unknown'}</span>
+          </div>
+          <div className="flex justify-between items-center pt-2 border-t border-slate-800">
+            <span className="text-slate-500 flex items-center gap-1"><Clock size={12}/> Last seen:</span>
+            <span className="text-[10px]">{formatLastSeen(agent.last_seen)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className={`space-y-6 ${containerClass}`}>
-      {/* Header */}
-      <div>
-        <h2 className="text-3xl font-bold text-white">Monitored Agents</h2>
-        <p className="text-slate-400 mt-1">Manage your security endpoints</p>
+    <div className="space-y-8">
+      <div className="flex justify-between items-end">
+        <div>
+          <h2 className="text-3xl font-bold flex items-center gap-3">
+            <Shield className="text-cyan-500" /> Endpoint Inventory
+          </h2>
+          <p className="text-slate-400 mt-1">Unified monitoring for Aegis and NodeTrace fleets</p>
+        </div>
+        <div className="flex gap-2">
+            <div className="px-3 py-1 bg-cyan-900/30 border border-cyan-800 rounded text-xs text-cyan-400 flex items-center gap-2">
+                <Activity size={14}/> Aegis: {aegisAgents.length}
+            </div>
+            <div className="px-3 py-1 bg-purple-900/30 border border-purple-800 rounded text-xs text-purple-400 flex items-center gap-2">
+                <Zap size={14}/> NodeTrace: {nodeTraceAgents.length + unknownAgents.length}
+            </div>
+        </div>
       </div>
 
-      {/* Search */}
       <div className={`rounded-lg p-4 border ${settings.darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
         <input
           type="text"
-          placeholder="Search by hostname, IP, or agent ID..."
+          placeholder="Filter by name, IP, or ID..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className={`w-full px-4 py-2 rounded-lg focus:outline-none focus:border-cyan-500 transition-all ${inputClass}`}
+          className={`w-full px-4 py-2 rounded-lg focus:outline-none focus:border-cyan-500 transition-all ${
+            settings.darkMode ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-900'
+          }`}
         />
       </div>
 
-      {/* Agents Grid */}
       {loading ? (
-        <div className="flex items-center justify-center h-96">
-          <div className="text-slate-400">Loading agents...</div>
-        </div>
-      ) : error ? (
-        <div className="bg-red-950 border border-red-700 rounded-lg p-4 text-red-400">
-          {error}
-        </div>
-      ) : filteredAgents.length === 0 ? (
-        <div className={`rounded-lg p-12 text-center border ${settings.darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <Shield size={48} className={settings.darkMode ? 'mx-auto text-slate-500 mb-4' : 'mx-auto text-slate-400 mb-4'} />
-          <p className={settings.darkMode ? 'text-slate-400' : 'text-slate-600'}>No agents found</p>
-        </div>
+        <div className="flex items-center justify-center h-48 text-slate-500 italic">Synchronizing assets...</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredAgents.map((agent) => {
-            const OSIcon = getOSIcon(agent.os_type);
-            const isActive = isAgentActive(agent.last_seen);
-
-            return (
-              <div
-                key={agent.agent_id}
-                className={`rounded-lg p-6 transition-all hover:shadow-lg ${settings.darkMode ? 'bg-slate-900 border border-slate-700 hover:border-slate-600 hover:shadow-slate-900 text-white' : 'bg-white border border-slate-200 hover:border-slate-300 hover:shadow-slate-200 text-slate-900'}`}
-              >
-                {/* Header with Status */}
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-gradient-to-br from-cyan-500 to-blue-500 p-3 rounded-lg">
-                      <OSIcon size={24} className="text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-white truncate">
-                        {agent.hostname || 'Unknown'}
-                      </h3>
-                      <p className="text-xs font-mono text-slate-400 truncate">
-                        {agent.agent_id}
-                      </p>
-                    </div>
-                  </div>
-                  <div
-                    className={`px-3 py-1 rounded-full text-xs font-bold ${
-                      isActive
-                        ? 'bg-green-900 text-green-300 border border-green-700'
-                        : 'bg-slate-800 text-slate-300 border border-slate-700'
-                    }`}
-                  >
-                    {isActive ? 'Active' : 'Offline'}
-                  </div>
+        <>
+          {/* SECTION: Aegis-Guard (Java/EDR) */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-cyan-500 flex items-center gap-2 uppercase tracking-widest border-b border-cyan-900/50 pb-2">
+              <Shield size={18}/> Aegis-Guard Fleet ({aegisAgents.length})
+            </h3>
+            {aegisAgents.length === 0 ? (
+                <p className="text-slate-600 text-sm italic">No Aegis-Guard agents reported yet.</p>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {aegisAgents.map(renderAgentCard)}
                 </div>
+            )}
+          </div>
 
-                {/* Details */}
-                <div className="space-y-3 text-sm">
-                  {/* IP Address */}
-                  <div className="flex items-center gap-3 text-slate-300">
-                    <span className="text-slate-500 font-medium">IP:</span>
-                    <span className="font-mono text-cyan-400">
-                      {agent.ip_address || 'N/A'}
-                    </span>
-                  </div>
-
-                  {/* OS Type */}
-                  <div className="flex items-center gap-3 text-slate-300">
-                    <span className="text-slate-500 font-medium">OS:</span>
-                    <span>{agent.os_type || 'Unknown'}</span>
-                  </div>
-
-                  {/* Last Seen */}
-                  <div className="flex items-center gap-3 text-slate-300">
-                    <Clock size={16} className="text-slate-500" />
-                    <span className="text-xs">
-                      Last seen: {formatLastSeen(agent.last_seen)}
-                    </span>
-                  </div>
+          {/* SECTION: NodeTrace (Python/Telemetry) */}
+          <div className="space-y-4 pt-4">
+            <h3 className="text-lg font-semibold text-purple-500 flex items-center gap-2 uppercase tracking-widest border-b border-purple-900/50 pb-2">
+              <Zap size={18}/> NodeTrace Telemetry Fleet ({nodeTraceAgents.length + unknownAgents.length})
+            </h3>
+            {[...nodeTraceAgents, ...unknownAgents].length === 0 ? (
+                <p className="text-slate-600 text-sm italic">No telemetry agents reported yet.</p>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {[...nodeTraceAgents, ...unknownAgents].map(renderAgentCard)}
                 </div>
-
-                {/* Action Button */}
-                <button className={`w-full mt-4 px-4 py-2 rounded-lg text-sm font-medium transition-all ${settings.darkMode ? 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-900 hover:text-slate-900'}`}>
-                  View Details
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Summary */}
-      {filteredAgents.length > 0 && (
-        <div className={`rounded-lg p-4 border ${settings.darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <p className={settings.darkMode ? 'text-slate-400 text-sm' : 'text-slate-500 text-sm'}>
-            Showing {filteredAgents.length} of {agents.length} agents •{' '}
-            <span className="text-green-400">
-              {agents.filter((a) => isAgentActive(a.last_seen)).length} active
-            </span>
-          </p>
-        </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -180,21 +180,11 @@ export default function AgentsList() {
 
 function formatLastSeen(timestamp) {
   if (!timestamp) return 'Never';
-
   const now = new Date();
   const lastSeen = new Date(timestamp);
-  const diffInSeconds = Math.floor((now - lastSeen) / 1000);
-
-  if (diffInSeconds < 60) {
-    return 'Just now';
-  } else if (diffInSeconds < 3600) {
-    const minutes = Math.floor(diffInSeconds / 60);
-    return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-  } else if (diffInSeconds < 86400) {
-    const hours = Math.floor(diffInSeconds / 3600);
-    return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-  } else {
-    const days = Math.floor(diffInSeconds / 86400);
-    return `${days} day${days > 1 ? 's' : ''} ago`;
-  }
+  const diff = Math.floor((now - lastSeen) / 1000);
+  if (diff < 60) return 'Just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return lastSeen.toLocaleDateString();
 }

@@ -72,16 +72,24 @@ src/
 The dashboard communicates with the AEGIS backend through these endpoints:
 
 ### Stats
-- `GET /api/v1/stats` - Fetch overall statistics
+- `GET /api/v1/telemetry/stats` - Fetch overall statistics and unresolved severity counts
 
 ### Alerts
-- `GET /api/v1/alerts` - List alerts with filtering
-  - Query params: `severity`, `is_resolved`, `limit`, `offset`, `agent_id`
-- `PATCH /api/v1/alerts/{id}/resolve` - Mark alert as resolved
+- `GET /api/v1/telemetry/alerts` - List alerts with filtering
+  - Query params: `severity`, `is_resolved`
+- `PATCH /api/v1/telemetry/alerts/{id}/resolve` - Mark alert as resolved
 
 ### Agents
-- `GET /api/v1/agents` - List monitored endpoints
-  - Query params: `limit`, `offset`
+- `GET /api/v1/telemetry/agents` - List monitored endpoints
+  - Query params: `limit`, `active_only`
+
+### AI, VaultX, OSINT
+- `POST /api/v1/ai/chat` - Authenticated AI assistant requests
+- `GET/POST /api/v1/vault/notes` - Authenticated encrypted notes
+- `DELETE /api/v1/vault/notes/{id}` - Delete an authenticated user's note
+- `GET /api/v1/osint/ip/{ip}` - IP lookup
+- `GET /api/v1/osint/domain/{domain}` - Domain lookup compatibility route
+- `GET /api/v1/osint/history` - Recent OSINT queries
 
 ## Available Pages
 

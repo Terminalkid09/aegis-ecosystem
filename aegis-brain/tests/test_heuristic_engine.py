@@ -1,6 +1,6 @@
 import pytest
-from api.schemas import EventSchema
-from rules.heuristic_engine import HeuristicEngine
+from app.api.schemas.common import EventSchema
+from app.rules.heuristic_engine import HeuristicEngine
 from datetime import datetime
 
 @pytest.fixture
@@ -9,11 +9,11 @@ def engine():
 
 def test_rule_known_attack_tool(engine):
     event = EventSchema(
-        agentId="test-agent",
+        agent_id="test-agent",
         pid=123,
-        processName="mimikatz.exe",
+        process_name="mimikatz.exe",
         os="Windows",
-        eventType="PROCESS_CREATED",
+        event_type="PROCESS_CREATED",
         timestamp=datetime.now()
     )
     result = engine.analyze(event)

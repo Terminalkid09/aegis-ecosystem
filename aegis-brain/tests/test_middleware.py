@@ -1,44 +1,52 @@
-import os
 import pytest
-from fastapi.testclient import TestClient
-from main import app
+from fastapi import HTTPException
+from httpx import AsyncClient, ASGITransport
 
-# Mock AEGIS_API_KEY per i test
+from app.core.config import settings
+from app.core.deps import verify_api_key
+from app.main import app
+
+
 TEST_API_KEY = "test-secret-key"
 
-@pytest.fixture
-def client():
-    os.environ["AEGIS_API_KEY"] = TEST_API_KEY
-    with TestClient(app) as c:
-        yield c
 
-def test_verify_api_key_missing(client):
-    response = client.get("/api/v1/alerts")
-    assert response.status_code == 403
-    assert "Forbidden" in response.json()["detail"]
+def test_verify_api_key_missing(monkeypatch):
+    monkeypatch.setattr(settings, "AEGIS_API_KEY", TEST_API_KEY)
+    with pytest.raises(HTTPException) as exc:
+        verify_api_key(None)
 
-def test_verify_api_key_invalid(client):
-    response = client.get("/api/v1/alerts", headers={"X-Api-Key": "wrong-key"})
-    assert response.status_code == 403
-    assert "Forbidden" in response.json()["detail"]
+    assert exc.value.status_code == 403
+    assert "Forbidden" in exc.value.detail
 
-def test_verify_api_key_valid(client):
-    response = client.get("/api/v1/alerts", headers={"X-Api-Key": TEST_API_KEY})
-    # Se il database non è configurato potrebbe dare 500 o altro, 
-    # ma qui ci interessa che superi il middleware (quindi non 403)
-    assert response.status_code != 403
 
-def test_health_no_auth_required(client):
-    # L'endpoint "/" non dovrebbe richiedere auth (configurato in main.py senza dependency)
-    response = client.get("/")
+def test_verify_api_key_invalid(monkeypatch):
+    monkeypatch.setattr(settings, "AEGIS_API_KEY", TEST_API_KEY)
+    with pytest.raises(HTTPException) as exc:
+        verify_api_key("wrong-key")
+
+    assert exc.value.status_code == 403
+    assert "Forbidden" in exc.value.detail
+
+
+def test_verify_api_key_valid(monkeypatch):
+    monkeypatch.setattr(settings, "AEGIS_API_KEY", TEST_API_KEY)
+    assert verify_api_key(TEST_API_KEY) == TEST_API_KEY
+
+
+def test_api_key_not_configured(monkeypatch):
+    monkeypatch.setattr(settings, "AEGIS_API_KEY", None)
+    with pytest.raises(HTTPException) as exc:
+        verify_api_key(TEST_API_KEY)
+
+    assert exc.value.status_code == 500
+    assert "API Key not configured" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_health_no_auth_required():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/")
+
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-
-def test_api_key_not_configured(client):
-    # Rimuoviamo la chiave dall'env per simulare errore server
-    del os.environ["AEGIS_API_KEY"]
-    response = client.get("/api/v1/alerts", headers={"X-Api-Key": TEST_API_KEY})
-    assert response.status_code == 500
-    assert "API Key not configured" in response.json()["detail"]
-    # Ripristiniamo per gli altri test
-    os.environ["AEGIS_API_KEY"] = TEST_API_KEY

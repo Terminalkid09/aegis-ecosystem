@@ -17,23 +17,26 @@ public interface WindowsKernel32 extends StdCallLibrary {
     int TH32CS_SNAPPROCESS = 0x00000002;
     int MAX_PATH           = 260;
 
-    // Struttura PROCESSENTRY32W (versione Unicode)
     @Structure.FieldOrder({
         "dwSize", "cntUsage", "th32ProcessID", "th32DefaultHeapID",
         "th32ModuleID", "cntThreads", "th32ParentProcessID",
         "pcPriClassBase", "dwFlags", "szExeFile"
     })
     class PROCESSENTRY32 extends Structure {
-        public DWORD   dwSize             = new DWORD(size());
-        public DWORD   cntUsage;
-        public DWORD   th32ProcessID;
+        public int dwSize;
+        public int cntUsage;
+        public int th32ProcessID;
         public Pointer th32DefaultHeapID;
-        public DWORD   th32ModuleID;
-        public DWORD   cntThreads;
-        public DWORD   th32ParentProcessID;
-        public int     pcPriClassBase;
-        public DWORD   dwFlags;
-        public char[]  szExeFile = new char[MAX_PATH];
+        public int th32ModuleID;
+        public int cntThreads;
+        public int th32ParentProcessID;
+        public int pcPriClassBase;
+        public int dwFlags;
+        public byte[] szExeFile = new byte[MAX_PATH];
+
+        public PROCESSENTRY32() {
+            dwSize = size();
+        }
 
         public static class ByReference extends PROCESSENTRY32 implements Structure.ByReference {}
     }

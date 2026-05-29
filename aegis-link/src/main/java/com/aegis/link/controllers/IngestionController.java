@@ -9,6 +9,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 /*
@@ -55,20 +57,28 @@ public class IngestionController {
      */
     @PostMapping("/events")
     public ResponseEntity<EventResponse> receiveEvent(
-            @RequestHeader(value = "X-Agent-Id", required = false) String agentIdHeader,
+            @RequestHeader("X-Agent-Id") String agentIdHeader,
             @Valid @RequestBody EventRequest event) {
 
         log.info("Event received: agent={} process={} pid={} os={}",
                 event.getAgentId(), event.getProcessName(),
                 event.getPid(), event.getOs());
 
-        // Sicurezza: l'agentId nel body deve corrispondere all'header
-        if (agentIdHeader != null && !agentIdHeader.equals(event.getAgentId())) {
+        // Sicurezza: l'agentId nel body deve corrispondere all'header e, per agenti,
+        // alla secret validata dal filtro.
+        if (!agentIdHeader.equals(event.getAgentId())) {
             log.warn("AgentId mismatch: header='{}' body='{}'",
                     agentIdHeader, event.getAgentId());
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
                     .body(EventResponse.error("X-Agent-Id header does not match agentId in body"));
+        }
+
+        if (!isAuthorizedForAgent(agentIdHeader)) {
+            log.warn("Authenticated principal is not allowed to publish for agent={}", agentIdHeader);
+            return ResponseEntity
+                    .status(HttpStatus.FORBIDDEN)
+                    .body(EventResponse.error("Authenticated principal does not match agent"));
         }
 
         redisService.pushEvent(event);
@@ -98,6 +108,10 @@ public class IngestionController {
     @GetMapping("/commands")
     public ResponseEntity<String> getCommands(
             @RequestHeader("X-Agent-Id") String agentId) {
+        if (!isAuthorizedForAgent(agentId)) {
+            log.warn("Authenticated principal is not allowed to read commands for agent={}", agentId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Authenticated principal does not match agent");
+        }
         
         String command = redisService.popCommand(agentId);
         
@@ -107,5 +121,15 @@ public class IngestionController {
         
         log.info("Command dispatched to agent={}: {}", agentId, command);
         return ResponseEntity.ok(command);
+    }
+
+    private boolean isAuthorizedForAgent(String agentId) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getPrincipal() == null) {
+            return false;
+        }
+
+        String principal = authentication.getPrincipal().toString();
+        return "aegis-admin".equals(principal) || principal.equals(agentId);
     }
 }

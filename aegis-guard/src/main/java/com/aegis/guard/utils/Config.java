@@ -2,28 +2,32 @@ package com.aegis.guard.utils;
 
 import java.util.UUID;
 
-/*
-Configurazione globale dell'agente
-I valori possono essere sovrascritti tramite variabili d'ambiente
-*/
-
 public class Config {
 
-    private Config() {} // Prevent instantiation
+    private Config() {}
 
-    // ID univoco di questo agente
     public static final String AGENT_ID = getEnv(
             "AEGIS_AGENT_ID", "agent-gen-" + UUID.randomUUID().toString().substring(0, 8)
     );
 
-    // URL di aegis-link dove inviare gli eventi
     public static final String GATEWAY_URL = getEnv(
-            "AEGIS_GATEWAY_URL", "http://localhost:8080/api/v1/events"
+            "AEGIS_GATEWAY_URL", "http://localhost:8000/api/v1/telemetry/report"
     );
 
-    // Intervallo in ms tra una scansione e l'altra
+    public static final String BRAIN_URL = getEnv(
+            "AEGIS_BRAIN_URL", "http://localhost:8000/api/v1"
+    );
+
+    public static final String ENROLL_KEY = getEnv(
+            "AEGIS_ENROLL_KEY", "aegis-enrollment-token-2024" // Default for development
+    );
+
     public static final int SCAN_INTERVAL_MS = Integer.parseInt(
             getEnv("AEGIS_SCAN_INTERVAL_MS", "1000")
+    );
+
+    public static final String SECRET_FILE = getEnv(
+            "AEGIS_SECRET_FILE", "secret.json"
     );
 
     private static String getEnv(String key, String defaultValue) {

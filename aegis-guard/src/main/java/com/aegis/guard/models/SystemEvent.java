@@ -7,17 +7,46 @@ Rappresenta un evento di sistema rilevato dall'agente.
 Viene serializzato in json e inviato all'aegis-link
 */
 
+import com.google.gson.annotations.SerializedName;
+import java.time.Instant;
+
+/*
+Rappresenta un evento di sistema rilevato dall'agente.
+Viene serializzato in json e inviato all'aegis-link
+*/
+
 public class SystemEvent {
+    @SerializedName("agentId")
     private String agentId;
+    
+    @SerializedName("pid")
     private long pid;
+    
+    @SerializedName("processName")
     private String processName;
+    
+    @SerializedName("processPath")
     private String processPath;
+    
+    @SerializedName("user")
     private String user;
+    
+    @SerializedName("os")
     private String os;
+    
+    @SerializedName("fileHash")
     private String fileHash;
+    
+    @SerializedName("eventType")
     private String eventType;
+    
+    @SerializedName("timestamp")
     private Instant timestamp;
+    
+    @SerializedName("hostname")
     private String hostname;
+    
+    @SerializedName("ipAddress")
     private String ipAddress;
 
     public SystemEvent() {}

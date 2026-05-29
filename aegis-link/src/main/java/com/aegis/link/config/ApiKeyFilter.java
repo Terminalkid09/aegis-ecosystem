@@ -1,5 +1,6 @@
 package com.aegis.link.config;
 
+import com.aegis.link.service.RedisService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -13,25 +14,26 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.Collections;
 
-/*
-Filtro per la validazione della API Key.
-Verifica che la richiesta contenga l'header X-Api-Key e che corrisponda
-alla chiave configurata nel sistema. Se valida, setta l'Authentication
-in Spring Security context in modo che il request passi le autorizzazioni.
-*/
 @Component
 public class ApiKeyFilter extends OncePerRequestFilter {
 
     @Value("${aegis.api.key}")
-    private String apiKey;
+    private String globalApiKey;
+
+    private final RedisService redisService;
+
+    public ApiKeyFilter(RedisService redisService) {
+        this.redisService = redisService;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
 
         String path = request.getRequestURI();
-        
-        // Escludi l'health check dalla validazione della API Key
+
+        // Escludi l'health check e l'enrollment (che è gestito da Brain) dalla validazione qui se necessario
+        // Ma qui siamo in Link, che riceve solo eventi e comandi.
         if (path.startsWith("/actuator/") || path.equals("/api/v1/health")) {
             filterChain.doFilter(request, response);
             return;
@@ -39,20 +41,32 @@ public class ApiKeyFilter extends OncePerRequestFilter {
 
         String requestKey = request.getHeader("X-Api-Key");
 
-        if (apiKey == null || apiKey.isBlank()) {
-            response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "API Key is not configured on server");
+        if (requestKey == null || requestKey.isBlank()) {
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Missing X-Api-Key header");
             return;
         }
 
-        if (apiKey.equals(requestKey)) {
-            // Set Spring Security authentication so the request passes authorization checks
+        // 1. Verifica se è un agente registrato tramite Redis
+        String agentId = redisService.getAgentIdBySecret(requestKey);
+        
+        if (agentId != null) {
             UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                    "aegis-agent", null, Collections.emptyList()
+                    agentId, null, Collections.emptyList()
+            );
+            SecurityContextHolder.getContext().setAuthentication(auth);
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        // 2. Fallback alla chiave globale (per test o management)
+        if (globalApiKey != null && !globalApiKey.isBlank() && globalApiKey.equals(requestKey)) {
+            UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                    "aegis-admin", null, Collections.emptyList()
             );
             SecurityContextHolder.getContext().setAuthentication(auth);
             filterChain.doFilter(request, response);
         } else {
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid or missing X-Api-Key header");
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid X-Api-Key");
         }
     }
 }

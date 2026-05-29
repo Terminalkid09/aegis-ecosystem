@@ -4,17 +4,16 @@ services:
     container_name: aegis-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB:       ${POSTGRES_DB}
-      POSTGRES_USER:     ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB:-aegis}
+      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-aegis}"]
+      interval: 5s
       timeout: 5s
       retries: 5
 
@@ -22,16 +21,53 @@ services:
     image: redis:7-alpine
     container_name: aegis-redis
     restart: unless-stopped
-    command: redis-server /usr/local/etc/redis/redis.conf
     ports:
       - "${REDIS_PORT_EXTERNAL:-6379}:6379"
     volumes:
-      - ./infrastructure/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
+      retries: 5
+
+  aegis-ollama:
+    image: ollama/ollama:latest
+    container_name: aegis-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  aegis-brain:
+    build: ./aegis-brain
+    container_name: aegis-brain
+    restart: unless-stopped
+    ports:
+      - "${BRAIN_PORT_EXTERNAL:-8000}:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:password@aegis-postgres:5432/aegis}
+      REDIS_URL: redis://aegis-redis:6379
+      REDIS_HOST: aegis-redis
+      REDIS_PORT: 6379
+      AEGIS_API_KEY: ${AEGIS_API_KEY:-secret-key}
+      AGENT_ENROLL_KEY: ${AGENT_ENROLL_KEY:-aegis-enrollment-token-2024}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      MASTER_KEY_B64: "${MASTER_KEY_B64:-Q/wCZ5reU82bQpZppUc6Qq80sybBPz4Q276NbMBF97Q=}"
+      OLLAMA_URL: http://aegis-ollama:11434/api/generate
+      OLLAMA_DEFAULT_MODEL: llama3
+      SHODAN_API_KEY: ${SHODAN_API_KEY}
+      ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY}
+    depends_on:
+      aegis-postgres:
+        condition: service_healthy
+      aegis-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/ || exit 1"]
+      interval: 10s
+      timeout: 10s
       retries: 5
 
   aegis-link:
@@ -43,54 +79,71 @@ services:
     environment:
       SPRING_DATA_REDIS_HOST: aegis-redis
       SPRING_DATA_REDIS_PORT: 6379
-      AEGIS_API_KEY: ${AEGIS_API_KEY}
+      AEGIS_API_KEY: ${AEGIS_API_KEY:-secret-key}
     depends_on:
       aegis-redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
-      interval: 15s
+      interval: 10s
       timeout: 10s
       retries: 5
-      start_period: 30s
 
-  aegis-brain:
-    build: ./aegis-brain
-    container_name: aegis-brain
-    restart: unless-stopped
-    ports:
-      - "${BRAIN_PORT_EXTERNAL:-8000}:8000"
-    environment:
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_HOST: aegis-redis
-      REDIS_PORT: 6379
-      AEGIS_API_KEY: ${AEGIS_API_KEY}
-    depends_on:
-      aegis-postgres:
-        condition: service_healthy
-      aegis-redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/ || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 15s
-
-  # ─── aegis-guard (The Agent) ────────────────────────────────────────────────
   aegis-guard:
     build: ./aegis-guard
     container_name: aegis-guard
+    profiles: ["container-agents"]
     restart: unless-stopped
     environment:
-      AEGIS_AGENT_ID: ${AEGIS_AGENT_ID}
+      AEGIS_AGENT_ID: ${AEGIS_AGENT_ID:-agent-001}
       AEGIS_GATEWAY_URL: http://aegis-link:8080/api/v1/events
-      AEGIS_SCAN_INTERVAL_MS: ${AEGIS_SCAN_INTERVAL_MS}
-      AEGIS_GUARD_API_KEY: ${AEGIS_API_KEY}
+      AEGIS_BRAIN_URL: http://aegis-brain:8000/api/v1
+      AEGIS_ENROLL_KEY: ${AGENT_ENROLL_KEY:-aegis-enrollment-token-2024}
+      AEGIS_SECRET_FILE: /app/data/secret.json
+      AEGIS_SCAN_INTERVAL_MS: ${AEGIS_SCAN_INTERVAL_MS:-1000}
+    volumes:
+      - guard_data:/app/data
     depends_on:
       aegis-link:
         condition: service_healthy
+      aegis-brain:
+        condition: service_healthy
+
+  aegis-nodetrace:
+    build: ./NodeTrace/agents/python
+    container_name: aegis-nodetrace
+    profiles: ["container-agents"]
+    restart: unless-stopped
+    environment:
+      NODETRACE_DEVICE_NAME: ${NODETRACE_DEVICE_NAME:-NodeTrace-Agent}
+      NODETRACE_REGISTER_URL: http://aegis-brain:8000/api/v1/register
+      NODETRACE_UPDATE_URL: http://aegis-brain:8000/api/v1/update
+      NODETRACE_HEARTBEAT_URL: http://aegis-brain:8000/api/v1/heartbeat
+      NODETRACE_TOKEN_FILE: /app/data/token.json
+      AEGIS_ENROLL_KEY: ${AGENT_ENROLL_KEY:-aegis-enrollment-token-2024}
+    volumes:
+      - nodetrace_data:/app/data
+    depends_on:
+      aegis-brain:
+        condition: service_healthy
+
+  aegis-frontend:
+    build: ./frontend
+    container_name: aegis-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/src:/app/src
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000/api/v1
+      - WDS_SOCKET_PORT=0
+    depends_on:
+      - aegis-brain
 
 volumes:
   postgres_data:
   redis_data:
+  ollama_data:
+  guard_data:
+  nodetrace_data:

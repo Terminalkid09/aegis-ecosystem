@@ -3,6 +3,9 @@ import {
   BarChart3,
   AlertCircle,
   Shield,
+  Lock,
+  Globe,
+  Bot,
   Settings,
   LogOut,
 } from 'lucide-react';
@@ -14,18 +17,33 @@ export default function Sidebar() {
   const menuItems = [
     {
       id: 'dashboard',
-      label: 'Dashboard',
+      label: 'Overview',
       icon: BarChart3,
     },
     {
       id: 'alerts',
-      label: 'Alerts',
+      label: 'Threat Monitor',
       icon: AlertCircle,
     },
     {
       id: 'agents',
-      label: 'Agents',
+      label: 'Endpoints',
       icon: Shield,
+    },
+    {
+        id: 'osint',
+        label: 'SentinelX (OSINT)',
+        icon: Globe,
+    },
+    {
+        id: 'ai',
+        label: 'AI Analyst',
+        icon: Bot,
+    },
+    {
+        id: 'vault',
+        label: 'VaultX (Notes)',
+        icon: Lock,
     },
     {
       id: 'settings',
@@ -35,46 +53,48 @@ export default function Sidebar() {
   ];
 
   const sidebarClass = settings.darkMode
-    ? 'bg-gradient-to-b from-slate-900 to-slate-800 text-white border-slate-700'
+    ? 'bg-gradient-to-b from-slate-950 to-slate-900 text-white border-slate-800'
     : 'bg-gradient-to-b from-slate-100 to-slate-200 text-slate-900 border-slate-300';
 
-  const panelClass = settings.darkMode
-    ? 'bg-slate-900 border-slate-700'
+  const logoPanelClass = settings.darkMode
+    ? 'bg-slate-950 border-slate-800'
     : 'bg-white border-slate-300';
 
   return (
-    <div className={`w-64 flex flex-col h-screen border-r ${sidebarClass}`}>
+    <div className={`w-72 flex flex-col h-screen border-r ${sidebarClass} shadow-2xl`}>
       {/* Logo */}
-      <div className={`p-6 border-b ${panelClass}`}>
-        <div className="flex items-center gap-2">
-          <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-blue-500 rounded-lg flex items-center justify-center font-bold text-white">
+      <div className={`p-8 border-b ${logoPanelClass}`}>
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-xl flex items-center justify-center font-black text-xl text-white shadow-[0_0_20px_rgba(6,182,212,0.3)]">
             A
           </div>
           <div>
-            <h1 className="text-xl font-bold">AEGIS</h1>
-            <p className={settings.darkMode ? 'text-xs text-slate-400' : 'text-xs text-slate-500'}>EDR Dashboard</p>
+            <h1 className="text-2xl font-black tracking-tighter">AEGIS XDR</h1>
+            <p className={settings.darkMode ? 'text-[10px] text-slate-500 uppercase tracking-widest font-bold' : 'text-[10px] text-slate-500 uppercase tracking-widest font-bold'}>Secure Monolith</p>
           </div>
         </div>
       </div>
 
       {/* Navigation Menu */}
-      <nav className="flex-1 px-4 py-6">
-        <div className="space-y-2">
+      <nav className="flex-1 px-4 py-8 overflow-y-auto">
+        <div className="space-y-1.5">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id;
+            const isSpecial = ['osint', 'ai', 'vault'].includes(item.id);
+
             return (
               <button
                 key={item.id}
                 onClick={() => setCurrentPage(item.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+                className={`w-full flex items-center gap-4 px-5 py-3.5 rounded-xl transition-all duration-300 group ${
                   isActive
-                    ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-lg'
-                    : 'text-slate-300 hover:bg-slate-700 hover:text-white'
+                    ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-[0_5px_15px_rgba(8,145,178,0.3)]'
+                    : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'
                 }`}
               >
-                <Icon size={20} />
-                <span className="font-medium">{item.label}</span>
+                <Icon size={20} className={isActive ? 'text-white' : isSpecial ? 'text-purple-500 group-hover:text-purple-400' : 'text-slate-500 group-hover:text-cyan-400'} />
+                <span className="font-bold text-sm">{item.label}</span>
               </button>
             );
           })}
@@ -82,10 +102,10 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t border-slate-700">
-        <button className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:text-red-400 hover:bg-slate-700 rounded-lg transition-all">
+      <div className="p-6 border-t border-slate-800">
+        <button className="w-full flex items-center gap-4 px-5 py-3 text-slate-500 hover:text-red-400 hover:bg-red-950/20 rounded-xl transition-all font-bold text-sm">
           <LogOut size={20} />
-          <span className="text-sm font-medium">Logout</span>
+          <span>Terminate Session</span>
         </button>
       </div>
     </div>

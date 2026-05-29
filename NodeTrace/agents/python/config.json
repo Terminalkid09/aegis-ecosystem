@@ -1,0 +1,11 @@
+{
+  "device_name": "NodeTrace-Agent-Legacy",
+  "register_url": "http://localhost:8000/api/v1/register",
+  "update_url": "http://localhost:8000/api/v1/update",
+  "heartbeat_url": "http://localhost:8000/api/v1/heartbeat",
+  "heartbeat_interval": 10,
+  "telemetry_interval": 60,
+  "retry_max_attempts": 5,
+  "retry_base_delay": 1,
+  "enroll_key": "aegis-enrollment-token-2024"
+}

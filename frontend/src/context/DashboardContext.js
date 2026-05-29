@@ -13,6 +13,9 @@ export const DashboardProvider = ({ children }) => {
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [aiChatHistory, setAiChatHistory] = useState([
+    { role: 'system', content: 'Aegis AI Security Analyst initialized. How can I assist with your forensic investigation?' }
+  ]);
 
   useEffect(() => {
     try {
@@ -77,6 +80,8 @@ export const DashboardProvider = ({ children }) => {
         setSetting,
         toggleSetting,
         resetSettings,
+        aiChatHistory,
+        setAiChatHistory
       }}
     >
       {children}

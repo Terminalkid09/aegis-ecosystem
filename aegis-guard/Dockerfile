@@ -12,7 +12,7 @@ COPY --from=build /app/target/aegis-guard.jar app.jar
 
 # Security: Run as non-root user
 RUN addgroup -S aegis && adduser -S aegis -G aegis
-RUN chown aegis:aegis /app/app.jar
+RUN mkdir -p /app/data && chown -R aegis:aegis /app
 USER aegis
 
 ENTRYPOINT ["java", "-jar", "app.jar"]

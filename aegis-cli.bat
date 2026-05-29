@@ -1,106 +1,104 @@
 @echo off
 setlocal enabledelayedexpansion
 
-:: AEGIS CLI - Windows Management Script
-:: Unified tool for start, stop and status
+cd /d "%~dp0"
 
-set APP_NAME=Aegis EDR Ecosystem
-set FRONTEND_DIR=frontend
-set DOCKER_COMPOSE=docker-compose.yml
+echo [INFO] Aegis XDR Ecosystem launcher
 
-:: Check for arguments
-if "%1"=="--stop" goto :stop
-if "%1"=="--status" goto :status
+where docker >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] Docker is not installed or not available in PATH.
+    pause
+    exit /b 1
+)
 
-:start
-cls
-echo [INFO] Starting %APP_NAME%...
-
-:: Check for .env file
-if not exist .env (
-    if exist .env.example (
-        echo [WARN] .env file not found. Creating from .env.example...
-        copy .env.example .env
-        echo [IMPORTANT] Please edit .env with your configuration and restart.
-        pause
-        exit /b 1
-    ) else (
-        echo [ERROR] .env.example not found. Cannot continue.
+docker compose version >nul 2>nul
+if errorlevel 1 (
+    where docker-compose >nul 2>nul
+    if errorlevel 1 (
+        echo [ERROR] Neither "docker compose" nor "docker-compose" is available.
         pause
         exit /b 1
     )
+    set "COMPOSE=docker-compose"
+) else (
+    set "COMPOSE=docker compose"
 )
 
-:: Check Docker
-docker info >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] Docker is not running. Please start Docker Desktop and try again.
+if "%~1"=="--help" goto help
+if "%~1"=="help" goto help
+if "%~1"=="--stop" goto stop
+if "%~1"=="stop" goto stop
+if "%~1"=="--logs" goto logs
+if "%~1"=="logs" goto logs
+
+docker info >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] Docker is installed, but the Docker daemon is not running.
+    echo [INFO] Start Docker Desktop, wait until it is ready, then run "%~nx0" again.
     pause
     exit /b 1
 )
 
-:: Start Backend
-echo [INFO] Launching backend services (Docker)...
-docker-compose up -d --build
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to start Docker services.
+if not exist ".env" (
+    if not exist ".env.example" (
+        echo [ERROR] .env is missing and .env.example was not found.
+        pause
+        exit /b 1
+    )
+    echo [INFO] Creating .env from .env.example...
+    copy ".env.example" ".env" >nul
+)
+
+echo [INFO] Using compose command: !COMPOSE!
+echo [INFO] Building and starting services...
+call !COMPOSE! up -d --build
+if errorlevel 1 (
+    echo [ERROR] Docker Compose failed to start the stack.
     pause
     exit /b 1
 )
 
-:: Start Frontend
-echo [INFO] Launching frontend dashboard...
-cd %FRONTEND_DIR%
-start "Aegis-Frontend" /B cmd /c "npm start"
-cd ..
+echo [INFO] Waiting briefly for services to initialize...
+timeout /t 5 /nobreak >nul
+
+echo [INFO] Service status:
+call !COMPOSE! ps
 
 echo.
-echo ==================================================
-echo   %APP_NAME% IS NOW RUNNING
-echo ==================================================
-echo   - Dashboard: http://localhost:3000
-echo   - Brain API: http://localhost:8000/docs
-echo   - Link API:  http://localhost:8080/api/v1/health
-echo ==================================================
+echo [SUCCESS] Ecosystem start requested.
+echo [INFO] Dashboard: http://localhost:3000
+echo [INFO] Brain API: http://localhost:8000/api/v1
+echo [INFO] Link API: http://localhost:8080/api/v1/health
 echo.
-echo Use 'aegis-cli.bat --stop' to shut down from another terminal.
-echo.
-
-:wait_prompt
-echo [READY] All systems active.
-echo Type 'stop' to shut down everything or press Ctrl+C twice.
-set /p input="> "
-if /I "!input!"=="stop" goto :stop
-goto :wait_prompt
-
-:stop
-echo.
-echo [INFO] Shutting down %APP_NAME%...
-echo [INFO] Stopping Docker containers...
-docker-compose -f %DOCKER_COMPOSE% down
-
-echo [INFO] Cleaning up frontend processes...
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :3000') do (
-    taskkill /F /PID %%a 2>nul
-)
-taskkill /F /IM node.exe /T 2>nul
-
-echo [SUCCESS] All services stopped.
-if "%1"=="" pause
+echo [TIP] Use "%~nx0 --logs" to follow logs, or "%~nx0 --stop" to stop the stack.
+pause
 exit /b 0
 
-:status
-echo [INFO] Checking status of %APP_NAME%...
-echo.
-echo --- Docker Containers ---
-docker-compose ps
-echo.
-echo --- Frontend Reachability ---
-curl -s -I http://localhost:3000 | findstr "HTTP/1.1 200 OK" >nul
-if %errorlevel% equ 0 (
-    echo [OK] Frontend is UP (http://localhost:3000)
-) else (
-    echo [WARN] Frontend seems to be DOWN.
+:stop
+echo [INFO] Stopping Aegis XDR Ecosystem...
+call !COMPOSE! down
+if errorlevel 1 (
+    echo [ERROR] Docker Compose failed to stop the stack.
+    pause
+    exit /b 1
 )
+echo [SUCCESS] Ecosystem stopped. Volumes were preserved.
 pause
-goto :eof
+exit /b 0
+
+:logs
+echo [INFO] Following logs. Press CTRL+C to exit logs.
+call !COMPOSE! logs -f
+exit /b %errorlevel%
+
+:help
+echo.
+echo Usage:
+echo   %~nx0          Build and start the full Docker stack
+echo   %~nx0 --stop   Stop the stack while preserving volumes
+echo   %~nx0 --logs   Follow Docker Compose logs
+echo   %~nx0 --help   Show this help
+echo.
+pause
+exit /b 0
