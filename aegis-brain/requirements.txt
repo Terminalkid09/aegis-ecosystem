@@ -25,6 +25,7 @@ numpy==1.26.4
 # Linting and testing
 ruff==0.6.8
 bandit==1.7.5
+pbr==6.1.0
 pytest-cov==4.1.0
 responses==0.24.1
 pytest-mock==3.13.0
