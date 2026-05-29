@@ -55,6 +55,7 @@ class IngestionControllerTest {
 
         mockMvc.perform(post("/api/v1/events")
                         .with(csrf())
+                        .header("X-Api-Key", "test-secret")
                         .header("X-Agent-Id", "test-agent")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -78,6 +79,7 @@ class IngestionControllerTest {
 
         mockMvc.perform(post("/api/v1/events")
                         .with(csrf())
+                        .header("X-Api-Key", "test-secret")
                         .header("X-Agent-Id", "wrong-agent")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -100,6 +102,7 @@ class IngestionControllerTest {
 
         mockMvc.perform(post("/api/v1/events")
                         .with(csrf())
+                        .header("X-Api-Key", "test-secret")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
