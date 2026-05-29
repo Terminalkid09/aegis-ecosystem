@@ -1,6 +1,5 @@
 # Aegis XDR Ecosystem 🛡️
 
-[![GitHub CI](https://github.com/Terminalkid09/aegis-ecosystem/actions/workflows/ci.yml/badge.svg)](https://github.com/Terminalkid09/aegis-ecosystem/actions/workflows/ci.yml)
 [![GitLab CI](https://gitlab.com/Terminalkid09/aegis-ecosystem/badges/main/pipeline.svg)](https://gitlab.com/Terminalkid09/aegis-ecosystem/-/pipelines)
 ![Java Version](https://img.shields.io/badge/Java-21-orange?logo=openjdk)
 ![Python Version](https://img.shields.io/badge/Python-3.12-blue?logo=python)
