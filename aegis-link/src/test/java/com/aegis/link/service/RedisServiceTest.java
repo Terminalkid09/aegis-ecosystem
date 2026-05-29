@@ -44,22 +44,21 @@ class RedisServiceTest {
 
         verify(listOperations).leftPush(RedisService.EVENTS_QUEUE_KEY, event);
     }
+@Test
+void pushEvent_ThrowsException_WhenRedisFails() {
+    EventRequest event = EventRequest.builder()
+            .agentId("agent-1")
+            .processName("calc.exe")
+            .pid(123)
+            .os("Windows")
+            .eventType("PROCESS_CREATED")
+            .timestamp(Instant.now())
+            .build();
 
-    @Test
-    void pushEvent_ThrowsException_WhenRedisFails() {
-        EventRequest event = EventRequest.builder()
-                .agentId("agent-1")
-                .processName("calc.exe")
-                .pid(123)
-                .os("Windows")
-                .eventType("PROCESS_CREATED")
-                .timestamp(Instant.now())
-                .build();
+    when(redisTemplate.opsForList()).thenThrow(new RuntimeException("Redis down"));
 
-        when(redisTemplate.opsForList()).thenThrow(new RuntimeException("Redis down"));
-
-        assertThrows(RuntimeException.class, () -> redisService.pushEvent(event));
-    }
+    assertThrows(RuntimeException.class, () -> redisService.pushEvent(event));
+}
 
     @Test
     void getQueueSize_ReturnsCorrectSize() {
