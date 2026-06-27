@@ -99,6 +99,8 @@ class RedisConsumer:
             db.add(alert)
             await db.flush()
             logger.warning(f"THREAT DETECTED on {event.agent_id}: {analysis.description}")
+
+            asyncio.ensure_future(self._enrich_alert_async(alert.id))
             
             if analysis.auto_remediation:
                 await self._execute_auto_remediation(db, alert, analysis, event)
@@ -158,3 +160,10 @@ class RedisConsumer:
                     description=f"Anomaly in {anomaly['metric']}: {anomaly['value']} (z={anomaly['z_score']:.1f})"
                 )
                 db.add(alert)
+
+    async def _enrich_alert_async(self, alert_id: int):
+        try:
+            from app.services.alert_enrichment import enrich_alert
+            await enrich_alert(alert_id)
+        except Exception as e:
+            logger.error(f"Alert enrichment failed for {alert_id}: {e}")

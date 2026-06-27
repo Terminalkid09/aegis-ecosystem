@@ -56,7 +56,7 @@ export const agentsAPI = {
 
 // STATS API
 export const statsAPI = {
-  getStats: () => apiClient.get('/telemetry/stats'),
+  getStats: (params = {}) => apiClient.get('/telemetry/stats', { params }),
   getRecentTelemetry: (params = {}) => apiClient.get('/telemetry/recent', { params }),
   getActivity: (params = {}) => apiClient.get('/telemetry/activity', { params }),
 };
@@ -84,6 +84,8 @@ export const discoveryAPI = {
   startDemo: () => apiClient.post('/discovery/demo/start'),
   demoHeartbeat: () => apiClient.post('/discovery/demo/heartbeat'),
   deploymentPlan: (data) => apiClient.post('/discovery/deployment/plan', data),
+  autoDeploy: (data) => apiClient.post('/discovery/deploy', data, { timeout: 60000 }),
+  syncAgentStatus: () => apiClient.post('/discovery/sync-agent-status'),
 };
 
 // AI-SUITE

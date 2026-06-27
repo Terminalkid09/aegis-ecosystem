@@ -58,12 +58,15 @@ async def get_agents(
     db: AsyncSession = Depends(get_db), 
     _user = Depends(get_current_user),
     active_only: bool = False,
+    include_demo: bool = Query(False, description="Include demo agents"),
     limit: int = Query(100, ge=1, le=1000)
 ):
     stmt = select(Agent)
     if active_only:
         threshold = datetime.now(timezone.utc) - timedelta(minutes=15)
         stmt = stmt.where(Agent.last_seen >= threshold)
+    if not include_demo:
+        stmt = stmt.where(Agent.is_demo == False)
 
     stmt = stmt.order_by(Agent.last_seen.desc()).limit(limit)
     result = await db.execute(stmt)
@@ -148,7 +151,11 @@ async def get_activity(
     return sorted(activity, key=lambda item: item["timestamp"], reverse=True)[:limit]
 
 @router.get("/stats", response_model=StatsResponse)
-async def get_stats(db: AsyncSession = Depends(get_db), _user = Depends(get_current_user)):
+async def get_stats(
+    db: AsyncSession = Depends(get_db), 
+    _user = Depends(get_current_user),
+    include_demo: bool = Query(False, description="Include demo agents in stats")
+):
     total_alerts = (await db.execute(select(func.count(Alert.id)))).scalar() or 0
     unresolved = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False))).scalar() or 0
     current_critical = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False, func.upper(Alert.severity) == "CRITICAL"))).scalar() or 0
@@ -156,9 +163,15 @@ async def get_stats(db: AsyncSession = Depends(get_db), _user = Depends(get_curr
     current_medium = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False, func.upper(Alert.severity) == "MEDIUM"))).scalar() or 0
     current_low = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False, func.upper(Alert.severity) == "LOW"))).scalar() or 0
     
-    # Count only agents seen in the last 15 minutes as "active"
     threshold = datetime.now(timezone.utc) - timedelta(minutes=15)
-    active_agents = (await db.execute(select(func.count(Agent.agent_id)).where(Agent.last_seen >= threshold))).scalar() or 0
+    agent_query = select(func.count(Agent.agent_id)).where(Agent.last_seen >= threshold)
+    if not include_demo:
+        agent_query = agent_query.where(Agent.is_demo == False)
+    active_agents = (await db.execute(agent_query)).scalar() or 0
+    
+    # Also count demo agents separately
+    demo_agent_query = select(func.count(Agent.agent_id)).where(Agent.is_demo == True, Agent.last_seen >= threshold)
+    demo_agents = (await db.execute(demo_agent_query)).scalar() or 0
     
     return StatsResponse(
         total_alerts=total_alerts,
@@ -167,7 +180,8 @@ async def get_stats(db: AsyncSession = Depends(get_db), _user = Depends(get_curr
         current_critical_alerts=current_critical,
         current_high_alerts=current_high,
         current_medium_alerts=current_medium,
-        current_low_alerts=current_low
+        current_low_alerts=current_low,
+        demo_agents=demo_agents
     )
 
 @router.post("/report")
@@ -204,3 +218,10 @@ async def get_remediation_actions(limit: int = 20, db: AsyncSession = Depends(ge
     result = await db.execute(select(RemediationAction).order_by(RemediationAction.executed_at.desc()).limit(limit))
     actions = result.scalars().all()
     return [{"id": a.id, "alert_id": a.alert_id, "action": a.action, "target": a.target, "status": a.status, "executed_at": a.executed_at.isoformat() if a.executed_at else None, "details": a.details} for a in actions]
+
+@router.get("/threat-reports")
+async def get_threat_reports(limit: int = 50, db: AsyncSession = Depends(get_db), _user = Depends(get_current_user)):
+    from app.database.models import ThreatReport
+    result = await db.execute(select(ThreatReport).order_by(ThreatReport.created_at.desc()).limit(limit))
+    reports = result.scalars().all()
+    return [{"id": r.id, "alert_id": r.alert_id, "summary": r.summary, "confidence": r.confidence, "recommended_actions": r.recommended_actions, "osint_data": r.osint_data, "is_auto_generated": r.is_auto_generated, "created_at": r.created_at.isoformat() if r.created_at else None} for r in reports]

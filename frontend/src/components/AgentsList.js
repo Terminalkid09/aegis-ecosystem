@@ -12,6 +12,7 @@ export default function AgentsList() {
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [agentTelemetry, setAgentTelemetry] = useState(null);
   const [loadingTelemetry, setLoadingTelemetry] = useState(false);
+  const [showDemo, setShowDemo] = useState(false);
 
   useEffect(() => {
     fetchAgents();
@@ -33,11 +34,13 @@ export default function AgentsList() {
 
   const filteredAgents = agents.filter((agent) => {
     const searchLower = searchTerm.toLowerCase();
-    return (
+    const matchesSearch = (
       agent.hostname?.toLowerCase().includes(searchLower) ||
       agent.ip_address?.toLowerCase().includes(searchLower) ||
       agent.agent_id?.toLowerCase().includes(searchLower)
     );
+    if (!showDemo && agent.is_demo) return false;
+    return matchesSearch;
   });
 
   const nodeTraceAgents = filteredAgents.filter(a => a.agent_type === 'nodetrace');
@@ -103,10 +106,15 @@ export default function AgentsList() {
               <p className="text-[10px] font-mono text-slate-500 truncate max-w-[120px]">{agent.agent_id}</p>
             </div>
           </div>
-          <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-            isActive ? 'bg-green-950 text-green-400 border-green-800' : 'bg-slate-800 text-slate-400 border-slate-700'
-          }`}>
-            {isActive ? 'ONLINE' : 'OFFLINE'}
+          <div className="flex items-center gap-1.5">
+            {agent.is_demo && (
+              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold border border-yellow-800 bg-yellow-950/50 text-yellow-400">DEMO</span>
+            )}
+            <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+              isActive ? 'bg-green-950 text-green-400 border-green-800' : 'bg-slate-800 text-slate-400 border-slate-700'
+            }`}>
+              {isActive ? 'ONLINE' : 'OFFLINE'}
+            </div>
           </div>
         </div>
 
@@ -151,7 +159,7 @@ export default function AgentsList() {
         </div>
       </div>
 
-      <div className={`rounded-lg p-4 border ${settings.darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <div className={`rounded-lg p-4 border space-y-3 ${settings.darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
         <input
           type="text"
           placeholder="Filter by name, IP, or ID..."
@@ -161,6 +169,10 @@ export default function AgentsList() {
             settings.darkMode ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-900'
           }`}
         />
+        <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+          <input type="checkbox" checked={showDemo} onChange={(e) => setShowDemo(e.target.checked)} className="rounded border-slate-600" />
+          Show demo agents
+        </label>
       </div>
 
       {loading ? (

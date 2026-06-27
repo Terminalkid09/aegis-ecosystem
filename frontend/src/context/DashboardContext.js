@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 
 const DashboardContext = createContext();
 
@@ -35,6 +35,8 @@ export const DashboardProvider = ({ children }) => {
     localStorage.setItem('aegis-settings', JSON.stringify(settings));
   }, [settings]);
 
+  const wsRef = useRef(null);
+
   useEffect(() => {
     if (!settings.autoRefresh) {
       return;
@@ -42,7 +44,7 @@ export const DashboardProvider = ({ children }) => {
 
     const interval = setInterval(() => {
       setRefreshTrigger((prev) => prev + 1);
-    }, Number(process.env.REACT_APP_REFRESH_INTERVAL) || 30000);
+    }, Number(process.env.REACT_APP_REFRESH_INTERVAL) || 5000);
 
     return () => clearInterval(interval);
   }, [settings.autoRefresh]);
@@ -58,16 +60,31 @@ export const DashboardProvider = ({ children }) => {
 
     const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
     const wsUrl = apiUrl.replace(/^http/, 'ws').replace(/\/api\/v1$/, '/api/v1/ws/overview');
-    let socket;
     try {
-      socket = new WebSocket(`${wsUrl}?token=${encodeURIComponent(token)}`);
-      socket.onmessage = () => setRefreshTrigger((prev) => prev + 1);
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+      const socket = new WebSocket(`${wsUrl}?token=${encodeURIComponent(token)}`);
+      wsRef.current = socket;
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'overview' || data.active_agents !== undefined) {
+            setRefreshTrigger((prev) => prev + 1);
+          }
+        } catch (err) {
+          setRefreshTrigger((prev) => prev + 1);
+        }
+      };
+      socket.onerror = () => {
+        console.warn('WebSocket error, falling back to polling');
+      };
     } catch (err) {
       console.warn('Live updates unavailable:', err);
     }
     return () => {
-      if (socket && socket.readyState <= 1) {
-        socket.close();
+      if (wsRef.current && wsRef.current.readyState <= 1) {
+        wsRef.current.close();
       }
     };
   }, [settings.autoRefresh]);

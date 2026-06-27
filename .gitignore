@@ -67,6 +67,14 @@ htmlcov/
 .next/
 .docusaurus/
 
+# CI / Reports
+.gitlab-ci.yml.local
+AEGIS_*_REPORT.md
+codex_refactor.md
+
+# OUI cache
+aegis-brain/app/data/oui_cache.json
+
 # Logs
 *.log
 *.sqlite3

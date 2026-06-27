@@ -52,6 +52,7 @@ class AgentResponse(BaseSchema):
     ip_address: Optional[str] = None
     os_type: Optional[str] = None
     agent_type: Optional[str] = None
+    is_demo: bool = False
     last_seen: Optional[datetime] = None
 
 class EventSchema(BaseModel):
@@ -95,3 +96,4 @@ class StatsResponse(BaseModel):
     current_high_alerts: int = 0
     current_medium_alerts: int = 0
     current_low_alerts: int = 0
+    demo_agents: int = 0

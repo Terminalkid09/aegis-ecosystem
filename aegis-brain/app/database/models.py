@@ -67,6 +67,7 @@ class Agent(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     os_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     agent_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     meta: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     device_token_hash: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -137,6 +138,9 @@ class CustomRule(Base):
     mitre_technique: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     mitre_technique_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
+    # Logic type: "simple" (default) or "and"/"or" for multi-condition
+    logic_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+
     # AND/OR conditions (JSON array of {target_field, pattern, operator})
     conditions: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
 
@@ -170,14 +174,31 @@ class DiscoveredHost(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ip_address: Mapped[str] = mapped_column(String(45), unique=True, nullable=False, index=True)
     hostname: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    mac_address: Mapped[Optional[str]] = mapped_column(String(17), nullable=True)
+    vendor: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     os_guess: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    os_confidence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="unknown", nullable=False)
     open_ports: Mapped[Optional[List[int]]] = mapped_column(JSON, nullable=True)
-    agent_status: Mapped[str] = mapped_column(String(30), default="not_deployed", nullable=False)
+    guard_status: Mapped[str] = mapped_column(String(30), default="not_deployed", nullable=False)
+    nodetrace_status: Mapped[str] = mapped_column(String(30), default="not_deployed", nullable=False)
     source: Mapped[str] = mapped_column(String(50), default="scan", nullable=False)
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+class ThreatReport(Base):
+    __tablename__ = "threat_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    alert_id: Mapped[int] = mapped_column(Integer, ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False, index=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[str] = mapped_column(String(20), default="medium", nullable=False)
+    recommended_actions: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    osint_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    ai_analysis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_auto_generated: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class IPReputation(Base):
     __tablename__ = "ip_reputations"

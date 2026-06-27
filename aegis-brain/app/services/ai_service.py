@@ -1,3 +1,4 @@
+import json
 import re
 import httpx
 import redis.asyncio as redis
@@ -109,3 +110,45 @@ async def generate_ai_response(prompt: str, model: Optional[str] = None) -> Dict
         raise PromptInjectionError("Malicious prompt detected")
     anonymized = anonymize_prompt(prompt)
     return await call_llm(anonymized, model=model)
+
+
+async def generate_threat_report(alert: Any, osint_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    context = f"""
+Alert: {alert.description}
+Process: {alert.process_name} (PID: {alert.pid})
+Path: {alert.process_path or 'N/A'}
+Severity: {alert.severity}
+
+OSINT Data:
+{json.dumps(osint_data, indent=2) if osint_data else 'No OSINT data available'}
+"""
+    prompt = f"""You are an AegisXDR security analyst. Analyze this alert and OSINT data.
+Provide:
+1. Summary of the threat (1-2 sentences)
+2. Confidence level (low/medium/high)
+3. Recommended actions (list)
+
+Alert context:
+{context}
+
+Respond in JSON format: {{"summary": "...", "confidence": "...", "recommended_actions": [...], "detailed_analysis": "..."}}
+"""
+    try:
+        response = await call_llm(prompt, model="tinyllama")
+        text = response.get("answer", "")
+        try:
+            import json
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start >= 0 and end > start:
+                return json.loads(text[start:end])
+        except Exception:
+            pass
+        return {
+            "summary": f"Alert: {alert.description[:100]}",
+            "confidence": "medium",
+            "recommended_actions": [f"Investigate process {alert.process_name} on host"],
+            "detailed_analysis": text[:500] if text else None,
+        }
+    except Exception:
+        return None

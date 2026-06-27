@@ -15,9 +15,18 @@ from app.core.health import health_checker, liveness_check, readiness_check, sta
 from app.core.circuit_breaker import get_breaker_status
 
 from app.services.redis_consumer import RedisConsumer
+from app.services.alert_enrichment import auto_enrich_new_alerts
 
 logger = get_logger(__name__)
 _consumer: RedisConsumer | None = None
+
+async def _auto_enrich_loop():
+    while True:
+        try:
+            await auto_enrich_new_alerts()
+        except Exception as e:
+            logger.error(f"Auto-enrichment loop error: {e}")
+        await asyncio.sleep(15)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,7 +45,8 @@ async def lifespan(app: FastAPI):
         _consumer = RedisConsumer()
         # Start as background async task
         asyncio.create_task(_consumer.start())
-        logger.info("Database initialized and Async RedisConsumer started.")
+        asyncio.create_task(_auto_enrich_loop())
+        logger.info("Database initialized, RedisConsumer and auto-enrichment started.")
         yield
     except Exception as e:
         logger.error(f"Error during startup: {e}")

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Shield, Activity, TrendingUp, Cpu, HardDrive } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import React, { useState, useEffect, useRef } from 'react';
+import { AlertTriangle, Shield, Activity, TrendingUp, Cpu, HardDrive, Users } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Brush } from 'recharts';
 import { statsAPI } from '../services/api';
 import { useDashboard } from '../context/DashboardContext';
 
@@ -139,7 +139,7 @@ export default function DashboardOverview() {
           darkMode={settings.darkMode}
         />
 
-        {/* Critical Threats Card */}
+          {/* Critical Threats Card */}
         <StatCard
           label="Critical Threats"
           value={stats?.current_critical_alerts || 0}
@@ -149,6 +149,14 @@ export default function DashboardOverview() {
           darkMode={settings.darkMode}
         />
       </div>
+
+      {/* Demo Agents Badge */}
+      {(stats?.demo_agents || 0) > 0 && (
+        <div className="bg-yellow-950/40 border border-yellow-800/60 rounded-lg px-4 py-2 text-sm text-yellow-300 flex items-center gap-3">
+          <Users size={16} />
+          <span><strong>{stats.demo_agents}</strong> demo agent(s) active — excluded from main stats. Go to <button onClick={() => window.dispatchEvent(new CustomEvent('aegis-navigate', {detail: 'agents'}))} className="underline hover:text-yellow-200">Endpoints</button> to view.</span>
+        </div>
+      )}
 
       {/* Severity Breakdown */}
       <div className={`${panelClass} rounded-lg p-6`}>
@@ -192,7 +200,7 @@ export default function DashboardOverview() {
         </div>
         <div className="h-80 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData}>
+            <AreaChart data={chartData} margin={{top: 5, right: 5, bottom: 5, left: 5}}>
               <defs>
                 <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3}/>
@@ -210,12 +218,14 @@ export default function DashboardOverview() {
                 fontSize={10} 
                 tickLine={false}
                 axisLine={false}
+                minTickGap={30}
               />
               <YAxis 
                 stroke="#64748b" 
                 fontSize={10} 
                 tickLine={false}
                 axisLine={false}
+                domain={[0, 100]}
                 tickFormatter={(value) => `${value}%`}
               />
               <Tooltip 
@@ -226,7 +236,9 @@ export default function DashboardOverview() {
                   fontSize: '12px'
                 }}
                 itemStyle={{ padding: '2px 0' }}
+                animationDuration={100}
               />
+              <Brush dataKey="time" height={20} stroke="#06b6d4" fill="#1e293b" travellerWidth={10} />
               <Area 
                 type="monotone" 
                 dataKey="cpu" 
@@ -235,6 +247,8 @@ export default function DashboardOverview() {
                 fillOpacity={1} 
                 fill="url(#colorCpu)" 
                 name="CPU Usage"
+                animationDuration={200}
+                isAnimationActive={false}
               />
               <Area 
                 type="monotone" 
@@ -244,6 +258,8 @@ export default function DashboardOverview() {
                 fillOpacity={1} 
                 fill="url(#colorRam)" 
                 name="RAM Usage"
+                animationDuration={200}
+                isAnimationActive={false}
               />
             </AreaChart>
           </ResponsiveContainer>
