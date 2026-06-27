@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database.connection import get_db
 from app.database.models import User
 from app.core.security import hash_password, verify_password, needs_rehash, create_access_token
 from app.api.schemas.common import TokenResponse, UserOut
+from app.core.rate_limit import limiter
 from pydantic import BaseModel
 
 router = APIRouter(tags=["Authentication"])
@@ -15,7 +16,8 @@ class UserCreate(BaseModel):
     password: str
 
 @router.post("/register", response_model=TokenResponse)
-async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def register(request: Request, payload: UserCreate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == payload.email))
     if result.scalars().first():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -33,7 +35,8 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
     return {"access_token": token, "token_type": "bearer", "user": user}
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: UserCreate, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def login(request: Request, payload: UserCreate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalars().first()
     

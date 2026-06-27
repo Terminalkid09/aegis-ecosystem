@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database.connection import get_db
 from app.database.models import Telemetry
-from app.core.deps import verify_api_key
+from app.core.deps import get_current_user
 from typing import List, Dict, Any
 
 router = APIRouter(tags=["Telemetry History"])
@@ -13,7 +13,7 @@ async def get_telemetry_history(
     agent_id: str, 
     limit: int = 50, 
     db: AsyncSession = Depends(get_db),
-    api_key: str = Depends(verify_api_key)
+    _user = Depends(get_current_user),
 ):
     stmt = (
         select(Telemetry)

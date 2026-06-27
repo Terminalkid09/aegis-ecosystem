@@ -5,7 +5,7 @@ from app.core.deps import get_current_user
 from app.services import ai_service
 from app.database.connection import get_db
 from app.database.models import AIMessage, AIThread, User
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 router = APIRouter(tags=["AI-Suite"])
@@ -13,10 +13,10 @@ router = APIRouter(tags=["AI-Suite"])
 
 
 class ChatRequest(BaseModel):
-    prompt: str
-    model: Optional[str] = None
+    prompt: str = Field(..., max_length=8000)
+    model: Optional[str] = Field(None, max_length=100)
     thread_id: Optional[int] = None
-    title: Optional[str] = None
+    title: Optional[str] = Field(None, max_length=255)
 
 async def get_or_create_thread(db: AsyncSession, user: User, thread_id: Optional[int], prompt: str, title: Optional[str] = None) -> AIThread:
     if thread_id is not None:

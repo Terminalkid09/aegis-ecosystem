@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from app.core.config import settings
 from app.database.base import Base
+from app.database import models  # noqa: F401 - register SQLAlchemy models in Base.metadata
 
 engine = create_async_engine(
     settings.DATABASE_URL,
@@ -17,9 +18,9 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 async def init_db():
-    async with engine.begin() as conn:
-        # Crea le tabelle se non esistono (utile per il primo avvio in Docker)
-        await conn.run_sync(Base.metadata.create_all)
+    if settings.DB_BOOTSTRAP_CREATE_ALL:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
 async def get_db():
     async with AsyncSessionLocal() as session:

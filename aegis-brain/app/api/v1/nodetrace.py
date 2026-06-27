@@ -8,7 +8,8 @@ from app.core.security import verify_password
 from app.core.config import settings
 from app.services import telemetry_service
 from app.api.schemas.common import EventSchema
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
@@ -25,11 +26,18 @@ class TelemetryUpdate(BaseModel):
     device_id: str
     cpu_usage: float
     ram_usage: float
-    processes: List[str] = []
+    ip_local: Optional[str] = None
+    ip_public: Optional[str] = None
+    geo_country: Optional[str] = None
+    geo_city: Optional[str] = None
+    processes: List[str] = Field(default_factory=list)
     disk_free: Optional[int] = None
     disk_total: Optional[int] = None
     network_sent: Optional[int] = None
     network_received: Optional[int] = None
+    active_connections: Optional[int] = None
+    users: List[Dict[str, Any]] = Field(default_factory=list)
+    network_flows: List[Dict[str, Any]] = Field(default_factory=list)
 
 async def verify_nodetrace_agent(
     device_id: str,
@@ -113,17 +121,29 @@ async def update_telemetry(
         agent_id=payload.device_id,
         timestamp=datetime.now(timezone.utc),
         event_type="METRICS_REPORT",
+        ip_address=payload.ip_local,
         cpu_usage=payload.cpu_usage,
         ram_usage=payload.ram_usage,
         disk_free=payload.disk_free,
         disk_total=payload.disk_total,
         network_sent=payload.network_sent,
         network_received=payload.network_received,
-        processes=[{"name": p} for p in payload.processes]
+        processes=[{"name": p} for p in payload.processes],
+        users=payload.users,
+        network_flows=payload.network_flows
     )
     
     # Process through the standard telemetry service
-    await telemetry_service.process_telemetry(db, agent_id_uuid, event.model_dump())
+    data = event.model_dump()
+    data.update({
+        "ip_local": payload.ip_local,
+        "ip_public": payload.ip_public,
+        "geo_country": payload.geo_country,
+        "geo_city": payload.geo_city,
+        "users": payload.users,
+        "network_flows": payload.network_flows,
+    })
+    await telemetry_service.process_telemetry(db, agent_id_uuid, data)
     return {"status": "ok"}
 
 @router.post("/heartbeat")

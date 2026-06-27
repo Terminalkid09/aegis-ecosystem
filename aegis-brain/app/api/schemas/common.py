@@ -23,10 +23,10 @@ class TokenResponse(BaseModel):
     user: UserOut
 
 class NoteCreate(BaseModel):
-    title: str
-    content: str
-    mood: Optional[str] = None
-    tags: Optional[List[str]] = None
+    title: str = Field(..., max_length=255)
+    content: str = Field(..., max_length=10000)
+    mood: Optional[str] = Field(None, max_length=20)
+    tags: Optional[List[str]] = Field(None, max_length=20)
 
 class NoteOut(BaseSchema):
     id: int
@@ -60,21 +60,21 @@ class EventSchema(BaseModel):
         populate_by_name=True
     )
 
-    agent_id: str
+    agent_id: str = Field(..., max_length=64)
     timestamp: datetime
-    event_type: str
+    event_type: str = Field(..., max_length=50)
     
     # System Info
-    hostname: Optional[str] = None
-    ip_address: Optional[str] = None
-    os: Optional[str] = None
+    hostname: Optional[str] = Field(None, max_length=255)
+    ip_address: Optional[str] = Field(None, max_length=45)
+    os: Optional[str] = Field(None, max_length=50)
     
     # Process Info
     pid: Optional[int] = None
-    process_name: Optional[str] = None
-    process_path: Optional[str] = None
-    user: Optional[str] = None
-    file_hash: Optional[str] = None
+    process_name: Optional[str] = Field(None, max_length=255)
+    process_path: Optional[str] = Field(None, max_length=1024)
+    user: Optional[str] = Field(None, max_length=255)
+    file_hash: Optional[str] = Field(None, max_length=64)
     
     # Metrics
     cpu_usage: Optional[float] = None
@@ -83,7 +83,9 @@ class EventSchema(BaseModel):
     disk_total: Optional[int] = None
     network_sent: Optional[int] = None
     network_received: Optional[int] = None
-    processes: Optional[List[Dict[str, Any]]] = None
+    processes: Optional[List[Dict[str, Any]]] = Field(None, max_length=500)
+    users: Optional[List[Dict[str, Any]]] = None
+    network_flows: Optional[List[Dict[str, Any]]] = None
 
 class StatsResponse(BaseModel):
     total_alerts: int
