@@ -88,9 +88,10 @@ async def call_llm(prompt: str, model: Optional[str] = None) -> Dict[str, Any]:
             return {"answer": "[AI fallback] Ollama not configured. Development stub.", "raw": "", "model": model}
         return {"error": "ollama_url_not_configured"}
 
-    payload = {"model": model, "prompt": prompt, "stream": False}
-    # Increased timeout to 120s to allow for model loading/first run
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    # Use num_ctx=2048 for tinyllama compatibility (supports max 2048)
+    payload = {"model": model, "prompt": prompt, "stream": False, "options": {"num_ctx": 2048}}
+    # Increased timeout to 300s to allow for model loading/swapping
+    async with httpx.AsyncClient(timeout=300.0) as client:
         try:
             r = await client.post(settings.OLLAMA_URL, json=payload)
             r.raise_for_status()

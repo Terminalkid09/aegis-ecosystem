@@ -1,14 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from app.core.deps import get_optional_user
 from app.services import osint_service
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database.connection import get_db
 from app.database.models import OSINTReport
+from app.core.logging import get_logger
 import ipaddress
 import re
+from typing import List
+from pydantic import BaseModel
 
+logger = get_logger(__name__)
 router = APIRouter(tags=["OSINT"])
+
+class BatchLookupRequest(BaseModel):
+    ips: List[str]
 
 @router.get("/ip/{ip_address}")
 async def ip_lookup(ip_address: str, force: bool = False, db: AsyncSession = Depends(get_db), user=Depends(get_optional_user)):
@@ -44,6 +51,42 @@ async def domain_lookup(domain: str, force: bool = False, db: AsyncSession = Dep
     data = await osint_service.fetch_domain_info(domain)
     await osint_service.save_osint_result(db, "domain", domain, data)
     return {"cached": False, "data": data}
+
+@router.post("/batch")
+async def batch_ip_lookup(payload: BatchLookupRequest, db: AsyncSession = Depends(get_db), user=Depends(get_optional_user)):
+    results = {}
+    for ip in payload.ips[:50]:
+        try:
+            ipaddress.ip_address(ip)
+            cached = await osint_service.get_cached_result(db, "ip", ip)
+            if cached:
+                results[ip] = {"cached": True, "data": cached}
+            else:
+                data = await osint_service.fetch_ip_info(ip)
+                await osint_service.save_osint_result(db, "ip", ip, data)
+                results[ip] = {"cached": False, "data": data}
+        except ValueError:
+            results[ip] = {"error": "Invalid IP"}
+    return {"results": results}
+
+@router.post("/enrich")
+async def auto_enrich(ip: str = Query(...), background_tasks: BackgroundTasks = None, db: AsyncSession = Depends(get_db)):
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid IP")
+    async def _enrich(ip: str, db: AsyncSession):
+        cached = await osint_service.get_cached_result(db, "ip", ip)
+        if not cached:
+            data = await osint_service.fetch_ip_info(ip)
+            await osint_service.save_osint_result(db, "ip", ip, data)
+            logger.info("Auto-enriched IP: %s", ip)
+    if background_tasks:
+        background_tasks.add_task(_enrich, ip, db)
+        return {"status": "enrichment_scheduled", "ip": ip}
+    else:
+        await _enrich(ip, db)
+        return {"status": "enriched", "ip": ip}
 
 @router.get("/history")
 async def osint_history(limit: int = Query(10, ge=1, le=100), db: AsyncSession = Depends(get_db), user=Depends(get_optional_user)):

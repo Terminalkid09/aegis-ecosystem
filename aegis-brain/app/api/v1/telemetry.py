@@ -5,7 +5,7 @@ from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from app.database.connection import get_db
 from app.database.models import Alert, Agent, Telemetry
-from app.core.deps import verify_api_key
+from app.core.deps import get_current_user
 from app.core.agent_deps import get_current_agent
 from app.api.schemas.common import AlertResponse, AgentResponse, StatsResponse, EventSchema
 from app.services import telemetry_service
@@ -19,7 +19,7 @@ class ResolveRequest(BaseModel):
 @router.get("/alerts", response_model=List[AlertResponse])
 async def get_alerts(
     db: AsyncSession = Depends(get_db), 
-    api_key: str = Depends(verify_api_key),
+    _user = Depends(get_current_user),
     severity: Optional[str] = None,
     is_resolved: Optional[bool] = None
 ):
@@ -34,7 +34,7 @@ async def get_alerts(
     return result.scalars().all()
 
 @router.patch("/alerts/{alert_id}/resolve", response_model=AlertResponse)
-async def resolve_alert(alert_id: int, body: ResolveRequest, db: AsyncSession = Depends(get_db), api_key: str = Depends(verify_api_key)):
+async def resolve_alert(alert_id: int, body: ResolveRequest, db: AsyncSession = Depends(get_db), _user = Depends(get_current_user)):
     alert = await db.get(Alert, alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
@@ -56,7 +56,7 @@ async def resolve_alert(alert_id: int, body: ResolveRequest, db: AsyncSession = 
 @router.get("/agents", response_model=List[AgentResponse])
 async def get_agents(
     db: AsyncSession = Depends(get_db), 
-    api_key: str = Depends(verify_api_key),
+    _user = Depends(get_current_user),
     active_only: bool = False,
     limit: int = Query(100, ge=1, le=1000)
 ):
@@ -72,7 +72,7 @@ async def get_agents(
 @router.get("/recent")
 async def get_recent_telemetry(
     db: AsyncSession = Depends(get_db),
-    api_key: str = Depends(verify_api_key),
+    _user = Depends(get_current_user),
     agent_id: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200)
 ):
@@ -101,6 +101,8 @@ async def get_recent_telemetry(
             "processes": telemetry.processes,
             "ip_local": telemetry.ip_local,
             "ip_public": telemetry.ip_public,
+            "users": telemetry.users,
+            "network_flows": telemetry.network_flows,
         }
         for telemetry, agent in result.all()
     ]
@@ -108,7 +110,7 @@ async def get_recent_telemetry(
 @router.get("/activity")
 async def get_activity(
     db: AsyncSession = Depends(get_db),
-    api_key: str = Depends(verify_api_key),
+    _user = Depends(get_current_user),
     limit: int = Query(30, ge=1, le=100)
 ):
     telemetry_result = await db.execute(
@@ -146,7 +148,7 @@ async def get_activity(
     return sorted(activity, key=lambda item: item["timestamp"], reverse=True)[:limit]
 
 @router.get("/stats", response_model=StatsResponse)
-async def get_stats(db: AsyncSession = Depends(get_db), api_key: str = Depends(verify_api_key)):
+async def get_stats(db: AsyncSession = Depends(get_db), _user = Depends(get_current_user)):
     total_alerts = (await db.execute(select(func.count(Alert.id)))).scalar() or 0
     unresolved = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False))).scalar() or 0
     current_critical = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False, func.upper(Alert.severity) == "CRITICAL"))).scalar() or 0
@@ -183,17 +185,22 @@ async def agent_heartbeat(data: dict, db: AsyncSession = Depends(get_db), agent:
 
 @router.get("/commands")
 async def get_agent_commands(
-    agent_id: str = Header(..., alias="X-Agent-Id"),
+    agent: Agent = Depends(get_current_agent),
     db: AsyncSession = Depends(get_db)
 ):
-    # Public-ish endpoint but requires X-Agent-Id
-    # Ideally would use get_current_agent, but standardizing for compatibility
     import redis.asyncio as redis
-    from app.core.config import settings
-    rc = redis.from_url(settings.REDIS_URL, decode_responses=True)
-    queue_name = f"aegis:commands:{agent_id}"
+    from app.core.redis_utils import get_redis_url
+    rc = redis.from_url(get_redis_url(), decode_responses=True)
+    queue_name = f"aegis:commands:{agent.agent_id}"
     command = await rc.lpop(queue_name)
     if command:
         import json
         return json.loads(command)
     return None
+
+@router.get("/remediations")
+async def get_remediation_actions(limit: int = 20, db: AsyncSession = Depends(get_db)):
+    from app.database.models import RemediationAction
+    result = await db.execute(select(RemediationAction).order_by(RemediationAction.executed_at.desc()).limit(limit))
+    actions = result.scalars().all()
+    return [{"id": a.id, "alert_id": a.alert_id, "action": a.action, "target": a.target, "status": a.status, "executed_at": a.executed_at.isoformat() if a.executed_at else None, "details": a.details} for a in actions]
