@@ -9,6 +9,8 @@ import VaultX from './components/VaultX';
 import SentinelX from './components/SentinelX';
 import AIChat from './components/AIChat';
 import Settings from './components/Settings';
+import RulesManager from './components/RulesManager';
+import DiscoveryCenter from './components/DiscoveryCenter';
 import AuthButton from './components/AuthButton';
 import './styles/index.css';
 
@@ -58,6 +60,10 @@ function AppContent() {
         return <AIChat />;
       case 'settings':
         return <Settings />;
+      case 'rules':
+        return <RulesManager />;
+      case 'discovery':
+        return <DiscoveryCenter />;
       default:
         return <DashboardOverview />;
     }

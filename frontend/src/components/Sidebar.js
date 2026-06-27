@@ -3,9 +3,11 @@ import {
   BarChart3,
   AlertCircle,
   Shield,
+  ShieldAlert,
   Lock,
   Globe,
   Bot,
+  Network,
   Settings,
   LogOut,
 } from 'lucide-react';
@@ -26,9 +28,19 @@ export default function Sidebar() {
       icon: AlertCircle,
     },
     {
+      id: 'rules',
+      label: 'Detection Rules',
+      icon: ShieldAlert,
+    },
+    {
       id: 'agents',
       label: 'Endpoints',
       icon: Shield,
+    },
+    {
+      id: 'discovery',
+      label: 'Discovery',
+      icon: Network,
     },
     {
         id: 'osint',

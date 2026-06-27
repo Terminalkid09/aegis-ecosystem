@@ -6,18 +6,19 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        // Ultra-dark cyber theme (replaces slate)
         slate: {
-          950: '#030712',
-          900: '#0f172a',
-          800: '#1e293b',
-          700: '#334155',
-          600: '#475569',
-          500: '#64748b',
-          400: '#94a3b8',
-          300: '#cbd5e1',
-          200: '#e2e8f0',
-          100: '#f1f5f9',
-          50: '#f8fafc',
+          950: '#000000', // Pure black
+          900: '#07070b', // Deepest violet-black
+          800: '#0f0f16', // Dark interface bg
+          700: '#1a1a27', // Borders / subtle bg
+          600: '#2b2b3b', // Hover states
+          500: '#46465c', // Muted text
+          400: '#6e6e87', // Secondary text
+          300: '#9b9bb2', // Light secondary
+          200: '#c5c5d6', // Light text
+          100: '#e5e5ef', // Almost white
+          50: '#f4f4f8',  // White
         },
         cyan: {
           50: '#ecfdfd',
@@ -25,16 +26,22 @@ module.exports = {
           200: '#a5f3fc',
           300: '#67e8f9',
           400: '#22d3ee',
-          500: '#06b6d4',
+          500: '#00f0ff', // Cyberpunk Cyan
           600: '#0891b2',
           700: '#0e7490',
           800: '#155e75',
           900: '#164e63',
         },
+        purple: {
+          400: '#b026ff', // Neon Purple light
+          500: '#8e00fa', // Neon Purple base
+          600: '#6800cc', // Neon Purple dark
+          900: '#1d003b', // Deep glow
+        }
       },
       fontFamily: {
-        sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-        mono: ['Fira Code', 'Courier New', 'monospace'],
+        sans: ['Outfit', 'Inter', '-apple-system', 'sans-serif'],
+        mono: ['Fira Code', 'JetBrains Mono', 'monospace'],
       },
       boxShadow: {
         'glow': '0 0 20px rgba(6, 182, 212, 0.5)',

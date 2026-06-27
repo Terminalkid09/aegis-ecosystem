@@ -20,7 +20,7 @@ export default function LoginModal({ open, onClose }) {
       // authAPI.login uses axios and returns full response
       const body = res.data || res;
       const token = body.access_token || body.accessToken || body.token;
-      const user = body.user || body.user || body;
+      const user = body.user || body;
       if (token) {
         setAuthToken(token);
       }

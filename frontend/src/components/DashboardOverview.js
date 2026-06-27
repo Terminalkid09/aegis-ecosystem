@@ -48,11 +48,17 @@ export default function DashboardOverview() {
     
     const criticalCount = stats.current_critical_alerts || 0;
     const highCount = stats.current_high_alerts || 0;
+    const mediumCount = stats.current_medium_alerts || 0;
+    const totalUnresolved = stats.unresolved_alerts || 0;
     
     if (criticalCount > 0) {
       return { level: 'CRITICAL', color: 'text-red-500', bgColor: 'bg-red-950' };
-    } else if (highCount > 2) {
+    } else if (highCount > 2 || totalUnresolved > 20) {
       return { level: 'WARNING', color: 'text-orange-500', bgColor: 'bg-orange-950' };
+    } else if (highCount > 0 || mediumCount > 5 || totalUnresolved > 5) {
+      return { level: 'ELEVATED', color: 'text-yellow-500', bgColor: 'bg-yellow-950' };
+    } else if (totalUnresolved > 0) {
+      return { level: 'LOW', color: 'text-blue-500', bgColor: 'bg-blue-950' };
     } else {
       return { level: 'NORMAL', color: 'text-green-500', bgColor: 'bg-green-950' };
     }

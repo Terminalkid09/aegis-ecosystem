@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -10,14 +12,16 @@
 
 html {
   scroll-behavior: smooth;
+  background-color: #000000;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: 'Outfit', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-  color: #e2e8f0;
+  background: radial-gradient(circle at 50% -20%, #1d003b 0%, #000000 80%);
+  background-attachment: fixed;
+  color: #e5e5ef;
 }
 
 #root {
@@ -31,16 +35,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #1e293b;
+  background: #07070b;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #475569;
+  background: #2b2b3b;
   border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+  background: #8e00fa;
 }
 
 /* Animations */
@@ -59,16 +63,16 @@ body {
 
 /* Gradient Button */
 .btn-gradient {
-  @apply bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-all duration-200 shadow-lg hover:shadow-cyan-500/50;
+  @apply bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-cyan-500 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 shadow-[0_0_15px_rgba(142,0,250,0.4)] hover:shadow-[0_0_25px_rgba(0,240,255,0.6)];
 }
 
 /* Card Base */
 .card {
-  @apply bg-slate-900 border border-slate-700 rounded-lg transition-all duration-200;
+  @apply bg-[#07070b]/80 backdrop-blur-md border border-[#1a1a27] rounded-xl transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.5)];
 }
 
 .card:hover {
-  @apply border-slate-600 shadow-lg shadow-slate-900;
+  @apply border-purple-500/50 shadow-[0_0_30px_rgba(142,0,250,0.15)] transform -translate-y-1;
 }
 
 /* Badge Base */
@@ -100,20 +104,25 @@ body {
 
 /* Status Indicators */
 .status-active {
-  @apply text-green-400;
+  @apply text-cyan-400 drop-shadow-[0_0_5px_rgba(0,240,255,0.8)];
 }
 
 .status-warning {
-  @apply text-orange-400;
+  @apply text-purple-400 drop-shadow-[0_0_5px_rgba(176,38,255,0.8)];
 }
 
 .status-critical {
-  @apply text-red-400;
+  @apply text-red-500 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)];
 }
 
 /* Backdrop Blur */
 .backdrop-blur-glass {
-  background: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(7, 7, 11, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(142, 0, 250, 0.2);
+}
+
+/* Base Form Inputs */
+input, select, textarea {
+  @apply font-sans;
 }

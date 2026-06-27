@@ -1,14 +1,12 @@
 import axios from 'axios';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
-const API_KEY = process.env.REACT_APP_API_KEY || '';
 
-const apiClient = axios.create({
+export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
-    'X-Api-Key': API_KEY,
   },
 });
 
@@ -75,6 +73,17 @@ export const osintAPI = {
     ipLookup: (ip, force = false) => apiClient.get(`/osint/ip/${ip}`, { params: { force } }),
     domainLookup: (domain, force = false) => apiClient.get(`/osint/domain/${domain}`, { params: { force } }),
     getHistory: (params = {}) => apiClient.get('/osint/history', { params }),
+};
+
+// DISCOVERY / ENROLLMENT
+export const discoveryAPI = {
+  scan: (data) => apiClient.post('/discovery/scan', data, { timeout: 120000 }),
+  getHosts: () => apiClient.get('/discovery/hosts'),
+  upsertReputation: (data) => apiClient.post('/discovery/reputation', data),
+  getReputation: (params = {}) => apiClient.get('/discovery/reputation', { params }),
+  startDemo: () => apiClient.post('/discovery/demo/start'),
+  demoHeartbeat: () => apiClient.post('/discovery/demo/heartbeat'),
+  deploymentPlan: (data) => apiClient.post('/discovery/deployment/plan', data),
 };
 
 // AI-SUITE

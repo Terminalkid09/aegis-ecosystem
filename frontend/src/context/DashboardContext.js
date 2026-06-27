@@ -47,6 +47,31 @@ export const DashboardProvider = ({ children }) => {
     return () => clearInterval(interval);
   }, [settings.autoRefresh]);
 
+  useEffect(() => {
+    if (!settings.autoRefresh) {
+      return;
+    }
+    const token = localStorage.getItem('aegis_token');
+    if (!token) {
+      return;
+    }
+
+    const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
+    const wsUrl = apiUrl.replace(/^http/, 'ws').replace(/\/api\/v1$/, '/api/v1/ws/overview');
+    let socket;
+    try {
+      socket = new WebSocket(`${wsUrl}?token=${encodeURIComponent(token)}`);
+      socket.onmessage = () => setRefreshTrigger((prev) => prev + 1);
+    } catch (err) {
+      console.warn('Live updates unavailable:', err);
+    }
+    return () => {
+      if (socket && socket.readyState <= 1) {
+        socket.close();
+      }
+    };
+  }, [settings.autoRefresh]);
+
   const refreshData = () => {
     setRefreshTrigger((prev) => prev + 1);
   };

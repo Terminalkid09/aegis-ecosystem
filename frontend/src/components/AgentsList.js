@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, Cloud, Laptop, Clock, Cpu, Zap, Activity } from 'lucide-react';
-import { agentsAPI } from '../services/api';
+import { agentsAPI, statsAPI } from '../services/api';
 import { useDashboard } from '../context/DashboardContext';
 
 export default function AgentsList() {
@@ -9,6 +9,9 @@ export default function AgentsList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedAgent, setSelectedAgent] = useState(null);
+  const [agentTelemetry, setAgentTelemetry] = useState(null);
+  const [loadingTelemetry, setLoadingTelemetry] = useState(false);
 
   useEffect(() => {
     fetchAgents();
@@ -57,6 +60,24 @@ export default function AgentsList() {
     return diffInMinutes < 10;
   };
 
+  const handleAgentClick = async (agent) => {
+    setSelectedAgent(agent);
+    setLoadingTelemetry(true);
+    try {
+      const response = await statsAPI.getRecentTelemetry({ agent_id: agent.agent_id, limit: 1 });
+      if (response.data && response.data.length > 0) {
+        setAgentTelemetry(response.data[0]);
+      } else {
+        setAgentTelemetry(null);
+      }
+    } catch (err) {
+      console.error('Failed to fetch agent telemetry:', err);
+      setAgentTelemetry(null);
+    } finally {
+      setLoadingTelemetry(false);
+    }
+  };
+
   const renderAgentCard = (agent) => {
     const OSIcon = getOSIcon(agent.os_type);
     const isActive = isAgentActive(agent.last_seen);
@@ -65,7 +86,8 @@ export default function AgentsList() {
     return (
       <div
         key={agent.agent_id}
-        className={`rounded-lg p-5 transition-all hover:shadow-lg border ${
+        onClick={() => handleAgentClick(agent)}
+        className={`rounded-lg p-5 transition-all cursor-pointer hover:shadow-lg border ${
           settings.darkMode 
             ? 'bg-slate-900 border-slate-700 hover:border-slate-500 text-white' 
             : 'bg-white border-slate-200 hover:border-slate-400 text-slate-900'
@@ -173,6 +195,79 @@ export default function AgentsList() {
             )}
           </div>
         </>
+      )}
+
+      {selectedAgent && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className={`w-full max-w-4xl max-h-[80vh] overflow-y-auto rounded-lg shadow-2xl border ${settings.darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className={`p-4 border-b flex justify-between items-center sticky top-0 z-10 ${settings.darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <h3 className="text-xl font-bold flex items-center gap-2">
+                <Laptop className="text-cyan-500" /> {selectedAgent.hostname || 'Unknown'} Details
+              </h3>
+              <button onClick={() => setSelectedAgent(null)} className="text-slate-400 hover:text-red-500 text-2xl leading-none">&times;</button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              {loadingTelemetry ? (
+                <div className="text-center py-8 text-slate-500 animate-pulse">Fetching Deep Identity & Network Telemetry...</div>
+              ) : agentTelemetry ? (
+                <>
+                  {/* Identity Section */}
+                  <div>
+                    <h4 className="text-md font-semibold text-cyan-500 border-b border-cyan-900/50 pb-1 mb-3">Logged-in Users (Identity)</h4>
+                    {agentTelemetry.users && agentTelemetry.users.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        {agentTelemetry.users.map((u, i) => (
+                          <div key={i} className={`p-3 rounded border text-sm ${settings.darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                            <div className="font-bold text-white">{u.name}</div>
+                            <div className="text-slate-400 text-xs">Terminal: {u.terminal} | Host: {u.host}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-slate-500 text-sm italic">No users currently logged in.</p>
+                    )}
+                  </div>
+
+                  {/* Network Section */}
+                  <div>
+                    <h4 className="text-md font-semibold text-purple-500 border-b border-purple-900/50 pb-1 mb-3">Active Network Flows</h4>
+                    {agentTelemetry.network_flows && agentTelemetry.network_flows.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                          <thead>
+                            <tr className={`text-xs uppercase ${settings.darkMode ? 'text-slate-400 bg-slate-800' : 'text-slate-500 bg-slate-100'}`}>
+                              <th className="p-2">Local Address</th>
+                              <th className="p-2">Remote Address</th>
+                              <th className="p-2">State</th>
+                              <th className="p-2">PID</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {agentTelemetry.network_flows.map((flow, i) => (
+                              <tr key={i} className={`border-b ${settings.darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                                <td className="p-2 font-mono text-cyan-400">{flow.laddr}</td>
+                                <td className="p-2 font-mono text-purple-400">{flow.raddr}</td>
+                                <td className="p-2">
+                                  <span className="px-2 py-0.5 rounded text-[10px] bg-green-900/30 text-green-400 border border-green-800">{flow.status}</span>
+                                </td>
+                                <td className="p-2 text-slate-400">{flow.pid}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-slate-500 text-sm italic">No active external connections found.</p>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-8 text-slate-500 italic">No telemetry data available for this agent.</div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

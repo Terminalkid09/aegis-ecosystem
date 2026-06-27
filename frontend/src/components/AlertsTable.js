@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Shield, Activity, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { alertsAPI } from '../services/api';
 import { useDashboard } from '../context/DashboardContext';
 
@@ -27,8 +27,9 @@ export default function AlertsTable() {
     refreshData();
   };
 
-  const unresolved = alerts.filter(a => a.is_resolved === false || a.is_resolved === 'f' || a.is_resolved === 0);
-  const resolved = alerts.filter(a => a.is_resolved === true || a.is_resolved === 't' || a.is_resolved === 1);
+  const resolveStatus = (a) => [true, 't', 'true', 1, '1'].includes(a.is_resolved);
+  const unresolved = alerts.filter(a => !resolveStatus(a));
+  const resolved = alerts.filter(a => resolveStatus(a));
 
   return (
     <div className="space-y-6">
@@ -62,4 +63,4 @@ export default function AlertsTable() {
   );
 }
 
-function CheckCircle2({size}) { return <Activity size={size} />; }
+// CheckCircle2 imported from lucide-react
