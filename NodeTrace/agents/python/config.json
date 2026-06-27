@@ -6,6 +6,5 @@
   "heartbeat_interval": 10,
   "telemetry_interval": 60,
   "retry_max_attempts": 5,
-  "retry_base_delay": 1,
-  "enroll_key": "aegis-enrollment-token-2024"
+  "retry_base_delay": 1
 }

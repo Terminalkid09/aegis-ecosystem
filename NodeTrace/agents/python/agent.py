@@ -41,7 +41,7 @@ class Agent:
             "cpu_model": system_info["cpu_model"],
             "total_ram": system_info["total_ram"],
             "mac_address": network["mac"],
-            "enroll_key": os.getenv("AEGIS_ENROLL_KEY", self.config["enroll_key"])
+            "enroll_key": os.environ["AEGIS_ENROLL_KEY"],
         }
 
         r = requests.post(self.config["register_url"], json=payload)
@@ -67,7 +67,9 @@ class Agent:
             "disk_total": telemetry["disk_total"],
             "network_sent": telemetry["network_sent"],
             "network_received": telemetry["network_received"],
-            "active_connections": telemetry["active_connections"]
+            "active_connections": telemetry["active_connections"],
+            "users": telemetry.get("users", []),
+            "network_flows": telemetry.get("network_flows", [])
         }
 
         headers = {"Authorization": f"Bearer {token}"}
@@ -92,8 +94,8 @@ class Agent:
             r = requests.get(url, headers=headers, params=params, timeout=5)
             if r.status_code == 200:
                 return r.json()
-        except:
-            pass
+        except requests.RequestException as e:
+            Logger.warn(f"Failed to fetch commands: {e}")
         return None
 
     def start(self):
@@ -113,6 +115,8 @@ class Agent:
         telemetry_interval = self.config.get("telemetry_interval", 60)
 
         while True:
+            current_time = time.time()
+
             # 1. Heartbeat (always send to keep alive)
             self.send_heartbeat(token, device_id)
             
@@ -123,11 +127,11 @@ class Agent:
                 if cmd_type == "GET_TELEMETRY":
                     Logger.info("Telemetry requested via command.")
                     self.send_telemetry(token, device_id)
+                    last_telemetry_time = current_time  # Reset interval to prevent immediate re-send
                 else:
                     Logger.info(f"Received unknown command: {cmd_type}")
 
             # 3. Occasional telemetry anyway (optional, maybe keep it very sparse)
-            current_time = time.time()
             if current_time - last_telemetry_time > telemetry_interval:
                 self.send_telemetry(token, device_id)
                 last_telemetry_time = current_time

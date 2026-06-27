@@ -9,8 +9,14 @@ secret.json
 token.json
 *.pem
 *.key
+*.secret
 .aegis-guard-secret.json
 .nodetrace-token.json
+*.credentials.json
+# NodeTrace agent secret files (generated at runtime)
+NodeTrace/agents/python/*.secret
+NodeTrace/agents/python/token.json
+aegis-guard/secret.json
 
 # Build artifacts & target directories
 target/
