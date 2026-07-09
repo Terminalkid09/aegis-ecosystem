@@ -85,7 +85,7 @@ export const agentsAPI = {
 // STATS API
 export const statsAPI = {
   getStats: (params = {}) => cachedGet('stats', () => apiClient.get('/telemetry/stats', { params })),
-  getRecentTelemetry: (params = {}) => cachedGet('recent', () => apiClient.get('/telemetry/recent', { params })),
+  getRecentTelemetry: (params = {}) => apiClient.get('/telemetry/recent', { params }),
   getActivity: (params = {}) => cachedGet('activity', () => apiClient.get('/telemetry/activity', { params })),
 };
 

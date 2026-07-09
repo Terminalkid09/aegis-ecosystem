@@ -105,7 +105,7 @@ class RedisConsumer:
             await db.flush()
             logger.warning(f"THREAT DETECTED on {event.agent_id}: {analysis.description}")
 
-            asyncio.ensure_future(self._enrich_alert_async(alert.id))
+            # asyncio.ensure_future(self._enrich_alert_async(alert.id))  # Disabled: causes DB pool exhaustion via Ollama timeout
             
             if analysis.auto_remediation:
                 await self._execute_auto_remediation(db, alert, analysis, event)

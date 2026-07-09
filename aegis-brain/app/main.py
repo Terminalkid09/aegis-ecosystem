@@ -43,10 +43,9 @@ async def lifespan(app: FastAPI):
         
         await init_db()
         _consumer = RedisConsumer()
-        # Start as background async task
         asyncio.create_task(_consumer.start())
-        asyncio.create_task(_auto_enrich_loop())
-        logger.info("Database initialized, RedisConsumer and auto-enrichment started.")
+        # asyncio.create_task(_auto_enrich_loop())
+        logger.info("Database initialized, RedisConsumer started (auto-enrich disabled).")
         yield
     except Exception as e:
         logger.error(f"Error during startup: {e}")
