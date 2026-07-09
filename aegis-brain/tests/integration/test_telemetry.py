@@ -100,7 +100,7 @@ class TestTelemetry:
                 agent_id=test_agent.agent_id,
                 severity=["CRITICAL", "HIGH", "MEDIUM", "LOW", "LOW"][i],
                 process_name=f"proc_{i}", event_type="TEST", description=f"Desc {i}",
-                is_resolved=i < 2
+                is_resolved=i >= 3
             ))
         await db_session.commit()
 

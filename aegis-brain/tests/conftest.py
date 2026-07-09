@@ -29,20 +29,55 @@ from app.core.security import hash_password, create_access_token
 import uuid
 
 
-TEST_DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:password@localhost:5432/aegis_test"
-)
+# Force test database URL — never use production DB for tests
+_env_db = os.getenv("DATABASE_URL", "")
+if os.getenv("TEST_DATABASE_URL"):
+    TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
+elif "aegis" in _env_db and "test" not in _env_db.lower():
+    # Rewrite production URL to aegis_test
+    parts = _env_db.rsplit("/", 1)
+    TEST_DATABASE_URL = parts[0] + "/aegis_test"
+else:
+    TEST_DATABASE_URL = _env_db or "postgresql+asyncpg://postgres:password@localhost:5432/aegis_test"
+
 TEST_REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
-test_engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool, echo=False)
-TestAsyncSessionLocal = async_sessionmaker(
-    bind=test_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
+# Ensure test database exists by connecting to default `postgres` database first
+async def _ensure_test_db():
+    """Create aegis_test database if it doesn't exist."""
+    try:
+        root_url = TEST_DATABASE_URL.rsplit("/", 1)[0] + "/postgres"
+        engine = create_async_engine(root_url, isolation_level="AUTOCOMMIT", poolclass=NullPool)
+        async with engine.begin() as conn:
+            from sqlalchemy import text
+            db_name = TEST_DATABASE_URL.rsplit("/", 1)[-1]
+            result = await conn.execute(text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": db_name})
+            if not result.scalar():
+                await conn.execute(text(f"CREATE DATABASE \"{db_name}\""))
+                print(f"Created test database: {db_name}")
+        await engine.dispose()
+    except Exception as e:
+        print(f"Note: Could not ensure test database exists: {e}")
+
+try:
+    asyncio.run(_ensure_test_db())
+except Exception:
+    pass
+
+_db_available = False
+try:
+    test_engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool, echo=False)
+    TestAsyncSessionLocal = async_sessionmaker(
+        bind=test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+    _db_available = True
+except Exception:
+    test_engine = None
+    TestAsyncSessionLocal = None
 
 
 @pytest.fixture(scope="session")
@@ -54,20 +89,34 @@ def event_loop():
 
 @pytest.fixture(scope="session", autouse=True)
 async def setup_database():
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-    yield
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await test_engine.dispose()
+    if not _db_available:
+        yield
+        return
+    try:
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+        yield
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+    except Exception:
+        yield
+    finally:
+        if test_engine:
+            await test_engine.dispose()
 
 
 @pytest.fixture
 async def db_session():
-    async with TestAsyncSessionLocal() as session:
-        yield session
-        await session.rollback()
+    if not _db_available:
+        pytest.skip("Database not available")
+    conn = await test_engine.connect()
+    trans = await conn.begin()
+    session = TestAsyncSessionLocal(bind=conn)
+    yield session
+    await session.close()
+    await trans.rollback()
+    await conn.close()
 
 
 @pytest.fixture

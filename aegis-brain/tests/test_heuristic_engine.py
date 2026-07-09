@@ -7,7 +7,8 @@ from datetime import datetime
 def engine():
     return HeuristicEngine()
 
-def test_rule_known_attack_tool(engine):
+@pytest.mark.asyncio
+async def test_rule_known_attack_tool(engine):
     event = EventSchema(
         agent_id="test-agent",
         pid=123,
@@ -16,12 +17,13 @@ def test_rule_known_attack_tool(engine):
         event_type="PROCESS_CREATED",
         timestamp=datetime.now()
     )
-    result = engine.analyze(event)
+    result = await engine.analyze(event)
     assert result.is_threat is True
     assert result.severity == "CRITICAL"
     assert "Known attack tool" in result.description
 
-def test_rule_suspicious_path(engine):
+@pytest.mark.asyncio
+async def test_rule_suspicious_path(engine):
     event = EventSchema(
         agentId="test-agent",
         pid=123,
@@ -31,12 +33,13 @@ def test_rule_suspicious_path(engine):
         eventType="PROCESS_CREATED",
         timestamp=datetime.now()
     )
-    result = engine.analyze(event)
+    result = await engine.analyze(event)
     assert result.is_threat is True
     assert result.severity == "HIGH"
     assert "suspicious path" in result.description
 
-def test_rule_double_extension(engine):
+@pytest.mark.asyncio
+async def test_rule_double_extension(engine):
     event = EventSchema(
         agentId="test-agent",
         pid=123,
@@ -45,12 +48,13 @@ def test_rule_double_extension(engine):
         eventType="PROCESS_CREATED",
         timestamp=datetime.now()
     )
-    result = engine.analyze(event)
+    result = await engine.analyze(event)
     assert result.is_threat is True
     assert result.severity == "HIGH"
     assert "Double extension" in result.description
 
-def test_benign_event(engine):
+@pytest.mark.asyncio
+async def test_benign_event(engine):
     event = EventSchema(
         agentId="test-agent",
         pid=123,
@@ -60,5 +64,5 @@ def test_benign_event(engine):
         eventType="PROCESS_CREATED",
         timestamp=datetime.now()
     )
-    result = engine.analyze(event)
+    result = await engine.analyze(event)
     assert result.is_threat is False
