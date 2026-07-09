@@ -55,14 +55,19 @@ class AIMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy import UniqueConstraint
 
 class Agent(Base):
     __tablename__ = "agents"
+    __table_args__ = (
+        UniqueConstraint("hostname", "os_type", name="uq_agent_hostname_os"),
+    )
     agent_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     hostname: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     os_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     agent_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     meta: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     device_token_hash: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -75,11 +80,22 @@ class Alert(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    parent_pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    parent_process_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     process_name: Mapped[str] = mapped_column(String(255), nullable=False)
     process_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     event_type: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     is_resolved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # MITRE ATT&CK mapping (populated from CustomRule or enrichment)
+    mitre_tactic_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    mitre_technique_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    mitre_tactic_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    mitre_technique_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    # relation
+    agent: Mapped["Agent"] = relationship()
 
 class Telemetry(Base):
     __tablename__ = "telemetry"
@@ -97,6 +113,8 @@ class Telemetry(Base):
     ip_public: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     geo_country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     geo_city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    users: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSON, nullable=True)
+    network_flows: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSON, nullable=True)
 
 class OSINTReport(Base):
     __tablename__ = "osint_reports"
@@ -115,3 +133,158 @@ class APIKey(Base):
     scopes: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class CustomRule(Base):
+    __tablename__ = "custom_rules"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    target_field: Mapped[str] = mapped_column(String(100), nullable=False)
+    pattern: Mapped[str] = mapped_column(String(500), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, default="MEDIUM")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # MITRE ATT&CK mapping
+    mitre_tactic_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    mitre_tactic: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    mitre_technique_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    mitre_technique: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Logic type: "simple" (default) or "and"/"or" for multi-condition
+    logic_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+
+    # AND/OR conditions (JSON array of {target_field, pattern, operator})
+    conditions: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    # Whitelist: hostnames/IPs to exclude
+    whitelist: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    # Auto-remediation action
+    auto_remediation: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    # Counter / tracking
+    trigger_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_triggered: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class RemediationAction(Base):
+    __tablename__ = "remediation_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    alert_id: Mapped[int] = mapped_column(Integer, ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
+    agent_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agents.agent_id", ondelete="CASCADE"), nullable=False)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    target: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+class DiscoveredHost(Base):
+    __tablename__ = "discovered_hosts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ip_address: Mapped[str] = mapped_column(String(45), unique=True, nullable=False, index=True)
+    hostname: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    mac_address: Mapped[Optional[str]] = mapped_column(String(17), nullable=True)
+    vendor: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    os_guess: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    os_confidence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="unknown", nullable=False)
+    open_ports: Mapped[Optional[List[int]]] = mapped_column(JSON, nullable=True)
+    guard_status: Mapped[str] = mapped_column(String(30), default="not_deployed", nullable=False)
+    nodetrace_status: Mapped[str] = mapped_column(String(30), default="not_deployed", nullable=False)
+    source: Mapped[str] = mapped_column(String(50), default="scan", nullable=False)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+class ThreatReport(Base):
+    __tablename__ = "threat_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    alert_id: Mapped[int] = mapped_column(Integer, ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False, index=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[str] = mapped_column(String(20), default="medium", nullable=False)
+    recommended_actions: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    osint_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    ai_analysis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_auto_generated: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class IPReputation(Base):
+    __tablename__ = "ip_reputations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ip_address: Mapped[str] = mapped_column(String(45), unique=True, nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(30), default="unknown", nullable=False)
+    confidence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    source: Mapped[str] = mapped_column(String(100), default="manual", nullable=False)
+    details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    action: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    resource: Mapped[str] = mapped_column(String(255), nullable=False)
+    resource_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+class Playbook(Base):
+    __tablename__ = "playbooks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    
+    # Trigger conditions
+    trigger_event_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    trigger_severity: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    trigger_process_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    trigger_condition: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    actions: Mapped[List["PlaybookAction"]] = relationship(back_populates="playbook", cascade="all, delete-orphan")
+
+class PlaybookAction(Base):
+    __tablename__ = "playbook_actions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    playbook_id: Mapped[int] = mapped_column(ForeignKey("playbooks.id", ondelete="CASCADE"), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    target: Mapped[str] = mapped_column(String(255), nullable=False)
+    params: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    playbook: Mapped["Playbook"] = relationship(back_populates="actions")
+
+class PlaybookExecution(Base):
+    __tablename__ = "playbook_executions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    playbook_id: Mapped[int] = mapped_column(ForeignKey("playbooks.id", ondelete="CASCADE"), nullable=False)
+    alert_id: Mapped[Optional[int]] = mapped_column(ForeignKey("alerts.id", ondelete="SET NULL"), nullable=True)
+    triggered_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    result: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class SyslogEvent(Base):
+    __tablename__ = "syslog_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    facility: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    severity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    hostname: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    app_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    raw: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

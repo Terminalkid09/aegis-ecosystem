@@ -61,13 +61,14 @@ public class GlobalExceptionHandler {
 
     /*
      * Gestisce errori di runtime (es. Redis non raggiungibile).
+     * Returns generic message to avoid information leakage.
      */
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<EventResponse> handleRuntimeException(RuntimeException ex) {
         log.error("Runtime error processing event: {}", ex.getMessage(), ex);
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(EventResponse.error("Internal error: " + ex.getMessage()));
+                .body(EventResponse.error("Internal server error"));
     }
 
     /*

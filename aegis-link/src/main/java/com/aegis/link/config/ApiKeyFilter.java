@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.security.MessageDigest;
 import java.util.Collections;
 
 @Component
@@ -58,8 +59,8 @@ public class ApiKeyFilter extends OncePerRequestFilter {
             return;
         }
 
-        // 2. Fallback alla chiave globale (per test o management)
-        if (globalApiKey != null && !globalApiKey.isBlank() && globalApiKey.equals(requestKey)) {
+        // 2. Fallback alla chiave globale (per test o management) - constant-time comparison
+        if (globalApiKey != null && !globalApiKey.isBlank() && MessageDigest.isEqual(globalApiKey.getBytes(), requestKey.getBytes())) {
             UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                     "aegis-admin", null, Collections.emptyList()
             );

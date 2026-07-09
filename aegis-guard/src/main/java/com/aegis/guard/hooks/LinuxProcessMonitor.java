@@ -4,10 +4,8 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +23,8 @@ Legge il filesystem virtuale /proc per enumerare i processi attivi.
 Struttura usata:
 /proc/<pid>/comm   → nome del processo
 /proc/<pid>/exe    → symlink all'eseguibile (path reale)
-/proc/<pid>/status → UID e altri metadati
+/proc/<pid>/status → UID, PPID, thread count
+/proc/<pid>/maps   → regioni di memoria mappate (per rilevamento injection)
 */
 public class LinuxProcessMonitor implements ProcessMonitor {
 
@@ -40,6 +39,8 @@ public class LinuxProcessMonitor implements ProcessMonitor {
 
     private final String hostname;
     private final String ipAddress;
+
+    private Map<Long, String> netstatCache = new HashMap<>();
 
     public LinuxProcessMonitor(AegisClient client, HashCalculator hasher, String agentId) {
         this.client  = client;
@@ -56,22 +57,24 @@ public class LinuxProcessMonitor implements ProcessMonitor {
         running = true;
         log.info("LinuxProcessMonitor started (interval {}ms)", Config.SCAN_INTERVAL_MS);
 
-        // Snapshot iniziale — non inviamo i processi già esistenti all'avvio
         scanProcesses().forEach(e -> knownPids.add(e.getPid()));
 
         while (running) {
             try {
+                netstatCache = parseNetstat();
                 List<SystemEvent> current = scanProcesses();
 
                 for (SystemEvent event : current) {
                     if (!knownPids.contains(event.getPid())) {
+                        String conns = netstatCache.getOrDefault(event.getPid(), "[]");
+                        event.setNetworkConnections(conns);
+
                         log.info("New process detected: {}", event);
                         client.sendEvent(event);
                         knownPids.add(event.getPid());
                     }
                 }
 
-                // Manteniamo solo i PID ancora attivi
                 Set<Long> currentPids = new HashSet<>();
                 current.forEach(e -> currentPids.add(e.getPid()));
                 knownPids.retainAll(currentPids);
@@ -101,39 +104,96 @@ public class LinuxProcessMonitor implements ProcessMonitor {
         );
         if (procEntries == null) return events;
 
+        // Build pid → name map for parent resolution
+        Map<Long, String> pidNameMap = new HashMap<>();
+        List<ProcEntry> rawEntries = new ArrayList<>();
+
         for (File pidDir : procEntries) {
             try {
                 long pid = Long.parseLong(pidDir.getName());
-
                 String name = readComm(pidDir);
                 if (name.isEmpty()) continue;
 
-                String exePath = readExeSymlink(pidDir);
-                String user    = readUser(pidDir);
+                long ppid = readPpid(pidDir);
+                int threads = readThreadCount(pidDir);
 
-                SystemEvent event = new SystemEvent(
-                        agentId, pid, name, exePath, user, "Linux", "PROCESS_CREATED"
-                );
-                event.setHostname(hostname);
-                event.setIpAddress(ipAddress);
+                pidNameMap.put(pid, name);
+                rawEntries.add(new ProcEntry(pid, ppid, name, threads));
 
-                if (!exePath.isEmpty()) {
-                    event.setFileHash(hasher.calculateHash(exePath));
-                }
+            } catch (NumberFormatException ignored) {}
+        }
 
-                events.add(event);
+        for (ProcEntry pe : rawEntries) {
+            String parentName = pidNameMap.getOrDefault(pe.ppid, "unknown");
+            String exePath = readExeSymlink(new File(PROC.toFile(), String.valueOf(pe.pid)));
+            String user = readUser(new File(PROC.toFile(), String.valueOf(pe.pid)));
 
-            } catch (NumberFormatException ignored) {
-                // directory non numerica in /proc — saltata
+            SystemEvent event = new SystemEvent(
+                    agentId, pe.pid, pe.ppid, parentName, pe.name,
+                    exePath, user, "Linux", "PROCESS_CREATED"
+            );
+            event.setHostname(hostname);
+            event.setIpAddress(ipAddress);
+            event.setThreadCount(pe.threads);
+
+            if (!exePath.isEmpty()) {
+                event.setFileHash(hasher.calculateHash(exePath));
             }
+
+            String conns = netstatCache.getOrDefault(pe.pid, "[]");
+            event.setNetworkConnections(conns);
+
+            events.add(event);
         }
 
         return events;
     }
 
+    // Parse ss -tupn output into pid → JSON connections map
+    private Map<Long, String> parseNetstat() {
+        Map<Long, List<Map<String, String>>> connMap = new HashMap<>();
+        try {
+            ProcessBuilder pb = new ProcessBuilder("ss", "-tupn");
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes());
+            p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+
+            for (String line : out.split("\\r?\\n")) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("State") || line.startsWith("Netid")) continue;
+
+                String[] parts = line.split("\\s+");
+                if (parts.length >= 5) {
+                    // Extract PID from the last field: users:(("process",pid,fd))
+                    String peerField = parts[parts.length - 1];
+                    java.util.regex.Matcher m = java.util.regex.Pattern.compile("pid=(\\d+)").matcher(peerField);
+                    if (m.find()) {
+                        long pid = Long.parseLong(m.group(1));
+                        Map<String, String> conn = new LinkedHashMap<>();
+                        conn.put("proto", parts[0]);
+                        conn.put("local", parts[3]);
+                        conn.put("remote", parts[4]);
+                        conn.put("state", parts[1]);
+
+                        connMap.computeIfAbsent(pid, k -> new ArrayList<>()).add(conn);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse ss: {}", e.getMessage());
+        }
+
+        Map<Long, String> result = new HashMap<>();
+        com.google.gson.Gson gson = new com.google.gson.Gson();
+        for (Map.Entry<Long, List<Map<String, String>>> e : connMap.entrySet()) {
+            result.put(e.getKey(), gson.toJson(e.getValue()));
+        }
+        return result;
+    }
+
     //  Helpers
 
-    // Legge /proc/<pid>/comm (nome processo, max 15 char). 
     private String readComm(File pidDir) {
         try {
             return Files.readString(pidDir.toPath().resolve("comm")).strip();
@@ -142,19 +202,38 @@ public class LinuxProcessMonitor implements ProcessMonitor {
         }
     }
 
-    // Risolve il symlink /proc/<pid>/exe → path assoluto dell'eseguibile. 
+    private long readPpid(File pidDir) {
+        try {
+            List<String> lines = Files.readAllLines(pidDir.toPath().resolve("status"));
+            for (String line : lines) {
+                if (line.startsWith("PPid:")) {
+                    return Long.parseLong(line.split("\\s+")[1]);
+                }
+            }
+        } catch (IOException ignored) {}
+        return 0;
+    }
+
+    private int readThreadCount(File pidDir) {
+        try {
+            List<String> lines = Files.readAllLines(pidDir.toPath().resolve("status"));
+            for (String line : lines) {
+                if (line.startsWith("Threads:")) {
+                    return Integer.parseInt(line.split("\\s+")[1]);
+                }
+            }
+        } catch (IOException ignored) {}
+        return 0;
+    }
+
     private String readExeSymlink(File pidDir) {
         try {
             return Files.readSymbolicLink(pidDir.toPath().resolve("exe")).toString();
         } catch (IOException e) {
-            return ""; // processi di sistema o permessi insufficienti
+            return "";
         }
     }
 
-    /*
-    Legge l'UID reale da /proc/<pid>/status e lo converte in nome utente
-    tramite i file di sistema standard.
-     */
     private String readUser(File pidDir) {
         try {
             List<String> lines = Files.readAllLines(pidDir.toPath().resolve("status"));
@@ -170,7 +249,6 @@ public class LinuxProcessMonitor implements ProcessMonitor {
         return "unknown";
     }
 
-    // Converte UID numerico in nome utente leggendo /etc/passwd. 
     private String resolveUid(String uid) {
         try {
             List<String> lines = Files.readAllLines(Path.of("/etc/passwd"));
@@ -182,5 +260,17 @@ public class LinuxProcessMonitor implements ProcessMonitor {
             }
         } catch (IOException ignored) {}
         return "uid:" + uid;
+    }
+
+    private static class ProcEntry {
+        final long pid;
+        final long ppid;
+        final String name;
+        final int threads;
+
+        ProcEntry(long pid, long ppid, String name, int threads) {
+            this.pid = pid; this.ppid = ppid;
+            this.name = name; this.threads = threads;
+        }
     }
 }

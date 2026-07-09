@@ -1,0 +1,17 @@
+# Production-oriented overrides: do not publish Postgres/Redis to the host.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  aegis-postgres:
+    ports: !reset []
+
+  aegis-redis:
+    ports: !reset []
+
+  aegis-brain:
+    environment:
+      DEBUG: "false"
+
+  aegis-frontend:
+    environment:
+      REACT_APP_API_URL: /api/v1

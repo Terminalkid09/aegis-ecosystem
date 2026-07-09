@@ -1,34 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import LoginModal from './LoginModal';
-import { setAuthToken } from '../services/api';
+import { useDashboard } from '../context/DashboardContext';
 
 export default function AuthButton() {
   const [open, setOpen] = useState(false);
-  const [user, setUser] = useState(null);
-
-  useEffect(() => {
-    const load = () => {
-      try {
-        const u = JSON.parse(localStorage.getItem('aegis_user'));
-        setUser(u);
-      } catch {
-        setUser(null);
-      }
-    };
-    load();
-    window.addEventListener('storage', load);
-    window.addEventListener('aegis-auth-changed', load);
-    return () => {
-      window.removeEventListener('storage', load);
-      window.removeEventListener('aegis-auth-changed', load);
-    };
-  }, []);
-
-  const logout = () => {
-    setAuthToken(null);
-    try { localStorage.removeItem('aegis_user'); } catch(e){}
-    window.dispatchEvent(new Event('aegis-auth-changed'));
-  };
+  const { user, logout } = useDashboard();
 
   return (
     <div className="flex items-center gap-3">

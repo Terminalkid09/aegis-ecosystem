@@ -5,6 +5,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from app.main import app
+from app.database.connection import get_db
 from app.database.models import OSINTReport, User
 from app.core.security import create_access_token, hash_password
 from app.services import osint_service
@@ -45,10 +46,16 @@ async def test_cached_ip_returned(monkeypatch, db_session):
     monkeypatch.setattr(osint_service.httpx, "AsyncClient", MockAsyncClient)
     token, _, _ = create_access_token(str(user.id), user.role)
 
+    async def override_get_db():
+        yield db_session
+    app.dependency_overrides[get_db] = override_get_db
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         headers = {"Authorization": f"Bearer {token}"}
         r = await client.get("/api/v1/osint/ip/1.1.1.1", headers=headers)
+
+    app.dependency_overrides.clear()
 
     assert r.status_code == 200
     assert r.json()["cached"] is True

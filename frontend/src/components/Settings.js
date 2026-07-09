@@ -78,7 +78,7 @@ export default function Settings() {
             </label>
             <input
               type="text"
-              defaultValue="http://localhost:8000/api/v1"
+              defaultValue={process.env.REACT_APP_API_URL || "http://localhost:8000/api/v1"}
               className={`w-full px-4 py-2 rounded-lg focus:outline-none focus:border-cyan-500 transition-all font-mono text-sm ${inputClass}`}
             />
             <p className="text-slate-500 text-xs mt-2">

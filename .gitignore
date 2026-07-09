@@ -7,10 +7,16 @@
 .env.production.local
 secret.json
 token.json
+token_agent.json
 *.pem
 *.key
+*.secret
 .aegis-guard-secret.json
 .nodetrace-token.json
+*.credentials.json
+NodeTrace/agents/python/*.secret
+NodeTrace/agents/python/token.json
+aegis-guard/secret.json
 
 # Build artifacts & target directories
 target/
@@ -20,14 +26,27 @@ out/
 bin/
 mvn_temp/
 jre/
+jre-new/
 *.class
 *.jar
 *.war
 *.ear
+*.exe
+*.spec
+
+# PyInstaller intermediate files
+**/__pycache__/
+**/*.pyc
+**/build/
+
+# Python cache
 *.pyc
 *.pyo
 *.pyd
 __pycache__/
+
+# Maven generated
+**/dependency-reduced-pom.xml
 
 # Dependencies
 node_modules/
@@ -61,11 +80,39 @@ htmlcov/
 .next/
 .docusaurus/
 
+# Agent / test output files
+*.err
+*.out
+aegis-agents.txt
+agents-out.txt
+load_test.log
+test_*.json
+test_log.txt
+logs/
+
+# CI / Reports
+.gitlab-ci.yml.local
+AEGIS_*_REPORT.md
+docs/AEGIS_*_REPORT.md
+docs/TEST_REPORT.md
+docs/VALIDATION_REPORT.md
+docs/*_REPORT.md
+docs/*_GUIDE.md
+codex_refactor.md
+docs/codex_refactor.md
+
+# OUI cache
+aegis-brain/app/data/oui_cache.json
+
 # Logs
 *.log
 *.sqlite3
 *.db
-# Specific Aegis Guard log files
 aegis-guard/install/windows/install_log.txt
-# Specific test output
-load_test.log
+
+# Docker / PID
+*.pid
+
+# Docs suggestions / scratch
+*.suggestion.*
+scratch/

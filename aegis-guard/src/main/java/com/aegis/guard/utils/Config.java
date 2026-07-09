@@ -11,15 +11,15 @@ public class Config {
     );
 
     public static final String GATEWAY_URL = getEnv(
-            "AEGIS_GATEWAY_URL", "http://localhost:8000/api/v1/telemetry/report"
+            "AEGIS_GATEWAY_URL", "https://aegis.local/api/v1/telemetry/report"
     );
 
     public static final String BRAIN_URL = getEnv(
-            "AEGIS_BRAIN_URL", "http://localhost:8000/api/v1"
+            "AEGIS_BRAIN_URL", "https://aegis.local/api/v1"
     );
 
-    public static final String ENROLL_KEY = getEnv(
-            "AEGIS_ENROLL_KEY", "aegis-enrollment-token-2024" // Default for development
+    public static final String ENROLL_KEY = getEnvOrThrow(
+            "AEGIS_ENROLL_KEY", "Enrollment key must be set via AEGIS_ENROLL_KEY environment variable"
     );
 
     public static final int SCAN_INTERVAL_MS = Integer.parseInt(
@@ -33,5 +33,13 @@ public class Config {
     private static String getEnv(String key, String defaultValue) {
         String val = System.getenv(key);
         return (val != null && !val.isBlank()) ? val : defaultValue;
+    }
+
+    private static String getEnvOrThrow(String key, String message) {
+        String val = System.getenv(key);
+        if (val == null || val.isBlank()) {
+            throw new RuntimeException(message);
+        }
+        return val;
     }
 }

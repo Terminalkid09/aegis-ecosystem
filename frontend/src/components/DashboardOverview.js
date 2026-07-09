@@ -1,58 +1,66 @@
-import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Shield, Activity, TrendingUp, Cpu, HardDrive } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { AlertTriangle, Shield, Activity, TrendingUp, Cpu, HardDrive, Users } from 'lucide-react';
 import { statsAPI } from '../services/api';
 import { useDashboard } from '../context/DashboardContext';
+import TelemetryChart from './TelemetryChart';
 
 export default function DashboardOverview() {
-  const { refreshTrigger, settings } = useDashboard();
+  const { refreshTrigger, settings, liveStats } = useDashboard();
   const [stats, setStats] = useState(null);
   const [telemetry, setTelemetry] = useState([]);
   const [activity, setActivity] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchStats();
-  }, [refreshTrigger]);
+  // Merge WS live data into stats immediately
+  const mergedStats = useMemo(() => liveStats ? { ...(stats || {}), ...liveStats } : stats, [stats, liveStats]);
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
-      setLoading(true);
-      const response = await statsAPI.getStats();
-      const telemetryResponse = await statsAPI.getRecentTelemetry({ limit: 8 });
-      const activityResponse = await statsAPI.getActivity({ limit: 10 });
-      setStats(response.data);
-      setTelemetry(telemetryResponse.data || []);
-      setActivity(activityResponse.data || []);
+      const [statsRes, telemetryRes, activityRes] = await Promise.all([
+        statsAPI.getStats(),
+        statsAPI.getRecentTelemetry({ limit: 50 }),
+        statsAPI.getActivity({ limit: 10 }),
+      ]);
+      setStats(statsRes.data);
+      setTelemetry(telemetryRes.data || []);
+      setActivity(activityRes.data || []);
       setError(null);
     } catch (err) {
       setError('Failed to load statistics');
       console.error('Stats fetch error:', err);
-    } finally {
-      setLoading(false);
     }
-  };
+  }, []);
 
-  const chartData = telemetry
-    .filter(t => t.agent_type.toLowerCase() === 'nodetrace' && t.cpu_usage !== null && t.ram_usage !== null)
+  useEffect(() => {
+    fetchStats();
+  }, [refreshTrigger, fetchStats]);
+
+  const chartData = useMemo(() => telemetry
+    .filter(t => t.agent_type && t.agent_type.toLowerCase() === 'nodetrace' && t.cpu_usage !== null && t.ram_usage !== null)
     .map(t => ({
-      time: new Date(t.timestamp).toLocaleTimeString(),
+      time: new Date(t.timestamp).getTime(),
       cpu: t.cpu_usage,
       ram: t.ram_usage,
       name: t.hostname || t.agent_id
-    })).reverse();
+    })).sort((a, b) => a.time - b.time), [telemetry]);
 
   const getThreatLevel = () => {
-    if (!stats) return { level: 'UNKNOWN', color: 'text-slate-500', bgColor: 'bg-slate-900' };
+    const s = mergedStats;
+    if (!s) return { level: 'UNKNOWN', color: 'text-slate-500', bgColor: 'bg-slate-900' };
     
-    const criticalCount = stats.current_critical_alerts || 0;
-    const highCount = stats.current_high_alerts || 0;
+    const criticalCount = s.current_critical_alerts || 0;
+    const highCount = s.current_high_alerts || 0;
+    const mediumCount = s.current_medium_alerts || 0;
+    const totalUnresolved = s.unresolved_alerts || 0;
     
     if (criticalCount > 0) {
       return { level: 'CRITICAL', color: 'text-red-500', bgColor: 'bg-red-950' };
-    } else if (highCount > 2) {
+    } else if (highCount > 2 || totalUnresolved > 20) {
       return { level: 'WARNING', color: 'text-orange-500', bgColor: 'bg-orange-950' };
+    } else if (highCount > 0 || mediumCount > 5 || totalUnresolved > 5) {
+      return { level: 'ELEVATED', color: 'text-yellow-500', bgColor: 'bg-yellow-950' };
+    } else if (totalUnresolved > 0) {
+      return { level: 'LOW', color: 'text-blue-500', bgColor: 'bg-blue-950' };
     } else {
       return { level: 'NORMAL', color: 'text-green-500', bgColor: 'bg-green-950' };
     }
@@ -60,31 +68,19 @@ export default function DashboardOverview() {
 
   const threatLevel = getThreatLevel();
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className={settings.darkMode ? 'text-slate-400' : 'text-slate-500'}>Loading statistics...</div>
-      </div>
-    );
-  }
-
   const sectionClass = settings.darkMode
     ? 'text-white'
     : 'text-slate-900';
 
-  const panelClass = settings.darkMode
-    ? 'bg-slate-900 border border-slate-700'
-    : 'bg-white border border-slate-200';
+  const panelClass = 'card p-4';
 
   return (
     <div className="space-y-6">
-      {/* Title */}
       <div>
         <h2 className={`text-3xl font-bold ${sectionClass}`}>Dashboard</h2>
         <p className={settings.darkMode ? 'text-slate-500 mt-1' : 'text-slate-600 mt-1'}>Real-time security overview</p>
       </div>
 
-      {/* Threat Level Indicator */}
       <div className={`${threatLevel.bgColor} border border-slate-700 rounded-lg p-6`}>
         <div className="flex items-center justify-between">
           <div>
@@ -101,42 +97,37 @@ export default function DashboardOverview() {
         </div>
       </div>
 
-      {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Alerts Card */}
         <StatCard
           label="Total Alerts"
-          value={stats?.total_alerts || 0}
+          value={mergedStats?.total_alerts || 0}
           icon={AlertTriangle}
           color="from-red-500 to-red-600"
           iconColor="text-red-400"
           darkMode={settings.darkMode}
         />
 
-        {/* Unresolved Threats Card */}
         <StatCard
           label="Unresolved Threats"
-          value={stats?.unresolved_alerts || 0}
+          value={mergedStats?.unresolved_alerts || 0}
           icon={Shield}
           color="from-orange-500 to-orange-600"
           iconColor="text-orange-400"
           darkMode={settings.darkMode}
         />
 
-        {/* Active Agents Card */}
         <StatCard
           label="Active Agents"
-          value={stats?.active_agents || 0}
+          value={mergedStats?.active_agents || 0}
           icon={Activity}
           color="from-green-500 to-green-600"
           iconColor="text-green-400"
           darkMode={settings.darkMode}
         />
 
-        {/* Critical Threats Card */}
         <StatCard
           label="Critical Threats"
-          value={stats?.current_critical_alerts || 0}
+          value={mergedStats?.current_critical_alerts || 0}
           icon={TrendingUp}
           color="from-purple-500 to-purple-600"
           iconColor="text-purple-400"
@@ -144,38 +135,43 @@ export default function DashboardOverview() {
         />
       </div>
 
-      {/* Severity Breakdown */}
+      {(mergedStats?.demo_agents || 0) > 0 && (
+        <div className="bg-yellow-950/40 border border-yellow-800/60 rounded-lg px-4 py-2 text-sm text-yellow-300 flex items-center gap-3">
+          <Users size={16} />
+          <span><strong>{mergedStats.demo_agents}</strong> demo agent(s) active — excluded from main stats. Go to <button onClick={() => window.dispatchEvent(new CustomEvent('aegis-navigate', {detail: 'agents'}))} className="underline hover:text-yellow-200">Endpoints</button> to view.</span>
+        </div>
+      )}
+
       <div className={`${panelClass} rounded-lg p-6`}>
         <h3 className={`text-lg font-bold mb-6 ${settings.darkMode ? 'text-white' : 'text-slate-900'}`}>Alerts by Severity (Current)</h3>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <SeverityItem
             label="Critical"
-            count={stats?.current_critical_alerts || 0}
+            count={mergedStats?.current_critical_alerts || 0}
             color="bg-red-500"
             textColor="text-red-400"
           />
           <SeverityItem
             label="High"
-            count={stats?.current_high_alerts || 0}
+            count={mergedStats?.current_high_alerts || 0}
             color="bg-orange-500"
             textColor="text-orange-400"
           />
           <SeverityItem
             label="Medium"
-            count={stats?.current_medium_alerts || 0}
+            count={mergedStats?.current_medium_alerts || 0}
             color="bg-yellow-500"
             textColor="text-yellow-400"
           />
           <SeverityItem
             label="Low"
-            count={stats?.current_low_alerts || 0}
+            count={mergedStats?.current_low_alerts || 0}
             color="bg-blue-500"
             textColor="text-blue-400"
           />
         </div>
       </div>
 
-      {/* Performance Metrics Chart */}
       <div className={`${panelClass} rounded-lg p-6`}>
         <div className="flex items-center justify-between mb-6">
           <h3 className={`text-lg font-bold ${settings.darkMode ? 'text-white' : 'text-slate-900'}`}>System Performance Metrics</h3>
@@ -185,62 +181,7 @@ export default function DashboardOverview() {
           </div>
         </div>
         <div className="h-80 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData}>
-              <defs>
-                <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
-                </linearGradient>
-                <linearGradient id="colorRam" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#a855f7" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-              <XAxis 
-                dataKey="time" 
-                stroke="#64748b" 
-                fontSize={10} 
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis 
-                stroke="#64748b" 
-                fontSize={10} 
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(value) => `${value}%`}
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#0f172a', 
-                  border: '1px solid #334155',
-                  borderRadius: '8px',
-                  fontSize: '12px'
-                }}
-                itemStyle={{ padding: '2px 0' }}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="cpu" 
-                stroke="#06b6d4" 
-                strokeWidth={2}
-                fillOpacity={1} 
-                fill="url(#colorCpu)" 
-                name="CPU Usage"
-              />
-              <Area 
-                type="monotone" 
-                dataKey="ram" 
-                stroke="#a855f7" 
-                strokeWidth={2}
-                fillOpacity={1} 
-                fill="url(#colorRam)" 
-                name="RAM Usage"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+          <TelemetryChart data={chartData} darkMode={settings.darkMode} />
         </div>
       </div>
 
@@ -248,7 +189,7 @@ export default function DashboardOverview() {
         <div className={`${panelClass} rounded-lg p-6`}>
           <h3 className={`text-lg font-bold mb-4 ${settings.darkMode ? 'text-white' : 'text-slate-900'}`}>Live Telemetry</h3>
           <div className="space-y-3">
-            {telemetry.map(row => (
+            {telemetry.slice(0, 10).map(row => (
               <div key={row.id} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
                 <div>
                   <div className="text-sm font-bold">{row.hostname || row.agent_id}</div>
@@ -297,7 +238,7 @@ function formatDisk(value) {
   return `${value} MB`;
 }
 
-function StatCard({ label, value, icon: Icon, color, iconColor, darkMode }) {
+const StatCard = React.memo(({ label, value, icon: Icon, color, iconColor, darkMode }) => {
   return (
     <div className={`rounded-lg p-6 transition-all hover:shadow-lg ${darkMode ? 'bg-slate-900 border border-slate-700 hover:border-slate-600 hover:shadow-slate-900 text-white' : 'bg-white border border-slate-200 hover:border-slate-300 hover:shadow-slate-200 text-slate-900'}`}>
       <div className="flex items-start justify-between">
@@ -313,7 +254,7 @@ function StatCard({ label, value, icon: Icon, color, iconColor, darkMode }) {
       </div>
     </div>
   );
-}
+});
 
 function SeverityItem({ label, count, color, textColor }) {
   return (

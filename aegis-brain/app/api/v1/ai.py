@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user
 from app.services import ai_service
 from app.database.connection import get_db
 from app.database.models import AIMessage, AIThread, User
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 router = APIRouter(tags=["AI-Suite"])
@@ -13,10 +13,10 @@ router = APIRouter(tags=["AI-Suite"])
 
 
 class ChatRequest(BaseModel):
-    prompt: str
-    model: Optional[str] = None
+    prompt: str = Field(..., max_length=8000)
+    model: Optional[str] = Field(None, max_length=100)
     thread_id: Optional[int] = None
-    title: Optional[str] = None
+    title: Optional[str] = Field(None, max_length=255)
 
 async def get_or_create_thread(db: AsyncSession, user: User, thread_id: Optional[int], prompt: str, title: Optional[str] = None) -> AIThread:
     if thread_id is not None:
@@ -112,3 +112,21 @@ async def ai_chat(payload: ChatRequest, db: AsyncSession = Depends(get_db), user
         return response
     except ai_service.PromptInjectionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+
+@router.delete("/threads/{thread_id}")
+async def delete_thread(
+    thread_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(AIThread).where(AIThread.id == thread_id, AIThread.user_id == user.id))
+    thread = result.scalars().first()
+    if not thread:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI thread not found")
+    
+    await db.execute(
+        sa_delete(AIMessage).where(AIMessage.thread_id == thread_id)
+    )
+    await db.delete(thread)
+    await db.commit()
+    return {"status": "deleted", "thread_id": thread_id}

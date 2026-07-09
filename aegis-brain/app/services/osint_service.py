@@ -68,13 +68,38 @@ async def _abuseipdb_lookup(client: httpx.AsyncClient, ip: str) -> Dict[str, Any
     except Exception as e:
         return {"error": "exception", "message": str(e)}
 
+async def _virustotal_lookup(client: httpx.AsyncClient, ip: str) -> Dict[str, Any]:
+    if not settings.VIRUSTOTAL_API_KEY or settings.VIRUSTOTAL_API_KEY == "your_virustotal_key_here":
+        return {"error": "api_key_not_configured"}
+    url = f"https://www.virustotal.com/api/v3/ip_addresses/{ip}"
+    headers = {"x-apikey": settings.VIRUSTOTAL_API_KEY, "Accept": "application/json"}
+    try:
+        r = await client.get(url, headers=headers, timeout=10.0)
+        if r.status_code == 200:
+            data = r.json().get("data", {}).get("attributes", {})
+            last_stats = data.get("last_analysis_stats", {})
+            return {
+                "malicious": last_stats.get("malicious", 0),
+                "suspicious": last_stats.get("suspicious", 0),
+                "harmless": last_stats.get("harmless", 0),
+                "undetected": last_stats.get("undetected", 0),
+                "reputation": data.get("reputation", 0),
+                "country": data.get("country", ""),
+                "as_owner": data.get("as_owner", ""),
+            }
+        return {"error": "provider_error", "status": r.status_code}
+    except Exception as e:
+        return {"error": "exception", "message": str(e)}
+
 async def fetch_ip_info(ip: str) -> Dict[str, Any]:
     async with httpx.AsyncClient() as client:
-        shodan, abuse = await asyncio.gather(_shodan_lookup(client, ip), _abuseipdb_lookup(client, ip))
+        shodan, abuse, vt = await asyncio.gather(
+            _shodan_lookup(client, ip), _abuseipdb_lookup(client, ip), _virustotal_lookup(client, ip)
+        )
         return {
             "target": ip,
             "fetched_at": datetime.now(timezone.utc).isoformat(),
-            "sources": {"shodan": shodan, "abuseipdb": abuse}
+            "sources": {"shodan": shodan, "abuseipdb": abuse, "virustotal": vt}
         }
 
 async def fetch_domain_info(domain: str) -> Dict[str, Any]:

@@ -7,6 +7,7 @@ COPY src ./src
 RUN mvn clean package -Dmaven.test.skip=true -B
 
 FROM eclipse-temurin:21-jre-alpine
+RUN apk add --no-cache iproute2
 WORKDIR /app
 COPY --from=build /app/target/aegis-guard.jar app.jar
 

@@ -121,14 +121,16 @@ public class AegisClient {
             HttpGet request = new HttpGet(this.commandUrl);
             request.setHeader("X-Agent-Id", agentId);
             if (agentSecret != null) {
-                // For consistency, using Bearer here too if needed, 
-                // though the current endpoint doesn't strictly require it yet
                 request.setHeader("Authorization", "Bearer " + agentSecret);
             }
             return httpClient.execute(request, response -> {
                 if (response.getCode() == 200) {
                     byte[] content = response.getEntity().getContent().readAllBytes();
-                    return new String(content);
+                    String body = new String(content).trim();
+                    if (body.equals("null") || body.isEmpty()) {
+                        return null;
+                    }
+                    return body;
                 }
                 return null;
             });

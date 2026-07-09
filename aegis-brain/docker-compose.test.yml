@@ -1,0 +1,83 @@
+version: "3.9"
+
+services:
+  aegis_test_postgres:
+    image: postgres:16-alpine
+    container_name: aegis_test_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: aegis_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aegis_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+    networks:
+      - aegis_test
+
+  aegis_test_redis:
+    image: redis:7-alpine
+    container_name: aegis_test_redis
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru --requirepass test_redis_pass
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "test_redis_pass", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    networks:
+      - aegis_test
+
+  aegis_test_ollama:
+    image: ollama/ollama:latest
+    container_name: aegis_test_ollama
+    networks:
+      - aegis_test
+
+  aegis_test_brain:
+    build: .
+    container_name: aegis_test_brain
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@aegis_test_postgres:5432/aegis_test
+      - REDIS_URL=redis://:test_redis_pass@aegis_test_redis:6379
+      - REDIS_PASSWORD=test_redis_pass
+      - JWT_SECRET=test_jwt_secret_for_testing_only_32_chars_minimum_length
+      - AGENT_ENROLL_KEY=test_enrollment_token_16_chars_min
+      - MASTER_KEY_B64=Q/wCZ5reU82bQpZppUc6Qq80sybBPz4Q276NbMBF97Q=
+      - OLLAMA_URL=http://aegis_test_ollama:11434/api/generate
+      - DEBUG=true
+      - ALLOWED_ORIGINS=http://localhost:3000
+    depends_on:
+      aegis_test_postgres:
+        condition: service_healthy
+      aegis_test_redis:
+        condition: service_healthy
+    networks:
+      - aegis_test
+
+  aegis_test_runner:
+    build: .
+    container_name: aegis_test_runner
+    command: pytest tests/ -v --tb=short -x
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@aegis_test_postgres:5432/aegis_test
+      - REDIS_URL=redis://:test_redis_pass@aegis_test_redis:6379
+      - REDIS_PASSWORD=test_redis_pass
+      - JWT_SECRET=test_jwt_secret_for_testing_only_32_chars_minimum_length
+      - AGENT_ENROLL_KEY=test_enrollment_token_16_chars_min
+      - MASTER_KEY_B64=Q/wCZ5reU82bQpZppUc6Qq80sybBPz4Q276NbMBF97Q=
+      - OLLAMA_URL=http://aegis_test_ollama:11434/api/generate
+      - DEBUG=true
+    depends_on:
+      aegis_test_brain:
+        condition: service_started
+    networks:
+      - aegis_test
+    volumes:
+      - ./tests:/app/tests:ro
+
+networks:
+  aegis_test:
+    driver: bridge

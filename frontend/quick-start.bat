@@ -61,7 +61,7 @@ if not exist .env (
     echo ⚙️  Creating .env file...
     copy .env.example .env >nul
     echo ✅ .env file created with default values
-    echo    Backend URL: http://localhost:8000/api/v1
+    echo    Backend URL: https://aegis.local/api/v1
     echo    Edit .env if your backend runs on a different address
 ) else (
     echo.
@@ -73,7 +73,7 @@ echo.
 echo 🔗 Checking backend connectivity...
 where powershell >nul 2>nul
 if %errorlevel% equ 0 (
-    powershell -Command "try { $null = Invoke-WebRequest -Uri 'http://localhost:8000/api/v1/stats' -UseBasicParsing -TimeoutSec 2; Write-Host '✅ Backend is running and accessible' } catch { Write-Host '⚠️  Could not connect to backend at http://localhost:8000' }"
+    powershell -Command "try { [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}; $null = Invoke-WebRequest -Uri 'https://aegis.local/api/v1/telemetry/stats' -UseBasicParsing -TimeoutSec 2; Write-Host '✅ Backend is running and accessible' } catch { Write-Host '⚠️  Could not connect to backend at https://aegis.local (ensure hosts file has 127.0.0.1 aegis.local)' }"
 ) else (
     echo ⚠️  PowerShell not found, skipping backend check
 )
@@ -85,9 +85,10 @@ echo ║                    Ready to Start! 🚀                          ║
 echo ╚════════════════════════════════════════════════════════════════╝
 echo.
 echo 📌 Next Steps:
-echo    1. Ensure aegis-brain backend is running (http://localhost:8000)
-echo    2. Run: npm start
-echo    3. Dashboard will open at http://localhost:3000
+echo    1. Ensure aegis-brain backend is running via Docker (https://aegis.local)
+echo    2. Ensure hosts file has: 127.0.0.1 aegis.local
+echo    3. Run: npm start
+echo    4. Dashboard: https://aegis.local (production) or http://localhost:3000 (dev)
 echo.
 echo 📚 Documentation:
 echo    - README.md - Installation and feature guide

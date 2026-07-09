@@ -3,11 +3,16 @@ import {
   BarChart3,
   AlertCircle,
   Shield,
+  ShieldAlert,
   Lock,
   Globe,
   Bot,
+  Network,
   Settings,
   LogOut,
+  Activity,
+  ClipboardList,
+  Play,
 } from 'lucide-react';
 import { useDashboard } from '../context/DashboardContext';
 
@@ -26,9 +31,19 @@ export default function Sidebar() {
       icon: AlertCircle,
     },
     {
+      id: 'rules',
+      label: 'Detection Rules',
+      icon: ShieldAlert,
+    },
+    {
       id: 'agents',
       label: 'Endpoints',
       icon: Shield,
+    },
+    {
+      id: 'discovery',
+      label: 'Discovery',
+      icon: Network,
     },
     {
         id: 'osint',
@@ -44,6 +59,21 @@ export default function Sidebar() {
         id: 'vault',
         label: 'VaultX (Notes)',
         icon: Lock,
+    },
+    {
+        id: 'playbooks',
+        label: 'SOAR Playbooks',
+        icon: Play,
+    },
+    {
+        id: 'syslog',
+        label: 'Syslog Viewer',
+        icon: Activity,
+    },
+    {
+        id: 'audit',
+        label: 'Audit Log',
+        icon: ClipboardList,
     },
     {
       id: 'settings',
@@ -69,7 +99,7 @@ export default function Sidebar() {
             A
           </div>
           <div>
-            <h1 className="text-2xl font-black tracking-tighter">AEGIS XDR</h1>
+            <h1 className="text-2xl font-black tracking-tighter">AEGIS SIEM</h1>
             <p className={settings.darkMode ? 'text-[10px] text-slate-500 uppercase tracking-widest font-bold' : 'text-[10px] text-slate-500 uppercase tracking-widest font-bold'}>Secure Monolith</p>
           </div>
         </div>

@@ -4,6 +4,7 @@ import pytest
 from datetime import datetime, timezone
 from httpx import AsyncClient, ASGITransport
 from app.main import app
+from app.database.connection import get_db
 from app.database.models import Agent, Alert
 from app.core.security import hash_password, verify_password
 from sqlalchemy import select
@@ -11,7 +12,6 @@ from app.services.anomaly_engine import anomaly_engine
 
 @pytest.mark.asyncio
 async def test_anomaly_detection_creates_alert(db_session):
-    # Setup anomaly engine for test
     anomaly_engine.window_size = 10
     anomaly_engine.min_samples = 5
     anomaly_engine.threshold = 2.0
@@ -28,9 +28,12 @@ async def test_anomaly_detection_creates_alert(db_session):
         "Authorization": f"Bearer {token}"
     }
 
+    async def override_get_db():
+        yield db_session
+    app.dependency_overrides[get_db] = override_get_db
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # normal data
         for i in range(6):
             payload = {
                 "agent_id": str(agent_id),
@@ -41,7 +44,6 @@ async def test_anomaly_detection_creates_alert(db_session):
             r = await client.post("/api/v1/telemetry/report", json=payload, headers=headers)
             assert r.status_code == 200
 
-        # spike
         payload_spike = {
             "agent_id": str(agent_id),
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -51,7 +53,8 @@ async def test_anomaly_detection_creates_alert(db_session):
         r = await client.post("/api/v1/telemetry/report", json=payload_spike, headers=headers)
         assert r.status_code == 200
 
-    # verify alert
+    app.dependency_overrides.clear()
+
     result = await db_session.execute(select(Alert).where(Alert.agent_id == agent_id, Alert.event_type == "statistical_anomaly"))
     alerts = result.scalars().all()
     assert len(alerts) >= 1

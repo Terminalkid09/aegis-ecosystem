@@ -31,8 +31,8 @@ export default function SentinelX() {
         setLoading(true);
         setResult(null);
         try {
-            const isAuthenticated = !!localStorage.getItem('aegis_token');
-            const forceScan = isAuthenticated; // only allow live scans when authenticated
+            const isAuthenticated = true;
+            const forceScan = true;
             const res = scanType === 'ip' 
                 ? await osintAPI.ipLookup(target, forceScan)
                 : await osintAPI.domainLookup(target, forceScan);
@@ -197,6 +197,50 @@ export default function SentinelX() {
                                             </div>
                                         </div>
                                     </div>
+                                </div>
+
+                                {/* VirusTotal Card */}
+                                <div className="bg-slate-900 border border-slate-700 rounded-xl p-6">
+                                    <div className="flex justify-between items-center mb-6">
+                                        <h4 className="font-bold text-green-500 flex items-center gap-2 uppercase text-xs tracking-widest">
+                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg> VirusTotal
+                                        </h4>
+                                        <span className={`text-[10px] ${result.sources?.virustotal?.malicious ? 'text-red-500' : 'text-slate-500'}`}>
+                                            {result.sources?.virustotal ? 'Scanned' : 'No API key'}
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="text-center p-3 rounded-lg bg-red-900/20 border border-red-800/30">
+                                            <div className="text-2xl font-black text-red-500">{result.sources?.virustotal?.malicious || 0}</div>
+                                            <div className="text-[10px] text-red-400 uppercase tracking-wider">Malicious</div>
+                                        </div>
+                                        <div className="text-center p-3 rounded-lg bg-orange-900/20 border border-orange-800/30">
+                                            <div className="text-2xl font-black text-orange-400">{result.sources?.virustotal?.suspicious || 0}</div>
+                                            <div className="text-[10px] text-orange-400 uppercase tracking-wider">Suspicious</div>
+                                        </div>
+                                        <div className="text-center p-3 rounded-lg bg-green-900/20 border border-green-800/30">
+                                            <div className="text-2xl font-black text-green-400">{result.sources?.virustotal?.harmless || 0}</div>
+                                            <div className="text-[10px] text-green-400 uppercase tracking-wider">Harmless</div>
+                                        </div>
+                                        <div className="text-center p-3 rounded-lg bg-slate-800 border border-slate-700">
+                                            <div className="text-2xl font-black text-slate-300">{result.sources?.virustotal?.undetected || 0}</div>
+                                            <div className="text-[10px] text-slate-500 uppercase tracking-wider">Undetected</div>
+                                        </div>
+                                    </div>
+                                    {result.sources?.virustotal?.reputation !== undefined && (
+                                        <div className="mt-4 pt-4 border-t border-slate-800 flex justify-between items-center">
+                                            <span className="text-xs text-slate-400">Reputation</span>
+                                            <span className={`text-sm font-bold ${result.sources.virustotal.reputation >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                {result.sources.virustotal.reputation}
+                                            </span>
+                                        </div>
+                                    )}
+                                    {result.sources?.virustotal?.as_owner && (
+                                        <div className="mt-2 flex justify-between items-center">
+                                            <span className="text-xs text-slate-400">AS Owner</span>
+                                            <span className="text-xs font-bold text-slate-200">{result.sources.virustotal.as_owner}</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>

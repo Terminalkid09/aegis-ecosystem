@@ -1,29 +1,49 @@
-import React, { useEffect, useState } from 'react';
-import { Bot, Send, Eraser, User, MessageSquare, Plus, LogIn } from 'lucide-react';
-import { aiAPI } from '../services/api';
+import React, { useEffect, useState, useRef } from 'react';
+import { Bot, Send, Eraser, User, MessageSquare, Plus, LogIn, Trash2 } from 'lucide-react';
+import { aiAPI, invalidateCache } from '../services/api';
 import { useDashboard } from '../context/DashboardContext';
 import LoginModal from './LoginModal';
 
 export default function AIChat() {
-    const { aiChatHistory: messages, setAiChatHistory: setMessages } = useDashboard();
+    const { aiChatHistory: messages, setAiChatHistory: setMessages, user } = useDashboard();
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [threads, setThreads] = useState([]);
-    const [activeThreadId, setActiveThreadId] = useState(null);
+    const [activeThreadId, setActiveThreadId] = useState(() => {
+        try { const t = localStorage.getItem('aegis-active-thread'); return t ? Number(t) : null; } catch { return null; }
+    });
     const [authOpen, setAuthOpen] = useState(false);
     const [status, setStatus] = useState(null);
+    const initialLoadDone = useRef(false);
 
-    const isAuthenticated = () => !!localStorage.getItem('aegis_token');
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
 
     useEffect(() => {
-        loadThreads();
-        const onAuth = () => loadThreads();
-        window.addEventListener('aegis-auth-changed', onAuth);
-        return () => window.removeEventListener('aegis-auth-changed', onAuth);
-    }, []);
+        setIsAuthenticated(!!user);
+    }, [user]);
+
+    useEffect(() => {
+        if (user) loadThreads();
+    }, [user]);
+
+    // Restore active thread on mount
+    useEffect(() => {
+        if (activeThreadId && !initialLoadDone.current) {
+            initialLoadDone.current = true;
+            loadMessages(activeThreadId);
+        }
+    }, [activeThreadId]);
+
+    // Persist active thread
+    useEffect(() => {
+        try {
+            if (activeThreadId) localStorage.setItem('aegis-active-thread', String(activeThreadId));
+            else localStorage.removeItem('aegis-active-thread');
+        } catch {}
+    }, [activeThreadId]);
 
     const loadThreads = async () => {
-        if (!isAuthenticated()) {
+        if (!isAuthenticated) {
             setThreads([]);
             setActiveThreadId(null);
             setStatus('Login required before using the AI analyst.');
@@ -61,7 +81,7 @@ export default function AIChat() {
     const handleSend = async (e) => {
         e.preventDefault();
         if (!input.trim() || loading) return;
-        if (!isAuthenticated()) {
+        if (!isAuthenticated) {
             setAuthOpen(true);
             setStatus('Login required before using the AI analyst.');
             return;
@@ -76,6 +96,7 @@ export default function AIChat() {
             const res = await aiAPI.chat(input, null, activeThreadId);
             if (!activeThreadId && res.data.thread_id) {
                 setActiveThreadId(res.data.thread_id);
+                invalidateCache('ai-threads');
                 loadThreads();
             }
             const aiMsg = {
@@ -114,16 +135,16 @@ export default function AIChat() {
                     <p className="text-slate-400 mt-1">Intelligent log analysis and threat remediation advice</p>
                 </div>
                 <div className="flex gap-2">
-                    {!isAuthenticated() && (
+                    {!isAuthenticated && (
                         <button onClick={() => setAuthOpen(true)} className="inline-flex items-center gap-2 px-3 py-2 bg-cyan-700 hover:bg-cyan-600 rounded-lg text-xs font-bold">
                             <LogIn size={16}/> Login
                         </button>
                     )}
-                    <button onClick={newThread} className="p-2 text-slate-500 hover:text-white transition-colors">
-                        <Plus size={20}/>
+                    <button onClick={newThread} className="inline-flex items-center gap-1.5 px-3 py-2 bg-purple-700/40 hover:bg-purple-700/60 border border-purple-700/50 rounded-lg text-xs font-bold text-purple-300 transition-all" title="Start a new investigation">
+                        <Plus size={16}/> New Chat
                     </button>
-                    <button onClick={() => setMessages(messages.length ? [messages[0]] : [])} className="p-2 text-slate-500 hover:text-white transition-colors">
-                        <Eraser size={20}/>
+                    <button onClick={() => setMessages(messages.length ? [messages[0]] : [])} className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-bold text-slate-400 transition-all" title="Clear current conversation messages">
+                        <Eraser size={16}/> Clear
                     </button>
                 </div>
             </div>
@@ -138,15 +159,23 @@ export default function AIChat() {
                     <div className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-3">Investigations</div>
                     <div className="space-y-2">
                         {threads.map(thread => (
-                            <button
-                                key={thread.id}
-                                onClick={() => loadMessages(thread.id)}
-                                className={`w-full text-left p-3 rounded-lg border transition-all ${activeThreadId === thread.id ? 'bg-purple-950/40 border-purple-700 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}`}
-                            >
-                                <div className="flex items-center gap-2 text-xs font-bold">
-                                    <MessageSquare size={14}/>{thread.title}
-                                </div>
-                            </button>
+                            <div key={thread.id} className={`group flex items-center rounded-lg border transition-all ${activeThreadId === thread.id ? 'bg-purple-950/40 border-purple-700' : 'bg-slate-900 border-slate-800 hover:border-slate-700'}`}>
+                                <button
+                                    onClick={() => loadMessages(thread.id)}
+                                    className="flex-1 text-left p-3 min-w-0"
+                                >
+                                    <div className="flex items-center gap-2 text-xs font-bold text-slate-400 group-hover:text-white transition-colors">
+                                        <MessageSquare size={14} className="shrink-0"/>{thread.title}
+                                    </div>
+                                </button>
+                                <button
+                                    onClick={async (e) => { e.stopPropagation(); try { await aiAPI.deleteThread(thread.id); loadThreads(); if (activeThreadId === thread.id) newThread(); } catch {} }}
+                                    className="p-2 mr-1 text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                                    title="Delete investigation"
+                                >
+                                    <Trash2 size={14}/>
+                                </button>
+                            </div>
                         ))}
                         {threads.length === 0 && (
                             <div className="text-xs text-slate-600 italic">No saved investigations yet.</div>

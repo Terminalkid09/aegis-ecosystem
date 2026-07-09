@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { setAuthToken, authAPI } from '../services/api';
+import { authAPI, setAuthToken } from '../services/api';
+import { useDashboard } from '../context/DashboardContext';
 
 export default function LoginModal({ open, onClose }) {
+  const { login, checkAuth } = useDashboard();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -15,20 +17,16 @@ export default function LoginModal({ open, onClose }) {
     setLoading(true);
     setError(null);
     try {
-      const payload = { email, username: email.split('@')[0], password };
-      const res = isRegister ? await authAPI.register(payload) : await authAPI.login(email, password);
-      // authAPI.login uses axios and returns full response
-      const body = res.data || res;
-      const token = body.access_token || body.accessToken || body.token;
-      const user = body.user || body.user || body;
-      if (token) {
-        setAuthToken(token);
+      if (isRegister) {
+        const res = await authAPI.register({ email, username: email.split('@')[0], password });
+        const body = res.data || res;
+        const token = body.access_token || body.accessToken || body.token;
+        if (token) setAuthToken(token);
+        // cookie is set by backend; re-fetch user state
+        await checkAuth();
+      } else {
+        await login(email, password);
       }
-      if (body.user) {
-        try { localStorage.setItem('aegis_user', JSON.stringify(body.user)); } catch(e){}
-      }
-      // notify other components
-      window.dispatchEvent(new Event('aegis-auth-changed'));
       onClose();
     } catch (err) {
       setError(err?.response?.data?.detail || err.message || 'Login failed');

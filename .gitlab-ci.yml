@@ -1,12 +1,34 @@
 stages:
+  - lint
   - build
   - test
+  - security
   - deploy
 
 variables:
   DOCKER_DRIVER: overlay2
   JAVA_VERSION: '21'
   PYTHON_VERSION: '3.12'
+  NODE_VERSION: '18'
+
+# LINT STAGE
+lint_frontend:
+  stage: lint
+  image: node:$NODE_VERSION
+  script:
+    - cd frontend
+    - npm install
+    - npm run lint
+  allow_failure: true
+
+lint_brain:
+  stage: lint
+  image: python:$PYTHON_VERSION
+  script:
+    - cd aegis-brain
+    - pip install -r requirements.txt flake8
+    - flake8 app/ --max-line-length=120 --exclude=__pycache__,migrations
+  allow_failure: true
 
 # BUILD STAGE
 build_aegis_guard:
@@ -31,7 +53,7 @@ build_aegis_brain:
 
 build_frontend:
   stage: build
-  image: node:18
+  image: node:$NODE_VERSION
   script:
     - cd frontend
     - npm install
@@ -56,7 +78,17 @@ test_aegis_brain:
   script:
     - cd aegis-brain
     - pip install -r requirements.txt
-    - pytest
+    - pytest --import-mode=importlib -v
+
+# SECURITY STAGE
+security_scan:
+  stage: security
+  image: python:$PYTHON_VERSION
+  script:
+    - cd aegis-brain
+    - pip install -r requirements.txt bandit
+    - bandit -r app/ -x app/tests -ll
+  allow_failure: true
 
 # DEPLOY STAGE (Example)
 deploy_staging:

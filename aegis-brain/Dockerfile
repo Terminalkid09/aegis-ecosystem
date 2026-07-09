@@ -33,8 +33,9 @@ USER aegis
 
 # Assicuriamoci che i binari installati siano nel PATH
 ENV PATH=/home/aegis/.local/bin:$PATH
+ENV PYTHONPATH=/app
 
 EXPOSE 8000
 
 # Ridotto a 1 worker per gestire correttamente il consumer Redis interno
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--http", "h11"]
