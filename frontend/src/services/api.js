@@ -4,37 +4,52 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 30000,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
+const CACHE_TTL = 30000;
+const cache = new Map();
+
+function cachedGet(key, fetcher) {
+  const now = Date.now();
+  const cached = cache.get(key);
+  if (cached) {
+    if (now - cached.timestamp < CACHE_TTL) {
+      return Promise.resolve(cached.data);
+    }
+    fetcher().then(res => { cache.set(key, { data: res, timestamp: Date.now() }); }).catch(() => {});
+    return Promise.resolve(cached.data);
+  }
+  return fetcher().then(res => { cache.set(key, { data: res, timestamp: now }); return res; });
+}
+
+export function invalidateCache(prefix) {
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) cache.delete(key);
+  }
+}
+
 export const setAuthToken = (token) => {
     if (token) {
         apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-        localStorage.setItem('aegis_token', token);
+        try { localStorage.setItem('aegis-jwt', token); } catch {}
     } else {
         delete apiClient.defaults.headers.common['Authorization'];
-        localStorage.removeItem('aegis_token');
+        try { localStorage.removeItem('aegis-jwt'); } catch {}
     }
 };
 
-const savedToken = localStorage.getItem('aegis_token');
-if (savedToken) setAuthToken(savedToken);
-
-// INTERCEPTORS
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response && error.response.status === 401) {
-      localStorage.removeItem('aegis_token');
-      localStorage.removeItem('aegis_user');
-      window.dispatchEvent(new Event('aegis-auth-changed'));
+// Restore token from localStorage on module load
+try {
+    const saved = localStorage.getItem('aegis-jwt');
+    if (saved) {
+        apiClient.defaults.headers.common['Authorization'] = `Bearer ${saved}`;
     }
-    return Promise.reject(error);
-  }
-);
+} catch {};
 
 // TELEMETRY HISTORY
 export const historyAPI = {
@@ -43,22 +58,35 @@ export const historyAPI = {
 
 // ALERTS API
 export const alertsAPI = {
-  getAlerts: (params = {}) => apiClient.get('/telemetry/alerts', { params }),
+  getAlerts: (params = {}) => {
+    const cacheKey = 'alerts-' + JSON.stringify(params);
+    return cachedGet(cacheKey, () => apiClient.get('/telemetry/alerts', { params }));
+  },
   getAlert: (alertId) => apiClient.get(`/telemetry/alerts/${alertId}`),
-  resolveAlert: (alertId, resolved = true) =>
-    apiClient.patch(`/telemetry/alerts/${alertId}/resolve`, { resolved }),
+  resolveAlert: (alertId, resolved = true) => {
+    invalidateCache('alerts-');
+    return apiClient.patch(`/telemetry/alerts/${alertId}/resolve`, { resolved });
+  },
+  resolveAllAlerts: () => {
+    invalidateCache('alerts-');
+    return apiClient.post('/telemetry/alerts/resolve-all');
+  },
+  deleteAllAlerts: () => {
+    invalidateCache('alerts-');
+    return apiClient.delete('/telemetry/alerts');
+  },
 };
 
 // AGENTS API
 export const agentsAPI = {
-  getAgents: (params = {}) => apiClient.get('/telemetry/agents', { params }),
+  getAgents: (params = {}) => cachedGet('agents', () => apiClient.get('/telemetry/agents', { params })),
 };
 
 // STATS API
 export const statsAPI = {
-  getStats: (params = {}) => apiClient.get('/telemetry/stats', { params }),
-  getRecentTelemetry: (params = {}) => apiClient.get('/telemetry/recent', { params }),
-  getActivity: (params = {}) => apiClient.get('/telemetry/activity', { params }),
+  getStats: (params = {}) => cachedGet('stats', () => apiClient.get('/telemetry/stats', { params })),
+  getRecentTelemetry: (params = {}) => cachedGet('recent', () => apiClient.get('/telemetry/recent', { params })),
+  getActivity: (params = {}) => cachedGet('activity', () => apiClient.get('/telemetry/activity', { params })),
 };
 
 // VAULTX (Encrypted Notes)
@@ -86,19 +114,42 @@ export const discoveryAPI = {
   deploymentPlan: (data) => apiClient.post('/discovery/deployment/plan', data),
   autoDeploy: (data) => apiClient.post('/discovery/deploy', data, { timeout: 60000 }),
   syncAgentStatus: () => apiClient.post('/discovery/sync-agent-status'),
+  addManualHost: (data) => apiClient.post('/discovery/hosts/manual', data),
+  scanViaAgent: (agentId, data) => apiClient.post(`/discovery/scan-via-agent/${agentId}`, data, { timeout: 10000 }),
 };
 
 // AI-SUITE
 export const aiAPI = {
     chat: (prompt, model = null, threadId = null) => apiClient.post('/ai/chat', { prompt, model, thread_id: threadId }, { timeout: 300000 }),
-    getThreads: () => apiClient.get('/ai/threads'),
-    getMessages: (threadId) => apiClient.get(`/ai/threads/${threadId}/messages`),
+    getThreads: () => cachedGet('ai-threads', () => apiClient.get('/ai/threads')),
+    getMessages: (threadId) => cachedGet(`ai-messages-${threadId}`, () => apiClient.get(`/ai/threads/${threadId}/messages`)),
+    deleteThread: (threadId) => { invalidateCache('ai-threads'); invalidateCache(`ai-messages-${threadId}`); return apiClient.delete(`/ai/threads/${threadId}`); },
 };
 
 // AUTH
 export const authAPI = {
-    login: (email, password) => apiClient.post('/auth/login', { email, username: email.split('@')[0], password }),
+    login: (email, password) => apiClient.post('/auth/login', { email, password }),
     register: (data) => apiClient.post('/auth/register', data),
+    me: () => apiClient.get('/auth/me'),
+};
+
+// SYSLOG
+export const syslogAPI = {
+  getEvents: (params = {}) => apiClient.get('/syslog/events', { params }),
+};
+
+// AUDIT LOG
+export const auditAPI = {
+  getLogs: (params = {}) => apiClient.get('/audit/logs', { params }),
+};
+
+// SOAR PLAYBOOKS
+export const playbookAPI = {
+  getPlaybooks: () => apiClient.get('/soar/playbooks'),
+  createPlaybook: (data) => apiClient.post('/soar/playbooks', data),
+  updatePlaybook: (id, data) => apiClient.put(`/soar/playbooks/${id}`, data),
+  deletePlaybook: (id) => apiClient.delete(`/soar/playbooks/${id}`),
+  getExecutions: (params = {}) => apiClient.get('/soar/playbook-executions', { params }),
 };
 
 export default apiClient;
