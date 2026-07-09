@@ -94,7 +94,7 @@ export const DashboardProvider = ({ children }) => {
   useEffect(() => {
     if (!settings.autoRefresh) return;
 
-    const apiUrl = process.env.REACT_APP_API_URL || 'https://aegis.local/api/v1';
+    const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
     let token = '';
     const authHeader = apiClient.defaults.headers.common['Authorization'];
     if (authHeader) {
