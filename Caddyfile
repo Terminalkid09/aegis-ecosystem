@@ -3,6 +3,8 @@
 	auto_https disable_redirects
 }
 
+# For dev: tls internal (auto self-signed)
+# For production: tls your@email.com (Let's Encrypt ACME) with a real domain
 aegis.local {
 	tls internal
 
