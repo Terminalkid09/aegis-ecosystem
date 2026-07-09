@@ -21,6 +21,12 @@ public class SystemEvent {
     
     @SerializedName("pid")
     private long pid;
+
+    @SerializedName("parentPid")
+    private long parentPid;
+    
+    @SerializedName("parentProcessName")
+    private String parentProcessName;
     
     @SerializedName("processName")
     private String processName;
@@ -49,13 +55,21 @@ public class SystemEvent {
     @SerializedName("ipAddress")
     private String ipAddress;
 
+    @SerializedName("threadCount")
+    private int threadCount;
+
+    @SerializedName("networkConnections")
+    private com.google.gson.JsonElement networkConnections;
+
     public SystemEvent() {}
 
-    public SystemEvent(String agentId, long pid, String processName,
-                       String processPath, String user, String os,
+    public SystemEvent(String agentId, long pid, long parentPid, String parentProcessName,
+                       String processName, String processPath, String user, String os,
                        String eventType) {
         this.agentId = agentId;
         this.pid = pid;
+        this.parentPid = parentPid;
+        this.parentProcessName = parentProcessName;
         this.processName = processName;
         this.processPath = processPath;
         this.user = user;
@@ -64,6 +78,8 @@ public class SystemEvent {
         this.timestamp = Instant.now();
         this.hostname = null;
         this.ipAddress = null;
+        this.threadCount = 0;
+        this.networkConnections = com.google.gson.JsonParser.parseString("[]");
     }
 
     // Getters e Setters
@@ -75,6 +91,12 @@ public class SystemEvent {
 
     public long getPid()                    { return pid; }
     public void setPid(long v)              { this.pid = v; }
+
+    public long getParentPid()              { return parentPid; }
+    public void setParentPid(long v)        { this.parentPid = v; }
+
+    public String getParentProcessName()    { return parentProcessName; }
+    public void setParentProcessName(String v) { this.parentProcessName = v; }
 
     public String getProcessName()          { return processName; }
     public void setProcessName(String v)    { this.processName = v; }
@@ -99,10 +121,16 @@ public class SystemEvent {
 
     public String getIpAddress()            { return ipAddress; }
     public void   setIpAddress(String v)    { this.ipAddress = v; }
+
+    public int getThreadCount()             { return threadCount; }
+    public void setThreadCount(int v)       { this.threadCount = v; }
+
+    public com.google.gson.JsonElement getNetworkConnections() { return networkConnections; }
+    public void setNetworkConnections(String v) { this.networkConnections = com.google.gson.JsonParser.parseString(v); }
     
     @Override
     public String toString() {
-        return String.format("[%s] pid=%-6d %-30s os=%-8s user=%s hostname=%s ip=%s",
-                eventType, pid, processName, os, user, hostname, ipAddress);
+        return String.format("[%s] pid=%-6d ppid=%-6d %-30s os=%-8s user=%s hostname=%s ip=%s",
+                eventType, pid, parentPid, processName, os, user, hostname, ipAddress);
     }
 }

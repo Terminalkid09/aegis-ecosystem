@@ -11,11 +11,11 @@ public class Config {
     );
 
     public static final String GATEWAY_URL = getEnv(
-            "AEGIS_GATEWAY_URL", "http://localhost:8000/api/v1/telemetry/report"
+            "AEGIS_GATEWAY_URL", "https://aegis.local/api/v1/telemetry/report"
     );
 
     public static final String BRAIN_URL = getEnv(
-            "AEGIS_BRAIN_URL", "http://localhost:8000/api/v1"
+            "AEGIS_BRAIN_URL", "https://aegis.local/api/v1"
     );
 
     public static final String ENROLL_KEY = getEnvOrThrow(

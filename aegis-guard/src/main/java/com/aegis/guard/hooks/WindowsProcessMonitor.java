@@ -1,9 +1,7 @@
 package com.aegis.guard.hooks;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +20,7 @@ Implementazione Windows di ProcessMonitor.
 Usa Toolhelp32 tramite JNA per enumerare i processi attivi.
 Ad ogni ciclo rileva i processi NUOVI rispetto al ciclo precedente
 e li invia come eventi PROCESS_CREATED ad aegis-link.
+Include PPID, nome parent, thread count, e connessioni di rete.
 */
 public class WindowsProcessMonitor implements ProcessMonitor {
 
@@ -38,6 +37,9 @@ public class WindowsProcessMonitor implements ProcessMonitor {
     private final String hostname;
     private final String ipAddress;
 
+    // Cache netstat: mappa PID → JSON array di connessioni
+    private Map<Long, String> netstatCache = new HashMap<>();
+
     public WindowsProcessMonitor(AegisClient client, HashCalculator hasher, String agentId) {
         this.client  = client;
         this.hasher  = hasher;
@@ -53,20 +55,25 @@ public class WindowsProcessMonitor implements ProcessMonitor {
         running = true;
         log.info("WindowsProcessMonitor started (interval {}ms)", Config.SCAN_INTERVAL_MS);
 
-        // Popoliamo i PID già esistenti senza inviarli (solo i nuovi interessano)
         scanProcesses().forEach(e -> knownPids.add(e.getPid()));
 
         while (running) {
             try {
+                // Refresh netstat cache every cycle
+                netstatCache = parseNetstat();
+
                 List<SystemEvent> current = scanProcesses();
                 for (SystemEvent event : current) {
                     if (!knownPids.contains(event.getPid())) {
+                        // Attach network connections for this PID
+                        String conns = netstatCache.getOrDefault(event.getPid(), "[]");
+                        event.setNetworkConnections(conns);
+
                         log.info("New process detected: {}", event);
                         client.sendEvent(event);
                         knownPids.add(event.getPid());
                     }
                 }
-                // Rimuoviamo i PID che non esistono più
                 Set<Long> currentPids = new HashSet<>();
                 current.forEach(e -> currentPids.add(e.getPid()));
                 knownPids.retainAll(currentPids);
@@ -100,30 +107,23 @@ public class WindowsProcessMonitor implements ProcessMonitor {
             return events;
         }
 
+        // First pass: build pid → name map for parent resolution
+        Map<Long, String> pidNameMap = new HashMap<>();
+        List<ProcessEntry> rawEntries = new ArrayList<>();
+
         try {
             WindowsKernel32.PROCESSENTRY32 entry = new WindowsKernel32.PROCESSENTRY32();
             entry.dwSize = entry.size();
 
             if (kernel32.Process32First(snapshot, entry)) {
                 do {
+                    long pid = (long) entry.th32ProcessID;
+                    long ppid = (long) entry.th32ParentProcessID;
                     String name = Native.toString(entry.szExeFile);
-                    long   pid  = (long) entry.th32ProcessID;
+                    int threads = entry.cntThreads;
 
-                    SystemEvent event = new SystemEvent(
-                            agentId, pid, name,
-                            resolveProcessPath(pid),
-                            System.getProperty("user.name"),
-                            "Windows",
-                            "PROCESS_CREATED"
-                    );
-                    event.setHostname(hostname);
-                    event.setIpAddress(ipAddress);
-
-                    // Hash opzionale — solo se abbiamo il path
-                    if (!event.getProcessPath().isEmpty()) {
-                        event.setFileHash(hasher.calculateHash(event.getProcessPath()));
-                    }
-                    events.add(event);
+                    pidNameMap.put(pid, name);
+                    rawEntries.add(new ProcessEntry(pid, ppid, name, threads));
 
                 } while (kernel32.Process32Next(snapshot, entry));
             }
@@ -131,7 +131,78 @@ public class WindowsProcessMonitor implements ProcessMonitor {
             kernel32.CloseHandle(snapshot);
         }
 
+        String currentUser = System.getProperty("user.name");
+
+        for (ProcessEntry pe : rawEntries) {
+            String parentName = pidNameMap.getOrDefault(pe.ppid, "unknown");
+
+            SystemEvent event = new SystemEvent(
+                    agentId, pe.pid, pe.ppid, parentName,
+                    pe.name,
+                    resolveProcessPath(pe.pid),
+                    currentUser,
+                    "Windows",
+                    "PROCESS_CREATED"
+            );
+            event.setHostname(hostname);
+            event.setIpAddress(ipAddress);
+            event.setThreadCount(pe.threads);
+
+            if (!event.getProcessPath().isEmpty()) {
+                event.setFileHash(hasher.calculateHash(event.getProcessPath()));
+            }
+
+            // Attach cached netstat if available
+            String conns = netstatCache.getOrDefault(pe.pid, "[]");
+            event.setNetworkConnections(conns);
+
+            events.add(event);
+        }
+
         return events;
+    }
+
+    // Parse netstat -ano output into pid → JSON connections map
+    private Map<Long, String> parseNetstat() {
+        Map<Long, List<Map<String, String>>> connMap = new HashMap<>();
+        try {
+            ProcessBuilder pb = new ProcessBuilder("netstat", "-ano");
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes());
+            p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+
+            for (String line : out.split("\\r?\\n")) {
+                line = line.trim();
+                if (line.isEmpty()) continue;
+                String[] parts = line.split("\\s+");
+                // netstat -ano output: Proto LocalAddr RemoteAddr State PID
+                if (parts.length >= 5) {
+                    try {
+                        long pid = Long.parseLong(parts[parts.length - 1]);
+                        if (pid <= 0) continue;
+
+                        Map<String, String> conn = new LinkedHashMap<>();
+                        conn.put("proto", parts[0]);
+                        conn.put("local", parts[1]);
+                        conn.put("remote", parts[2]);
+                        conn.put("state", parts.length >= 5 ? parts[3] : "UNKNOWN");
+
+                        connMap.computeIfAbsent(pid, k -> new ArrayList<>()).add(conn);
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse netstat: {}", e.getMessage());
+        }
+
+        // Serialize to JSON
+        Map<Long, String> result = new HashMap<>();
+        com.google.gson.Gson gson = new com.google.gson.Gson();
+        for (Map.Entry<Long, List<Map<String, String>>> e : connMap.entrySet()) {
+            result.put(e.getKey(), gson.toJson(e.getValue()));
+        }
+        return result;
     }
 
     /*
@@ -162,5 +233,18 @@ public class WindowsProcessMonitor implements ProcessMonitor {
             kernel32.CloseHandle(hProcess);
         }
         return "";
+    }
+
+    // Internal struct for parsed process data
+    private static class ProcessEntry {
+        final long pid;
+        final long ppid;
+        final String name;
+        final int threads;
+
+        ProcessEntry(long pid, long ppid, String name, int threads) {
+            this.pid = pid; this.ppid = ppid;
+            this.name = name; this.threads = threads;
+        }
     }
 }

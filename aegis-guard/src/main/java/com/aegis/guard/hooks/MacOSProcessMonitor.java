@@ -1,9 +1,9 @@
 package com.aegis.guard.hooks;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,11 +21,11 @@ import com.sun.jna.Pointer;
 /**
 Implementazione macOS di ProcessMonitor.
 Usa libproc (sysctl) tramite JNA per enumerare i processi attivi.
+PPID ottenuto via ps per compatibilità.
 
 API chiave:
 proc_listallpids()  → lista di tutti i PID attivi
 proc_pidpath()      → path dell'eseguibile dato un PID
-proc_pidinfo()      → info dettagliate (non usata qui, pronta per espansioni)
  */
 public class MacOSProcessMonitor implements ProcessMonitor {
 
@@ -36,16 +36,12 @@ public class MacOSProcessMonitor implements ProcessMonitor {
     interface LibProc extends Library {
         LibProc INSTANCE = Native.load("proc", LibProc.class);
 
-        // Restituisce il numero di PID scritti nel buffer; -1 su errore. 
         int proc_listallpids(Pointer buffer, int buffersize);
-
-        // Riempie pidPathBuffer con il path dell'eseguibile; 0 su errore. 
         int proc_pidpath(int pid, Pointer pidPathBuffer, int bufferSize);
     }
 
     private static final int PROC_PIDPATHINFO_MAXSIZE = 4096;
 
-    // Campi
     private final AegisClient    client;
     private final HashCalculator hasher;
     private final String         agentId;
@@ -54,6 +50,8 @@ public class MacOSProcessMonitor implements ProcessMonitor {
 
     private final String hostname;
     private final String ipAddress;
+
+    private Map<Long, String> netstatCache = new HashMap<>();
 
     public MacOSProcessMonitor(AegisClient client, HashCalculator hasher, String agentId) {
         this.client  = client;
@@ -74,10 +72,14 @@ public class MacOSProcessMonitor implements ProcessMonitor {
 
         while (running) {
             try {
+                netstatCache = parseNetstat();
                 List<SystemEvent> current = scanProcesses();
 
                 for (SystemEvent event : current) {
                     if (!knownPids.contains(event.getPid())) {
+                        String conns = netstatCache.getOrDefault(event.getPid(), "[]");
+                        event.setNetworkConnections(conns);
+
                         log.info("New process detected: {}", event);
                         client.sendEvent(event);
                         knownPids.add(event.getPid());
@@ -109,14 +111,15 @@ public class MacOSProcessMonitor implements ProcessMonitor {
         List<SystemEvent> events = new ArrayList<>();
         LibProc libProc = LibProc.INSTANCE;
 
-        // Prima chiamata per sapere quanti PID ci sono
         int count = libProc.proc_listallpids(Pointer.NULL, 0);
         if (count <= 0) return events;
 
-        // Allochiamo buffer: ogni PID è un int (4 byte), +16 di margine
         Memory pidBuffer = new Memory((long) (count + 16) * Integer.BYTES);
         int actual = libProc.proc_listallpids(pidBuffer, (int) pidBuffer.size());
         if (actual <= 0) return events;
+
+        // Get PPID map from ps command
+        Map<Long, Long> ppidMap = getPpidMap();
 
         String currentUser = System.getProperty("user.name");
 
@@ -126,9 +129,12 @@ public class MacOSProcessMonitor implements ProcessMonitor {
 
             String path = resolveProcessPath(libProc, pid);
             String name = extractName(path, pid);
+            long ppid = ppidMap.getOrDefault((long) pid, 0L);
+            String parentName = ppid > 0 ? getProcessNameByPid(ppid) : "unknown";
 
             SystemEvent event = new SystemEvent(
-                    agentId, pid, name, path, currentUser, "macOS", "PROCESS_CREATED"
+                    agentId, pid, ppid, parentName, name,
+                    path, currentUser, "macOS", "PROCESS_CREATED"
             );
             event.setHostname(hostname);
             event.setIpAddress(ipAddress);
@@ -137,13 +143,107 @@ public class MacOSProcessMonitor implements ProcessMonitor {
                 event.setFileHash(hasher.calculateHash(path));
             }
 
+            String conns = netstatCache.getOrDefault((long) pid, "[]");
+            event.setNetworkConnections(conns);
+
             events.add(event);
         }
 
         return events;
     }
 
-    // Helpers 
+    // Parse lsof or netstat for macOS
+    private Map<Long, String> parseNetstat() {
+        Map<Long, List<Map<String, String>>> connMap = new HashMap<>();
+        try {
+            // macOS: netstat -an -p tcp with -v for PID
+            ProcessBuilder pb = new ProcessBuilder("lsof", "-i", "-P", "-n", "-T");
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes());
+            p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
+
+            for (String line : out.split("\\r?\\n")) {
+                String[] parts = line.trim().split("\\s+");
+                if (parts.length >= 9 && parts[0].equals("COMMAND") == false) {
+                    try {
+                        long pid = Long.parseLong(parts[1]);
+                        if (pid <= 0) continue;
+
+                        Map<String, String> conn = new LinkedHashMap<>();
+                        conn.put("proto", parts[parts.length - 4]);
+                        conn.put("local", parts[8]);
+                        conn.put("remote", parts.length >= 10 ? parts[8] : "");
+                        conn.put("state", parts.length >= 9 ? parts[9] : "UNKNOWN");
+                        conn.put("process", parts[0]);
+
+                        connMap.computeIfAbsent(pid, k -> new ArrayList<>()).add(conn);
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse macOS lsof: {}", e.getMessage());
+        }
+
+        Map<Long, String> result = new HashMap<>();
+        com.google.gson.Gson gson = new com.google.gson.Gson();
+        for (Map.Entry<Long, List<Map<String, String>>> e : connMap.entrySet()) {
+            result.put(e.getKey(), gson.toJson(e.getValue()));
+        }
+        return result;
+    }
+
+    // Get pid → ppid map from ps command
+    private Map<Long, Long> getPpidMap() {
+        Map<Long, Long> map = new HashMap<>();
+        try {
+            ProcessBuilder pb = new ProcessBuilder("ps", "-eo", "pid,ppid,comm");
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes());
+            p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+
+            for (String line : out.split("\\r?\\n")) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("PID")) continue;
+                String[] parts = line.split("\\s+");
+                if (parts.length >= 3) {
+                    try {
+                        long pid = Long.parseLong(parts[0]);
+                        long ppid = Long.parseLong(parts[1]);
+                        map.put(pid, ppid);
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to get PPID map: {}", e.getMessage());
+        }
+        return map;
+    }
+
+    // Get process name by PID from /proc or ps
+    private String getProcessNameByPid(long pid) {
+        try {
+            // Check /proc first (if available)
+            Path procPath = Path.of("/proc", String.valueOf(pid), "comm");
+            if (procPath.toFile().exists()) {
+                return Files.readString(procPath).strip();
+            }
+        } catch (Exception ignored) {}
+
+        // Fallback: re-query ps for this PID
+        try {
+            ProcessBuilder pb = new ProcessBuilder("ps", "-p", String.valueOf(pid), "-o", "comm=");
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes()).strip();
+            p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            if (!out.isEmpty()) return out;
+        } catch (Exception ignored) {}
+        return "unknown";
+    }
+
+    //  Helpers 
 
     private String resolveProcessPath(LibProc libProc, int pid) {
         Memory pathBuf = new Memory(PROC_PIDPATHINFO_MAXSIZE);
