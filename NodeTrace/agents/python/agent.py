@@ -101,6 +101,10 @@ class Agent:
 
         system_info = self.telemetry.get_system_info()
 
+        enroll_key = os.environ.get("AEGIS_ENROLL_KEY") or self.config.get("enroll_key")
+        if not enroll_key:
+            raise Exception("No enrollment key configured (set AEGIS_ENROLL_KEY or enroll_key in config.json)")
+
         payload = {
             "hostname": self.config["device_name"],
             "os": system_info["os"],
@@ -108,7 +112,7 @@ class Agent:
             "cpu_model": system_info["cpu_model"],
             "total_ram": system_info["total_ram"],
             "mac_address": network["mac"],
-            "enroll_key": os.environ["AEGIS_ENROLL_KEY"],
+            "enroll_key": enroll_key,
         }
 
         r = post(self.config["register_url"], json_data=payload)
@@ -140,13 +144,17 @@ class Agent:
         }
 
         headers = {"Authorization": f"Bearer {token}"}
-        post(self.config["update_url"], json_data=payload, headers=headers)
+        r = post(self.config["update_url"], json_data=payload, headers=headers)
+        if r.status_code not in (200, 201):
+            raise Exception(f"Telemetry update failed: HTTP {r.status_code}")
 
     @retry(5, 1)
     def send_heartbeat(self, token, device_id):
         payload = {"device_id": device_id}
         headers = {"Authorization": f"Bearer {token}"}
-        post(self.config["heartbeat_url"], json_data=payload, headers=headers)
+        r = post(self.config["heartbeat_url"], json_data=payload, headers=headers)
+        if r.status_code not in (200, 201):
+            raise Exception(f"Heartbeat failed: HTTP {r.status_code}")
 
     @retry(5, 1)
     def fetch_commands(self, token, device_id):
@@ -222,8 +230,22 @@ class Agent:
         else:
             Logger.info(f"Remediation command '{cmd_type}' ignored — NodeTrace is telemetry-only. Use Aegis-Guard for remediation.")
 
+    def _probe_credentials(self, token, device_id):
+        payload = {"device_id": device_id}
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            r = post(self.config["heartbeat_url"], json_data=payload, headers=headers, timeout=5)
+            return r.status_code in (200, 201)
+        except Exception:
+            return False
+
     def _ensure_registered(self):
         token, device_id = self.token_service.load()
+
+        if token and not self._probe_credentials(token, device_id):
+            Logger.warn("Stored credentials are invalid (DB reset?). Re-registering...")
+            self.token_service.clear()
+            token, device_id = None, None
 
         while not token:
             try:

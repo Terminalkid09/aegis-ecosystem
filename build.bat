@@ -25,6 +25,7 @@ if !errorlevel! neq 0 (
 )
 
 copy /y config.json dist\nodetrace-agent\config.json >nul 2>&1
+copy /y run-agent.bat dist\nodetrace-agent\run-agent.bat >nul 2>&1
 echo     Telemetry interval set to 10s for real-time updates
 rmdir /s /q build 2>nul
 del /q nodetrace-agent.spec 2>nul

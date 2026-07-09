@@ -32,6 +32,14 @@ class TokenService:
     def save(self, token, device_id):
         self._atomic_write({"token": token, "device_id": device_id})
 
+    def clear(self):
+        for path in (self.FILE, self.FILE + ".tmp"):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
     def load(self):
         if not os.path.exists(self.FILE):
             return None, None

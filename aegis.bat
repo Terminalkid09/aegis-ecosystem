@@ -132,7 +132,8 @@ goto menu_or_exit
 echo.
 
 :: Step 0: Auto-build if needed
-set "NODETRACE_EXE=%ROOT%NodeTrace\agents\python\dist\nodetrace-agent\nodetrace-agent.exe"
+set "NODETRACE_DIR=%ROOT%NodeTrace\agents\python\dist\nodetrace-agent"
+set "NODETRACE_EXE=%NODETRACE_DIR%\nodetrace-agent.exe"
 set "GUARD_JAR=%ROOT%aegis-guard\target\aegis-guard.jar"
 set "NEED_BUILD="
 if not exist "!NODETRACE_EXE!" set "NEED_BUILD=1"
@@ -149,11 +150,15 @@ if defined NEED_BUILD (
 
 echo  %YELLOW%[*] Stopping any previously running host agents...%RESET%
 taskkill /f /im nodetrace-agent.exe 2>nul
-taskkill /f /im java.exe 2>nul
-timeout /t 2 >nul
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"name='java.exe'\" | Where-Object { $_.CommandLine -like '*aegis-guard*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>nul
+ping -n 3 127.0.0.1 >nul
 
-:: Clean stale agent state so registration is fresh
+:: Clean stale agent state so registration is fresh (all known token/pid locations)
+if exist "%ROOT%token.json" del /q /f "%ROOT%token.json" 2>nul
+if exist "%ROOT%nodetrace.pid" del /q /f "%ROOT%nodetrace.pid" 2>nul
 if exist "%ROOT%NodeTrace\agents\python\token.json" del /q /f "%ROOT%NodeTrace\agents\python\token.json" 2>nul
+if exist "%NODETRACE_DIR%\token.json" del /q /f "%NODETRACE_DIR%\token.json" 2>nul
+if exist "%NODETRACE_DIR%\nodetrace.pid" del /q /f "%NODETRACE_DIR%\nodetrace.pid" 2>nul
 if exist "%ROOT%aegis-guard\secret.json" del /q /f "%ROOT%aegis-guard\secret.json" 2>nul
 if exist "%ROOT%logs" rmdir /s /q "%ROOT%logs" >nul 2>&1
 mkdir "%ROOT%logs" 2>nul
@@ -183,10 +188,19 @@ set "AEGIS_GATEWAY_URL=%NODETRACE_BASE%/telemetry/report"
 set "AEGIS_SCAN_INTERVAL_MS=10000"
 
 :: ---- NodeTrace Agent ----
+set "NODETRACE_TOKEN_FILE=%NODETRACE_DIR%\token.json"
+copy /y "%ROOT%NodeTrace\agents\python\run-agent.bat" "%NODETRACE_DIR%\run-agent.bat" >nul 2>&1
 set "PYTHONUNBUFFERED=1"
 echo  %YELLOW%[*] Starting NodeTrace Agent...%RESET%
-start "NodeTrace Agent" /B "!NODETRACE_EXE!" > "%ROOT%logs\nodetrace.txt" 2>&1
+start "NodeTrace Agent" /B cmd /c "set AEGIS_ENROLL_KEY=!ENV_KEY! && "%NODETRACE_DIR%\run-agent.bat"" > "%ROOT%logs\nodetrace.txt" 2>&1
 echo  %GREEN%  [+] NodeTrace Agent started (log: logs\nodetrace.txt)%RESET%
+ping -n 6 127.0.0.1 >nul
+findstr /i /c:"Device registered" /c:"re-enrolled" /c:"Initial telemetry sent" "%ROOT%logs\nodetrace.txt" >nul 2>&1
+if !errorlevel! neq 0 (
+    echo  %RED%  [!] NodeTrace may have failed to register. Check logs\nodetrace.txt%RESET%
+) else (
+    echo  %GREEN%  [+] NodeTrace registration/telemetry confirmed in log.%RESET%
+)
 
 :: ---- Guard Agent ----
 if not exist "!GUARD_JAR!" (
@@ -208,7 +222,7 @@ echo.
 
 :after_guard
 echo  %GREEN%[+] Host agents launched.%RESET%
-echo  %GREEN%  Logs: nodetrace.log, aegis-guard.log%RESET%
+echo  %GREEN%  Logs: logs\nodetrace.txt, logs\guard.txt%RESET%
 call :maybe_pause
 goto menu_or_exit
 
