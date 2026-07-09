@@ -26,7 +26,7 @@ class TestNodeTraceDeepTelemetry:
             "device_id": str(agent_id),
             "cpu_usage": 12.5,
             "ram_usage": 34.0,
-            "processes": ["explorer.exe"],
+            "processes": [{"name": "explorer.exe", "pid": 1234}],
             "users": [{"username": "alice", "active": True}],
             "network_flows": [{"src": "10.0.0.1", "dst": "8.8.8.8", "port": 443}],
         }
@@ -69,7 +69,7 @@ class TestNodeTraceDeepTelemetry:
             "device_id": device_id,
             "cpu_usage": 5.0,
             "ram_usage": 10.0,
-            "processes": ["systemd"],
+            "processes": [{"name": "systemd", "pid": 1}],
             "users": [{"username": "root"}],
             "network_flows": [{"proto": "tcp", "port": 22}],
         }, headers={"Authorization": f"Bearer {token}"})

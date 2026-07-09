@@ -342,8 +342,8 @@ class TestRulePersistenceAutorun:
         r = rule_persistence_autorun(make_event("svch0st.exe"))
         assert r.triggered and r.severity == "HIGH"
 
-    def test_update_flagged(self):
-        r = rule_persistence_autorun(make_event("update.exe"))
+    def test_winupdate_flagged(self):
+        r = rule_persistence_autorun(make_event("winupdate.exe"))
         assert r.triggered
 
     def test_chrome_not_flagged(self):

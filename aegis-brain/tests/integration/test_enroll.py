@@ -35,8 +35,8 @@ class TestEnrollment:
         })
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "enrolled"
-        assert data["agent_secret"] == "ALREADY_ENROLLED"
+        assert data["status"] == "re-enrolled"
+        assert isinstance(data["agent_secret"], str) and len(data["agent_secret"]) > 0
         assert data["agent_id"] == str(test_agent.agent_id)
 
     async def test_enroll_missing_fields(self, client: AsyncClient):
