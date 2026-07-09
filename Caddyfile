@@ -1,0 +1,35 @@
+{
+	# Disable automatic HTTPS for the catch-all :80 listener below
+	auto_https disable_redirects
+}
+
+aegis.local {
+	tls internal
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	@api path /api/*
+	handle @api {
+		reverse_proxy aegis-brain:8000
+	}
+
+	@ws path /ws/*
+	handle @ws {
+		reverse_proxy aegis-brain:8000
+	}
+
+	handle {
+		reverse_proxy aegis-frontend:3000
+	}
+}
+
+:80 {
+	redir https://aegis.local{uri} permanent
+}

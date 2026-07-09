@@ -38,4 +38,4 @@ ENV PYTHONPATH=/app
 EXPOSE 8000
 
 # Ridotto a 1 worker per gestire correttamente il consumer Redis interno
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--http", "h11"]

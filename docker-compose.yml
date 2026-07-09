@@ -8,7 +8,7 @@ services:
       POSTGRES_USER:     ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -25,7 +25,7 @@ services:
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-aegis_redis_pass}
     ports:
-      - "${REDIS_PORT_EXTERNAL:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT_EXTERNAL:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -35,7 +35,7 @@ services:
       retries: 5
 
   aegis-ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.3.14
     container_name: aegis-ollama
     profiles: ["ollama"]
     restart: unless-stopped
@@ -51,8 +51,9 @@ services:
     build: ./aegis-brain
     container_name: aegis-brain
     restart: unless-stopped
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--http", "h11"]
     ports:
-      - "${BRAIN_PORT_EXTERNAL:-8000}:8000"
+      - "127.0.0.1:${BRAIN_PORT_EXTERNAL:-8000}:8000"
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:password@aegis-postgres:5432/aegis}
       REDIS_URL: redis://:${REDIS_PASSWORD:-aegis_redis_pass}@aegis-redis:6379
@@ -63,6 +64,7 @@ services:
       AGENT_ENROLL_KEY: ${AGENT_ENROLL_KEY:-aegis-enrollment-tokenFor_v3.0.0}
       JWT_SECRET: ${JWT_SECRET:-aegis-dev-jwt-secret-change-me-32-chars}
       MASTER_KEY_B64: ${MASTER_KEY_B64:-Q/wCZ5reU82bQpZppUc6Qq80sybBPz4Q276NbMBF97Q=}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://aegis.local,http://localhost:3000}
       OLLAMA_URL: http://aegis-ollama:11434/api/generate
       OLLAMA_DEFAULT_MODEL: llama3
       SHODAN_API_KEY: ${SHODAN_API_KEY}
@@ -83,8 +85,8 @@ services:
     container_name: aegis-link
     restart: unless-stopped
     ports:
-      - "${LINK_PORT_EXTERNAL:-8080}:8080"
-      - "1514:1514/udp"
+      - "127.0.0.1:${LINK_PORT_EXTERNAL:-8080}:8080"
+      - "127.0.0.1:1514:1514/udp"
     environment:
       SPRING_DATA_REDIS_HOST: aegis-redis
       SPRING_DATA_REDIS_PORT: 6379
@@ -99,44 +101,74 @@ services:
       timeout: 10s
       retries: 5
 
-  aegis-guard:
-    build: ./aegis-guard
-    container_name: aegis-guard
-    profiles: ["container-agents"]
-    restart: unless-stopped
-    environment:
-      AEGIS_AGENT_ID: ${AEGIS_AGENT_ID:-agent-001}
-      AEGIS_GATEWAY_URL: http://aegis-brain:8000/api/v1/telemetry/report
-      AEGIS_BRAIN_URL: http://aegis-brain:8000/api/v1
-      AEGIS_ENROLL_KEY: ${AGENT_ENROLL_KEY:-aegis-enrollment-tokenFor_v3.0.0}
-      AEGIS_SECRET_FILE: /app/data/secret.json
-      AEGIS_SCAN_INTERVAL_MS: ${AEGIS_SCAN_INTERVAL_MS:-1000}
-    volumes:
-      - guard_data:/app/data
-    depends_on:
-      aegis-link:
-        condition: service_healthy
-      aegis-brain:
-        condition: service_healthy
-
   aegis-frontend:
     build: ./frontend
     container_name: aegis-frontend
-    profiles: ["frontend-docker"]
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./frontend/src:/app/src
     environment:
-      - REACT_APP_API_URL=http://localhost:8000/api/v1
+      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:8000/api/v1}
       - WDS_SOCKET_PORT=0
     depends_on:
-      - aegis-brain
+      aegis-brain:
+        condition: service_healthy
+
+  aegis-caddy:
+    image: caddy:2-alpine
+    container_name: aegis-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      aegis-brain:
+        condition: service_healthy
+      aegis-frontend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  aegis-backup:
+    image: postgres:16-alpine
+    container_name: aegis-backup
+    profiles: ["backup"]
+    restart: unless-stopped
+    entrypoint: |
+      sh -c "
+        apk add --no-cache curl;
+        echo '0 */6 * * * /scripts/backup-db.sh' > /etc/crontabs/root;
+        crond -f -l 2
+      "
+    environment:
+      DB_HOST: aegis-postgres
+      DB_PORT: 5432
+      DB_NAME: aegis_db
+      DB_USER: aegis_user
+      PGPASSWORD: ${POSTGRES_PASSWORD:-password}
+      BACKUP_DIR: /backups
+      RETENTION_DAYS: 7
+    volumes:
+      - ./scripts/backup-db.sh:/scripts/backup-db.sh
+      - postgres_backups:/backups
+    depends_on:
+      - aegis-postgres
 
 volumes:
   postgres_data:
   redis_data:
   ollama_data:
+  caddy_data:
+  caddy_config:
   guard_data:
   nodetrace_data:
+  postgres_backups:
