@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
 
 from app.core.security import decode_access_token, is_token_blacklisted
 from app.database.connection import AsyncSessionLocal
@@ -14,10 +14,11 @@ router = APIRouter(tags=["Live Updates"])
 
 async def _overview_snapshot():
     async with AsyncSessionLocal() as db:
-        unresolved = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False))).scalar() or 0
-        critical = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False, func.upper(Alert.severity) == "CRITICAL"))).scalar() or 0
-        high = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False, func.upper(Alert.severity) == "HIGH"))).scalar() or 0
-        medium = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False, func.upper(Alert.severity) == "MEDIUM"))).scalar() or 0
+        not_resolved = or_(Alert.is_resolved == False, Alert.is_resolved == None)
+        unresolved = (await db.execute(select(func.count(Alert.id)).where(not_resolved))).scalar() or 0
+        critical = (await db.execute(select(func.count(Alert.id)).where(not_resolved, func.upper(Alert.severity) == "CRITICAL"))).scalar() or 0
+        high = (await db.execute(select(func.count(Alert.id)).where(not_resolved, func.upper(Alert.severity) == "HIGH"))).scalar() or 0
+        medium = (await db.execute(select(func.count(Alert.id)).where(not_resolved, func.upper(Alert.severity) == "MEDIUM"))).scalar() or 0
         threshold = datetime.now(timezone.utc) - timedelta(minutes=15)
         active_agents = (await db.execute(select(func.count(Agent.agent_id)).where(Agent.last_seen >= threshold, Agent.is_demo == False))).scalar() or 0
         demo_agents = (await db.execute(select(func.count(Agent.agent_id)).where(Agent.last_seen >= threshold, Agent.is_demo == True))).scalar() or 0
@@ -49,7 +50,7 @@ async def _accept_token(token: str | None) -> bool:
 
 @router.websocket("/overview")
 async def overview_socket(websocket: WebSocket):
-    token = websocket.query_params.get("token")
+    token = websocket.query_params.get("token") or websocket.cookies.get("aegis_token")
     if not await _accept_token(token):
         await websocket.close(code=1008)
         return

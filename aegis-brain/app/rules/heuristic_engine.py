@@ -9,6 +9,13 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Process names that should NEVER trigger alerts (legitimate system/third-party processes)
+ALWAYS_ALLOW_PROCESS_NAMES = {
+    "updater.exe", "update.exe", "chrome_updater.exe", "firefox_updater.exe",
+    "msedge_updater.exe", "brave_updater.exe", "opera_autoupdate.exe",
+    "sophosupdate.exe", "sophosupdater.exe",
+}
+
 SEVERITY_WEIGHT = {
     "LOW":      1,
     "MEDIUM":   2,
@@ -65,10 +72,15 @@ def _eval_condition(event: Any, cond: Dict) -> bool:
     return False
 
 class HeuristicEngine:
-    async def analyze(self, event: Any, db: AsyncSession) -> AnalysisResult:
+    async def analyze(self, event: Any, db: Optional[AsyncSession] = None) -> AnalysisResult:
         result = AnalysisResult()
         triggered_rules: list[RuleResult] = []
         auto_remediation: Optional[str] = None
+
+        # Skip analysis for known legitimate processes
+        proc_name = getattr(event, "process_name", None) or getattr(event, "name", None)
+        if proc_name and proc_name.lower().strip() in ALWAYS_ALLOW_PROCESS_NAMES:
+            return result
 
         # 1. Evaluate Static Definitions
         for rule_fn in ALL_RULES:
@@ -79,58 +91,59 @@ class HeuristicEngine:
             except Exception as e:
                 logger.error("Error in static rule: %s", str(e))
 
-        # 2. Evaluate Dynamic Database Rules
-        try:
-            custom_rules_result = await db.execute(select(CustomRule).where(CustomRule.is_active == True))
-            custom_rules = custom_rules_result.scalars().all()
+        # 2. Evaluate Dynamic Database Rules (skip if no db session)
+        if db is not None:
+            try:
+                custom_rules_result = await db.execute(select(CustomRule).where(CustomRule.is_active == True))
+                custom_rules = custom_rules_result.scalars().all()
 
-            for crule in custom_rules:
-                try:
-                    if not _check_whitelist(crule, getattr(event, "hostname", None), getattr(event, "ip_address", None)):
-                        continue
+                for crule in custom_rules:
+                    try:
+                        if not _check_whitelist(crule, getattr(event, "hostname", None), getattr(event, "ip_address", None)):
+                            continue
 
-                    matched = False
-                    conditions = crule.conditions
+                        matched = False
+                        conditions = crule.conditions
 
-                    if conditions and isinstance(conditions, dict):
-                        logic = conditions.get("logic", "and")
-                        items = conditions.get("conditions", [])
-                        if logic == "or":
-                            matched = any(_eval_condition(event, c) for c in items)
+                        if conditions and isinstance(conditions, dict):
+                            logic = conditions.get("logic", "and")
+                            items = conditions.get("conditions", [])
+                            if logic == "or":
+                                matched = any(_eval_condition(event, c) for c in items)
+                            else:
+                                matched = all(_eval_condition(event, c) for c in items)
                         else:
-                            matched = all(_eval_condition(event, c) for c in items)
-                    else:
-                        # Single-field fallback
-                        field_val = getattr(event, crule.target_field, None)
-                        if field_val and isinstance(field_val, str):
-                            matched = bool(re.search(crule.pattern, field_val, re.IGNORECASE))
+                            # Single-field fallback
+                            field_val = getattr(event, crule.target_field, None)
+                            if field_val and isinstance(field_val, str):
+                                matched = bool(re.search(crule.pattern, field_val, re.IGNORECASE))
 
-                    if matched:
-                        triggered_rules.append(RuleResult(
-                            triggered=True,
-                            severity=crule.severity,
-                            description=f"[CUSTOM RULE: {crule.name}] Match on {crule.target_field}='{getattr(event, crule.target_field, '')}'",
-                            mitre_tactic=crule.mitre_tactic,
-                            mitre_technique=crule.mitre_technique,
-                            mitre_technique_id=crule.mitre_technique_id,
-                        ))
+                        if matched:
+                            triggered_rules.append(RuleResult(
+                                triggered=True,
+                                severity=crule.severity,
+                                description=f"[CUSTOM RULE: {crule.name}] Match on {crule.target_field}='{getattr(event, crule.target_field, '')}'",
+                                mitre_tactic=crule.mitre_tactic,
+                                mitre_technique=crule.mitre_technique,
+                                mitre_technique_id=crule.mitre_technique_id,
+                            ))
 
-                        # Update counter
-                        now = datetime.now(timezone.utc)
-                        await db.execute(
-                            update(CustomRule)
-                            .where(CustomRule.id == crule.id)
-                            .values(trigger_count=CustomRule.trigger_count + 1, last_triggered=now)
-                        )
+                            # Update counter
+                            now = datetime.now(timezone.utc)
+                            await db.execute(
+                                update(CustomRule)
+                                .where(CustomRule.id == crule.id)
+                                .values(trigger_count=CustomRule.trigger_count + 1, last_triggered=now)
+                            )
 
-                        if crule.auto_remediation:
-                            auto_remediation = crule.auto_remediation
+                            if crule.auto_remediation:
+                                auto_remediation = crule.auto_remediation
 
-                except Exception as e:
-                    logger.error("Error evaluating custom rule '%s': %s", crule.name, str(e))
+                    except Exception as e:
+                        logger.error("Error evaluating custom rule '%s': %s", crule.name, str(e))
 
-        except Exception as e:
-            logger.error("Error fetching custom rules: %s", str(e))
+            except Exception as e:
+                logger.error("Error fetching custom rules: %s", str(e))
 
         if not triggered_rules:
             return result

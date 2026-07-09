@@ -1,3 +1,4 @@
+import time
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
@@ -8,11 +9,21 @@ from app.database.connection import get_db
 from app.database.models import CustomRule
 from app.core.deps import get_current_user
 from app.rules.rule_definitions import STATIC_RULES, ALL_RULES, EventSchema
+
 from app.rules.heuristic_engine import HeuristicEngine
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["Rules Engine"])
+
+_rules_cache = None
+_rules_cache_time = 0.0
+_rules_cache_ttl = 60
+
+def _invalidate_rules_cache():
+    global _rules_cache, _rules_cache_time
+    _rules_cache = None
+    _rules_cache_time = 0.0
 
 class RuleCreate(BaseModel):
     name: str
@@ -21,9 +32,10 @@ class RuleCreate(BaseModel):
     pattern: str = ""
     severity: str = "MEDIUM"
     is_active: bool = True
+    mitre_tactic_id: Optional[str] = None
     mitre_tactic: Optional[str] = None
-    mitre_technique: Optional[str] = None
     mitre_technique_id: Optional[str] = None
+    mitre_technique: Optional[str] = None
     conditions: Optional[Dict[str, Any]] = None
     whitelist: Optional[Dict[str, Any]] = None
     auto_remediation: Optional[str] = None
@@ -36,9 +48,10 @@ class RuleOut(BaseModel):
     pattern: str
     severity: str
     is_active: bool
+    mitre_tactic_id: Optional[str] = None
     mitre_tactic: Optional[str] = None
-    mitre_technique: Optional[str] = None
     mitre_technique_id: Optional[str] = None
+    mitre_technique: Optional[str] = None
     conditions: Optional[Dict[str, Any]] = None
     whitelist: Optional[Dict[str, Any]] = None
     auto_remediation: Optional[str] = None
@@ -51,6 +64,7 @@ class StaticRuleOut(BaseModel):
     name: str
     severity: str
     description: str
+    mitre_tactic_id: Optional[str] = None
     mitre_tactic: str
     mitre_technique: str
     mitre_technique_id: str
@@ -67,8 +81,15 @@ class RuleTestResult(BaseModel):
 
 @router.get("/", response_model=List[RuleOut])
 async def get_rules(db: AsyncSession = Depends(get_db), current_user = Depends(get_current_user)):
+    global _rules_cache, _rules_cache_time
+    now = time.monotonic()
+    if now - _rules_cache_time < _rules_cache_ttl and _rules_cache:
+        return _rules_cache
     result = await db.execute(select(CustomRule).order_by(CustomRule.created_at.desc()))
-    return result.scalars().all()
+    rules = result.scalars().all()
+    _rules_cache = rules
+    _rules_cache_time = now
+    return rules
 
 @router.get("/static", response_model=List[StaticRuleOut])
 async def get_static_rules(current_user = Depends(get_current_user)):
@@ -126,6 +147,7 @@ async def create_rule(rule: RuleCreate, db: AsyncSession = Depends(get_db), curr
     db.add(db_rule)
     await db.commit()
     await db.refresh(db_rule)
+    _invalidate_rules_cache()
     return db_rule
 
 @router.get("/{rule_id}", response_model=RuleOut)
@@ -145,6 +167,7 @@ async def update_rule(rule_id: int, updates: Dict[str, Any] = Body(...), db: Asy
             setattr(rule, key, value)
     await db.commit()
     await db.refresh(rule)
+    _invalidate_rules_cache()
     return rule
 
 @router.delete("/{rule_id}")

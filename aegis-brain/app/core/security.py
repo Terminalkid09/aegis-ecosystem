@@ -8,8 +8,14 @@ from app.core.config import settings
 # Client Redis Asincrono
 redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
-# Password hashing context
-pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
+# Password hashing context (fast Argon2id params for local deployment)
+pwd_context = CryptContext(
+    schemes=["argon2", "bcrypt"],
+    deprecated="auto",
+    argon2__time_cost=1,
+    argon2__memory_cost=4096,
+    argon2__parallelism=1,
+)
 
 
 def hash_password(password: str) -> str:

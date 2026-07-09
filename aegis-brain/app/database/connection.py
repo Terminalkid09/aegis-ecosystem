@@ -6,7 +6,11 @@ from app.database import models  # noqa: F401 - register SQLAlchemy models in Ba
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
-    future=True
+    future=True,
+    pool_size=30,
+    max_overflow=50,
+    pool_pre_ping=True,
+    pool_timeout=60
 )
 
 AsyncSessionLocal = async_sessionmaker(

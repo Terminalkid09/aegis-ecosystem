@@ -30,7 +30,7 @@ class TelemetryUpdate(BaseModel):
     ip_public: Optional[str] = None
     geo_country: Optional[str] = None
     geo_city: Optional[str] = None
-    processes: List[str] = Field(default_factory=list)
+    processes: List[Dict[str, Any]] = Field(default_factory=list)
     disk_free: Optional[int] = None
     disk_total: Optional[int] = None
     network_sent: Optional[int] = None
@@ -71,17 +71,28 @@ async def register_agent(payload: RegisterRequest, db: AsyncSession = Depends(ge
     # Check for existing agent
     result = await db.execute(select(Agent).where(Agent.hostname == payload.hostname, Agent.os_type == payload.os))
     existing = result.scalars().first()
-    
+
     if existing:
+        # Re-enroll: issue a fresh token so agent can authenticate again
+        new_token = f"nt-{uuid.uuid4().hex[:16]}"
+        existing.device_token_hash = hash_password(new_token)
+        existing.last_seen = datetime.now(timezone.utc)
+        await db.commit()
+
+        # Update redis cache
+        import redis.asyncio as aioredis
+        rc = aioredis.from_url(settings.REDIS_URL)
+        await rc.set(f"auth:agent:{new_token}", str(existing.agent_id))
+
         return {
             "device_id": str(existing.agent_id),
-            "device_token": "ALREADY_REGISTERED",
-            "status": "registered"
+            "device_token": new_token,
+            "status": "re-enrolled"
         }
 
     agent_id = uuid.uuid4()
     token = f"nt-{uuid.uuid4().hex[:16]}"
-    
+
     agent = Agent(
         agent_id=agent_id,
         hostname=payload.hostname,
@@ -91,12 +102,12 @@ async def register_agent(payload: RegisterRequest, db: AsyncSession = Depends(ge
     )
     db.add(agent)
     await db.commit()
-    
+
     # Also cache for link-style auth if needed
     import redis.asyncio as redis
     rc = redis.from_url(settings.REDIS_URL)
     await rc.set(f"auth:agent:{token}", str(agent_id))
-    
+
     return {
         "device_id": str(agent_id),
         "device_token": token,
@@ -132,7 +143,7 @@ async def update_telemetry(
         users=payload.users,
         network_flows=payload.network_flows
     )
-    
+
     # Process through the standard telemetry service
     data = event.model_dump()
     data.update({
@@ -173,13 +184,13 @@ async def get_commands(
     authorization: str = Header(..., alias="Authorization")
 ):
     await verify_nodetrace_agent(device_id, authorization, db)
-    
+
     import redis.asyncio as redis
     rc = redis.from_url(settings.REDIS_URL, decode_responses=True)
     queue_name = f"aegis:commands:{device_id}"
-    
+
     command = await rc.lpop(queue_name)
     if command:
         return json.loads(command)
-    
+
     return None
