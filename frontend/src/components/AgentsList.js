@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Shield, Cloud, Laptop, Clock, Cpu, Zap, Activity } from 'lucide-react';
 import { agentsAPI, statsAPI } from '../services/api';
 import { useDashboard } from '../context/DashboardContext';
 
 export default function AgentsList() {
-  const { refreshTrigger, settings } = useDashboard();
+  const { refreshTrigger, settings, showDemo, setShowDemo } = useDashboard();
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -12,16 +12,20 @@ export default function AgentsList() {
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [agentTelemetry, setAgentTelemetry] = useState(null);
   const [loadingTelemetry, setLoadingTelemetry] = useState(false);
-  const [showDemo, setShowDemo] = useState(false);
+  const initialLoad = useRef(true);
 
   useEffect(() => {
     fetchAgents();
-  }, [refreshTrigger]);
+  }, [refreshTrigger, showDemo]);
 
   const fetchAgents = async () => {
-    try {
+    if (initialLoad.current) {
       setLoading(true);
-      const response = await agentsAPI.getAgents({ limit: 1000 });
+    }
+    try {
+      const params = { limit: 1000 };
+      if (showDemo) { params.include_demo = true; }
+      const response = await agentsAPI.getAgents(params);
       setAgents(response.data || []);
       setError(null);
     } catch (err) {
@@ -29,6 +33,7 @@ export default function AgentsList() {
       console.error('Agents fetch error:', err);
     } finally {
       setLoading(false);
+      initialLoad.current = false;
     }
   };
 

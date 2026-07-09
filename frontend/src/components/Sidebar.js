@@ -10,6 +10,9 @@ import {
   Network,
   Settings,
   LogOut,
+  Activity,
+  ClipboardList,
+  Play,
 } from 'lucide-react';
 import { useDashboard } from '../context/DashboardContext';
 
@@ -58,6 +61,21 @@ export default function Sidebar() {
         icon: Lock,
     },
     {
+        id: 'playbooks',
+        label: 'SOAR Playbooks',
+        icon: Play,
+    },
+    {
+        id: 'syslog',
+        label: 'Syslog Viewer',
+        icon: Activity,
+    },
+    {
+        id: 'audit',
+        label: 'Audit Log',
+        icon: ClipboardList,
+    },
+    {
       id: 'settings',
       label: 'Settings',
       icon: Settings,
@@ -81,7 +99,7 @@ export default function Sidebar() {
             A
           </div>
           <div>
-            <h1 className="text-2xl font-black tracking-tighter">AEGIS XDR</h1>
+            <h1 className="text-2xl font-black tracking-tighter">AEGIS SIEM</h1>
             <p className={settings.darkMode ? 'text-[10px] text-slate-500 uppercase tracking-widest font-bold' : 'text-[10px] text-slate-500 uppercase tracking-widest font-bold'}>Secure Monolith</p>
           </div>
         </div>

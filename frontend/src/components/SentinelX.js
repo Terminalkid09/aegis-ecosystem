@@ -31,8 +31,8 @@ export default function SentinelX() {
         setLoading(true);
         setResult(null);
         try {
-            const isAuthenticated = !!localStorage.getItem('aegis_token');
-            const forceScan = isAuthenticated; // only allow live scans when authenticated
+            const isAuthenticated = true;
+            const forceScan = true;
             const res = scanType === 'ip' 
                 ? await osintAPI.ipLookup(target, forceScan)
                 : await osintAPI.domainLookup(target, forceScan);

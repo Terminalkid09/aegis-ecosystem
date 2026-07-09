@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCcw } from 'lucide-react';
 import { DashboardProvider, useDashboard } from './context/DashboardContext';
+import { statsAPI, agentsAPI, alertsAPI } from './services/api';
 import Sidebar from './components/Sidebar';
+import ErrorBoundary from './components/ErrorBoundary';
 import DashboardOverview from './components/DashboardOverview';
 import AlertsTable from './components/AlertsTable';
 import AgentsList from './components/AgentsList';
@@ -11,30 +13,34 @@ import AIChat from './components/AIChat';
 import Settings from './components/Settings';
 import RulesManager from './components/RulesManager';
 import DiscoveryCenter from './components/DiscoveryCenter';
+import SyslogViewer from './components/SyslogViewer';
+import AuditLogViewer from './components/AuditLogViewer';
+import PlaybookManager from './components/PlaybookManager';
 import AuthButton from './components/AuthButton';
 import './styles/index.css';
 
 function AppContent() {
-  const { currentPage, manualRefresh, settings } = useDashboard();
-  const [user, setUser] = useState(null);
+  const { currentPage, setCurrentPage, manualRefresh, settings, user, checkAuth } = useDashboard();
 
   useEffect(() => {
-    const load = () => {
-      try {
-        const u = JSON.parse(localStorage.getItem('aegis_user'));
-        setUser(u);
-      } catch {
-        setUser(null);
-      }
-    };
-    load();
-    window.addEventListener('storage', load);
-    window.addEventListener('aegis-auth-changed', load);
-    return () => {
-      window.removeEventListener('storage', load);
-      window.removeEventListener('aegis-auth-changed', load);
-    };
-  }, []);
+    checkAuth();
+  }, [checkAuth]);
+
+  useEffect(() => {
+    window.addEventListener('aegis-navigate', (e) => {
+      if (e.detail) setCurrentPage(e.detail);
+    });
+  }, [setCurrentPage]);
+
+  // Prefetch dashboard data as soon as user is known
+  useEffect(() => {
+    if (!user) return;
+    statsAPI.getStats();
+    statsAPI.getRecentTelemetry({ limit: 50 });
+    statsAPI.getActivity({ limit: 10 });
+    agentsAPI.getAgents({ limit: 1000 });
+    alertsAPI.getAlerts({ is_resolved: false, limit: 500 });
+  }, [user]);
 
   const renderContent = () => {
     if (!user) {
@@ -45,37 +51,32 @@ function AppContent() {
             </div>
         );
     }
-    switch (currentPage) {
-      case 'dashboard':
-        return <DashboardOverview />;
-      case 'alerts':
-        return <AlertsTable />;
-      case 'agents':
-        return <AgentsList />;
-      case 'vault':
-        return <VaultX />;
-      case 'osint':
-        return <SentinelX />;
-      case 'ai':
-        return <AIChat />;
-      case 'settings':
-        return <Settings />;
-      case 'rules':
-        return <RulesManager />;
-      case 'discovery':
-        return <DiscoveryCenter />;
-      default:
-        return <DashboardOverview />;
-    }
+    const pages = {
+      dashboard: <DashboardOverview />,
+      alerts: <AlertsTable />,
+      agents: <AgentsList />,
+      vault: <VaultX />,
+      osint: <SentinelX />,
+      ai: <AIChat />,
+      settings: <Settings />,
+      rules: <RulesManager />,
+      discovery: <DiscoveryCenter />,
+      syslog: <SyslogViewer />,
+      audit: <AuditLogViewer />,
+      playbooks: <PlaybookManager />,
+    };
+    return (
+      <ErrorBoundary key={currentPage} fallbackMessage={`Failed to load ${currentPage} view.`}>
+        {pages[currentPage] || <DashboardOverview />}
+      </ErrorBoundary>
+    );
   };
 
-  const outerClass = settings.darkMode
-    ? 'flex h-screen bg-slate-950 text-slate-100'
-    : 'flex h-screen bg-slate-100 text-slate-900';
+  const outerClass = 'flex h-screen bg-slate-950 text-slate-100';
 
   const barClass = settings.darkMode
     ? 'bg-gradient-to-r from-slate-900 to-slate-900 border-b border-slate-800'
-    : 'bg-gradient-to-r from-slate-200 to-slate-100 border-b border-slate-300';
+    : 'bg-gradient-to-r from-indigo-50/80 to-white border-b border-indigo-100';
 
   return (
     <div className={outerClass}>
@@ -108,8 +109,8 @@ function AppContent() {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 overflow-auto bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]">
-          <div className="p-8 max-w-[1600px] mx-auto">{renderContent()}</div>
+          <div className="flex-1 overflow-auto" style={{ backgroundColor: 'var(--bg-body)', backgroundImage: 'var(--bg-gradient)' }}>
+          <div key={currentPage} className="p-8 max-w-[1600px] mx-auto page-enter">{renderContent()}</div>
         </div>
       </div>
     </div>

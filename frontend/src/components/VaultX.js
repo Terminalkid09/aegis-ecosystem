@@ -82,7 +82,7 @@ export default function VaultX() {
                     <p className="text-slate-400 mt-1">End-to-end encrypted notes with AES-256-GCM Envelope Encryption</p>
                 </div>
                 <div className="flex items-center gap-2 px-3 py-1 bg-cyan-900/20 border border-cyan-800 rounded text-cyan-400 text-xs font-bold uppercase tracking-widest">
-                    <ShieldCheck size={14}/> Military Grade Security Active
+                    <ShieldCheck size={14}/> AES-256-GCM Encrypted
                 </div>
             </div>
 
