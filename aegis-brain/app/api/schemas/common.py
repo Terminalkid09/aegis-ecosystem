@@ -41,10 +41,17 @@ class AlertResponse(BaseSchema):
     timestamp: datetime
     severity: str
     pid: Optional[int] = None
+    parent_pid: Optional[int] = None
+    parent_process_name: Optional[str] = None
     process_name: str
+    process_path: Optional[str] = None
     event_type: str
     description: str
     is_resolved: bool
+    mitre_tactic_id: Optional[str] = None
+    mitre_technique_id: Optional[str] = None
+    mitre_tactic_name: Optional[str] = None
+    mitre_technique_name: Optional[str] = None
 
 class AgentResponse(BaseSchema):
     agent_id: UUIDStr
@@ -72,10 +79,13 @@ class EventSchema(BaseModel):
     
     # Process Info
     pid: Optional[int] = None
+    parent_pid: Optional[int] = Field(None, alias="parentPid")
+    parent_process_name: Optional[str] = Field(None, max_length=255, alias="parentProcessName")
     process_name: Optional[str] = Field(None, max_length=255)
     process_path: Optional[str] = Field(None, max_length=1024)
     user: Optional[str] = Field(None, max_length=255)
     file_hash: Optional[str] = Field(None, max_length=64)
+    thread_count: Optional[int] = Field(None, alias="threadCount")
     
     # Metrics
     cpu_usage: Optional[float] = None
@@ -87,6 +97,9 @@ class EventSchema(BaseModel):
     processes: Optional[List[Dict[str, Any]]] = Field(None, max_length=500)
     users: Optional[List[Dict[str, Any]]] = None
     network_flows: Optional[List[Dict[str, Any]]] = None
+
+    # Security signals
+    network_connections: Optional[List[Dict[str, Any]]] = Field(None, alias="networkConnections")
 
 class StatsResponse(BaseModel):
     total_alerts: int

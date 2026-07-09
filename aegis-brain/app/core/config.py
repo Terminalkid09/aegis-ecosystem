@@ -9,10 +9,10 @@ class Settings(BaseSettings):
     # App Config
     APP_NAME: str = "Aegis-Brain"
     DEBUG: bool = False
-    ALLOWED_ORIGINS: str = "http://localhost:3000"
+    ALLOWED_ORIGINS: str = "https://aegis.local,http://localhost:3000"
 
     # Database & Redis
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/aegis"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres@localhost:5432/aegis"
     DB_BOOTSTRAP_CREATE_ALL: bool = False
     
     @field_validator("DATABASE_URL", mode="before")

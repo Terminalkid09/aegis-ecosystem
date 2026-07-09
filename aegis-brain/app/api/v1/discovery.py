@@ -3,6 +3,7 @@ import ipaddress
 import os
 import platform
 import re
+import shlex
 import socket
 import subprocess
 import uuid
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.agent_deps import get_current_agent
 from app.core.deps import get_current_user
 from app.database.connection import get_db
 from app.database.models import Agent, DiscoveredHost, IPReputation, Note
@@ -104,13 +106,17 @@ async def _arp_scan_local(cidr: str) -> List[Dict[str, str]]:
 
 
 async def _ping_host(ip: str) -> bool:
-    is_windows = platform.system() == "Windows"
-    param = "-n 1 -w 500" if is_windows else "-c 1 -W 1"
     try:
-        proc = await asyncio.create_subprocess_shell(
-            f"ping {param} {ip}", stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    is_windows = platform.system() == "Windows"
+    args = ["ping", "-n", "1", "-w", "500", ip] if is_windows else ["ping", "-c", "1", "-W", "1", ip]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-        stdout, _ = await proc.communicate()
+        await proc.communicate()
         return proc.returncode == 0
     except Exception:
         return False
@@ -200,6 +206,18 @@ async def _check_port(ip: str, port: int, timeout: float) -> Optional[int]:
         return None
 
 
+def _sanitize_cred(s: str) -> str:
+    """Strip shell-dangerous characters from a credential string."""
+    return re.sub(r"[^\w@.\-\\/]", "", s)
+
+
+def _validate_ip_or_raise(ip: str):
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid IP address: {ip}") from exc
+
+
 def _safe_network(cidr: str):
     try:
         network = ipaddress.ip_network(cidr, strict=False)
@@ -276,14 +294,26 @@ async def scan_network(payload: DiscoveryScanRequest, db: AsyncSession = Depends
     arp_hosts = await _arp_scan_local(payload.cidr) if payload.fast_scan else []
     arp_ips = {h["ip"] for h in arp_hosts}
 
+    # Fallback: known agents from DB
+    known_ips = set()
+    try:
+        agent_result = await db.execute(select(Agent.ip_address).where(Agent.ip_address != None))
+        known_ips = {row[0] for row in agent_result.all() if row[0]}
+        known_hosts_result = await db.execute(select(DiscoveredHost.ip_address))
+        known_ips |= {row[0] for row in known_hosts_result.all() if row[0]}
+    except Exception:
+        pass
+
+    all_addrs = list(network.hosts()) if network.num_addresses > 2 else list(network)
     ping_tasks = {}
-    for addr in network.hosts() if network.num_addresses > 2 else network:
+    for addr in all_addrs:
         ip = str(addr)
-        if ip in arp_ips:
+        if ip in arp_ips or ip in known_ips:
             continue
         ping_tasks[ip] = asyncio.ensure_future(_ping_host(ip))
 
-    live_ips = set(arp_ips)
+    known_in_network = known_ips & {str(addr) for addr in all_addrs}
+    live_ips = set(arp_ips) | known_in_network
     for ip, task in ping_tasks.items():
         if await task:
             live_ips.add(ip)
@@ -296,7 +326,8 @@ async def scan_network(payload: DiscoveryScanRequest, db: AsyncSession = Depends
         discovered.append(host)
 
     if payload.include_unreachable:
-        for addr in network.hosts() if network.num_addresses > 2 else network:
+        all_addrs2 = list(network.hosts()) if network.num_addresses > 2 else list(network)
+        for addr in all_addrs2:
             ip = str(addr)
             if ip not in live_ips:
                 host = await _upsert_host(db, ip, [], source="scan")
@@ -427,37 +458,64 @@ async def deployment_plan(payload: DeploymentPlanRequest, db: AsyncSession = Dep
                         if "user:" in line.lower() or "username:" in line.lower():
                             creds["username"] = line.split(":", 1)[1].strip()
 
-    if payload.method == "winrm" and creds["username"] and creds["password"]:
-        deploy_command = (
-            f"powershell -Command \"$secpass=ConvertTo-SecureString '{creds['password']}' -AsPlainText -Force; "
-            f"$cred=New-Object System.Management.Automation.PSCredential('{creds['username']}', $secpass); "
-            f"Invoke-Command -ComputerName {payload.ip_address} -Credential $cred -ScriptBlock {{ "
-        )
+    _validate_ip_or_raise(payload.ip_address)
+    safe_user = _sanitize_cred(creds["username"] or "")
+    safe_pass = _sanitize_cred(creds["password"] or "")
+
+    if payload.method == "winrm" and safe_user and safe_pass:
+        quoted_pass = shlex.quote(safe_pass)
+        quoted_user = shlex.quote(safe_user)
         if payload.agent_type == "aegis-guard":
-            deploy_command += (
-                "Invoke-WebRequest -Uri 'http://aegis-brain:8000/api/v1/enroll/download/aegis-guard.exe' -OutFile 'C:\\AegisGuard\\aegis-guard.exe'; "
-                "Start-Process -FilePath 'C:\\AegisGuard\\aegis-guard.exe' -NoNewWindow -RedirectStandardOutput 'C:\\AegisGuard\\install.log' }}"
+            deploy_command = (
+                f"powershell -Command \"$secpass=ConvertTo-SecureString {quoted_pass} -AsPlainText -Force; "
+                f"$cred=New-Object System.Management.Automation.PSCredential({quoted_user}, $secpass); "
+                f"$s=New-PSSession -ComputerName {payload.ip_address} -Credential $cred; "
+                f"Invoke-Command -Session $s -ScriptBlock {{ New-Item -ItemType Directory -Force -Path 'C:\\AegisGuard' }}; "
+                f"Copy-Item -ToSession $s -Path 'aegis-guard\\target\\aegis-guard.jar' -Destination 'C:\\AegisGuard\\aegis-guard.jar'; "
+                f"Invoke-Command -Session $s -ScriptBlock {{ "
+                f"Start-Process -FilePath 'java' -ArgumentList '-jar','C:\\AegisGuard\\aegis-guard.jar' -NoNewWindow "
+                f"}}; Remove-PSSession $s\""
             )
         else:
-            deploy_command += (
-                "Invoke-WebRequest -Uri 'http://aegis-brain:8000/api/v1/enroll/download/nodetrace.py' -OutFile 'C:\\NodeTrace\\agent.py'; "
-                "Start-Process -FilePath 'python' -ArgumentList 'C:\\NodeTrace\\agent.py' -NoNewWindow }}"
+            deploy_command = (
+                f"powershell -Command \"$secpass=ConvertTo-SecureString {quoted_pass} -AsPlainText -Force; "
+                f"$cred=New-Object System.Management.Automation.PSCredential({quoted_user}, $secpass); "
+                f"$s=New-PSSession -ComputerName {payload.ip_address} -Credential $cred; "
+                f"Invoke-Command -Session $s -ScriptBlock {{ New-Item -ItemType Directory -Force -Path 'C:\\NodeTrace' }}; "
+                f"Copy-Item -ToSession $s -Path 'NodeTrace\\agents\\python\\dist\\nodetrace-agent\\*' -Destination 'C:\\NodeTrace\\' -Recurse -Force; "
+                f"Invoke-Command -Session $s -ScriptBlock {{ "
+                f"Start-Process -FilePath 'C:\\NodeTrace\\nodetrace-agent.exe' -NoNewWindow "
+                f"}}; Remove-PSSession $s\""
             )
         payload_method = "winrm"
-    elif payload.method == "ssh" and creds["username"] and creds["password"]:
-        agent_script = "python3 NodeTrace/agents/python/agent.py" if payload.agent_type == "nodetrace" else "java -jar aegis-guard.jar"
-        deploy_command = f"sshpass -p '{creds['password']}' ssh -o StrictHostKeyChecking=no {creds['username']}@{payload.ip_address} '{agent_script} &'"
+    elif payload.method == "ssh" and safe_user and safe_pass:
+        if payload.agent_type == "aegis-guard":
+            deploy_command = (
+                f"sshpass -p {shlex.quote(safe_pass)} scp -o StrictHostKeyChecking=no "
+                f"aegis-guard/target/aegis-guard.jar {shlex.quote(safe_user)}@{payload.ip_address}:/tmp/aegis-guard.jar && "
+                f"sshpass -p {shlex.quote(safe_pass)} ssh -o StrictHostKeyChecking=no "
+                f"{shlex.quote(safe_user)}@{payload.ip_address} "
+                f"'nohup java -jar /tmp/aegis-guard.jar > /tmp/aegis-guard.log 2>&1 &'"
+            )
+        else:
+            deploy_command = (
+                f"sshpass -p {shlex.quote(safe_pass)} scp -r -o StrictHostKeyChecking=no "
+                f"NodeTrace/agents/python/dist/nodetrace-agent {shlex.quote(safe_user)}@{payload.ip_address}:/tmp/nodetrace-agent && "
+                f"sshpass -p {shlex.quote(safe_pass)} ssh -o StrictHostKeyChecking=no "
+                f"{shlex.quote(safe_user)}@{payload.ip_address} "
+                f"'chmod +x /tmp/nodetrace-agent/nodetrace-agent && nohup /tmp/nodetrace-agent/nodetrace-agent > /tmp/nodetrace.log 2>&1 &'"
+            )
         payload_method = "ssh"
     else:
         deploy_command = None
         payload_method = "manual"
 
     if payload.agent_type == "nodetrace":
-        local_command = "cd NodeTrace\\agents\\python && python agent.py"
-        remote_command = f"python NodeTrace/agents/python/agent.py  # run on {payload.ip_address}"
+        local_command = "cd NodeTrace\\agents\\python\\dist\\nodetrace-agent && nodetrace-agent.exe"
+        remote_command = f"Copy nodetrace-agent folder to {payload.ip_address} and run nodetrace-agent.exe"
     else:
         local_command = "cd aegis-guard && java -jar target\\aegis-guard.jar"
-        remote_command = f"java -jar aegis-guard.jar  # run on {payload.ip_address}"
+        remote_command = f"Copy aegis-guard.jar to {payload.ip_address} and run: java -jar aegis-guard.jar"
 
     return {
         "status": "planned",
@@ -468,12 +526,17 @@ async def deployment_plan(payload: DeploymentPlanRequest, db: AsyncSession = Dep
         "local_command": local_command,
         "remote_command": remote_command,
         "deploy_command": deploy_command,
+        "executables": {
+            "nodetrace": "NodeTrace/agents/python/dist/nodetrace-agent/nodetrace-agent.exe",
+            "guard_jar": "aegis-guard/target/aegis-guard.jar",
+        },
         "note": "For WinRM/SSH auto-deploy, save a note in VaultX with tag #deploy-creds containing ip, username, password.",
     }
 
 
 @router.post("/deploy")
 async def auto_deploy(payload: AutoDeployRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    _validate_ip_or_raise(payload.ip_address)
     creds = {"username": payload.username, "password": payload.password}
     if not creds["username"] or not creds["password"]:
         result = await db.execute(select(Note).where(Note.tags != None))
@@ -497,51 +560,103 @@ async def auto_deploy(payload: AutoDeployRequest, db: AsyncSession = Depends(get
                         if "user:" in line.lower() or "username:" in line.lower():
                             creds["username"] = line.split(":", 1)[1].strip()
 
-    if not creds["username"] or not creds["password"]:
+    safe_user = _sanitize_cred(creds["username"] or "")
+    safe_pass = _sanitize_cred(creds["password"] or "")
+    if not safe_user or not safe_pass:
         raise HTTPException(status_code=400, detail="No credentials found. Save a VaultX note with #deploy-creds tag.")
 
-    os_type = "windows" if 445 in [p for p in []] else "linux"
+    os_type = "linux"
     try:
         result = await db.execute(select(DiscoveredHost).where(DiscoveredHost.ip_address == payload.ip_address))
         host = result.scalars().first()
         if host and host.open_ports:
             if 445 in host.open_ports or 3389 in host.open_ports or 135 in host.open_ports:
                 os_type = "windows"
+        if host and host.os_guess and "windows" in host.os_guess.lower():
+            os_type = "windows"
     except Exception:
         pass
 
+    quoted_user = shlex.quote(safe_user)
+    quoted_pass = shlex.quote(safe_pass)
+
     if os_type == "windows":
-        if not creds["username"] or not creds["password"]:
-            raise HTTPException(status_code=400, detail="Windows deploy requires username and password from Vault.")
+        if payload.agent_type == "aegis-guard":
+            command = (
+                f"powershell -Command \"$secpass=ConvertTo-SecureString {quoted_pass} -AsPlainText -Force; "
+                f"$cred=New-Object System.Management.Automation.PSCredential({quoted_user}, $secpass); "
+                f"$s=New-PSSession -ComputerName {payload.ip_address} -Credential $cred; "
+                f"Invoke-Command -Session $s -ScriptBlock {{ New-Item -ItemType Directory -Force -Path 'C:\\AegisGuard' }}; "
+                f"Copy-Item -ToSession $s -Path 'aegis-guard\\target\\aegis-guard.jar' -Destination 'C:\\AegisGuard\\aegis-guard.jar'; "
+                f"Invoke-Command -Session $s -ScriptBlock {{ "
+                f"Start-Process -FilePath 'java' -ArgumentList '-jar','C:\\AegisGuard\\aegis-guard.jar' -NoNewWindow "
+                f"}}; Remove-PSSession $s\""
+            )
+        else:
+            command = (
+                f"powershell -Command \"$secpass=ConvertTo-SecureString {quoted_pass} -AsPlainText -Force; "
+                f"$cred=New-Object System.Management.Automation.PSCredential({quoted_user}, $secpass); "
+                f"$s=New-PSSession -ComputerName {payload.ip_address} -Credential $cred; "
+                f"Invoke-Command -Session $s -ScriptBlock {{ New-Item -ItemType Directory -Force -Path 'C:\\NodeTrace' }}; "
+                f"Copy-Item -ToSession $s -Path 'NodeTrace\\agents\\python\\dist\\nodetrace-agent\\*' -Destination 'C:\\NodeTrace\\' -Recurse -Force; "
+                f"Invoke-Command -Session $s -ScriptBlock {{ "
+                f"Start-Process -FilePath 'C:\\NodeTrace\\nodetrace-agent.exe' -NoNewWindow "
+                f"}}; Remove-PSSession $s\""
+            )
         return {
             "status": "deploy_initiated",
             "ip_address": payload.ip_address,
             "agent_type": payload.agent_type,
             "method": "winrm",
-            "command": (
-                f"powershell -Command \"$secpass=ConvertTo-SecureString '{creds['password']}' -AsPlainText -Force; "
-                f"$cred=New-Object System.Management.Automation.PSCredential('{creds['username']}', $secpass); "
-                f"Invoke-Command -ComputerName {payload.ip_address} -Credential $cred -ScriptBlock {{ "
-                f"Start-Process -FilePath 'powershell' -ArgumentList '-Command \"& {{ "
-                f"$url=\"http://aegis-brain:8000/api/v1/enroll/download/{payload.agent_type}.py\"; "
-                f"$out=\"C:\\Aegis\\{payload.agent_type}.py\"; "
-                f"New-Item -ItemType Directory -Force -Path \"C:\\Aegis\"; "
-                f"Invoke-WebRequest -Uri $url -OutFile $out; python $out"
-                f" }}\" -NoNewWindow -WindowStyle Hidden'"
-                f"}} -ErrorAction Stop\""
-            ),
-            "note": "Deploy running in background on target. Check agent list in 30s.",
+            "os_detected": os_type,
+            "command": command,
+            "note": "Deploy copies compiled executable to target via WinRM and starts it. Check agent list in 30s.",
         }
     else:
+        if payload.agent_type == "aegis-guard":
+            command = (
+                f"sshpass -p {quoted_pass} scp -o StrictHostKeyChecking=no "
+                f"aegis-guard/target/aegis-guard.jar {quoted_user}@{payload.ip_address}:/tmp/aegis-guard.jar && "
+                f"sshpass -p {quoted_pass} ssh -o StrictHostKeyChecking=no "
+                f"{quoted_user}@{payload.ip_address} "
+                f"'nohup java -jar /tmp/aegis-guard.jar > /tmp/aegis-guard.log 2>&1 &'"
+            )
+        else:
+            command = (
+                f"sshpass -p {quoted_pass} scp -r -o StrictHostKeyChecking=no "
+                f"NodeTrace/agents/python/dist/nodetrace-agent {quoted_user}@{payload.ip_address}:/tmp/nodetrace-agent && "
+                f"sshpass -p {quoted_pass} ssh -o StrictHostKeyChecking=no "
+                f"{quoted_user}@{payload.ip_address} "
+                f"'chmod +x /tmp/nodetrace-agent/nodetrace-agent && nohup /tmp/nodetrace-agent/nodetrace-agent > /tmp/nodetrace.log 2>&1 &'"
+            )
         return {
             "status": "deploy_initiated",
             "ip_address": payload.ip_address,
             "agent_type": payload.agent_type,
             "method": "ssh",
-            "command": f"sshpass -p '{creds['password']}' ssh -o StrictHostKeyChecking=no {creds['username']}@{payload.ip_address} 'curl -sL http://aegis-brain:8000/api/v1/enroll/download/nodetrace.py | python3 &'",
-            "note": "Deploy running in background on target. Check agent list in 30s.",
+            "os_detected": os_type,
+            "command": command,
+            "note": "Deploy copies compiled executable to target via SCP and starts it. Check agent list in 30s.",
         }
 
+
+class ManualHostRequest(BaseModel):
+    ip_address: str
+    hostname: Optional[str] = None
+    mac_address: Optional[str] = None
+    source: str = "manual"
+
+@router.post("/hosts/manual")
+async def add_manual_host(payload: ManualHostRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    try:
+        ipaddress.ip_address(payload.ip_address)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid IP address") from exc
+    host = await _upsert_host(db, payload.ip_address, [], source=payload.source, mac=payload.mac_address)
+    if payload.hostname:
+        host.hostname = payload.hostname
+    await db.commit()
+    return _host_out(host)
 
 @router.post("/sync-agent-status")
 async def sync_agent_status(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
@@ -562,3 +677,78 @@ async def sync_agent_status(db: AsyncSession = Depends(get_db), user=Depends(get
 
     await db.commit()
     return {"status": "synced", "count": len(hosts)}
+
+
+# ===== SCAN VIA AGENT =====
+
+class ScanViaAgentRequest(BaseModel):
+    cidr: str = Field(default="192.168.1.0/24", examples=["192.168.1.0/24"])
+    ports: List[int] = Field(default_factory=lambda: DEFAULT_SCAN_PORTS)
+    probe_timeout: float = Field(default=0.1, ge=0.01, le=5.0, description="Seconds to wait for ARP probe per host. Higher = more thorough in large/noisy networks.")
+
+class AgentScanResultItem(BaseModel):
+    ip_address: str
+    hostname: Optional[str] = None
+    mac_address: Optional[str] = None
+    open_ports: List[int] = []
+    os_guess: Optional[str] = None
+
+class AgentScanResultRequest(BaseModel):
+    cidr: str
+    scan_hosts: List[AgentScanResultItem]
+
+@router.post("/scan-via-agent/{agent_id}")
+async def scan_network_via_agent(
+    agent_id: str,
+    payload: ScanViaAgentRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user)
+):
+    result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
+    agent_obj = result.scalars().first()
+    if not agent_obj:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    import json
+    import redis.asyncio as redis_lib
+    from app.core.redis_utils import get_redis_url
+    rc = redis_lib.from_url(get_redis_url(), decode_responses=True)
+    queue_name = f"aegis:commands:{agent_id}"
+    command = {
+        "command": "NETWORK_SCAN",
+        "cidr": payload.cidr,
+        "ports": payload.ports,
+        "probe_timeout": payload.probe_timeout,
+    }
+    await rc.rpush(queue_name, json.dumps(command))
+    await rc.aclose()
+    return {
+        "status": "command_queued",
+        "agent_id": agent_id,
+        "cidr": payload.cidr,
+        "note": "Agent will scan on next heartbeat cycle (usually within 5-10 seconds). Results will appear in hosts list when reported."
+    }
+
+@router.post("/agent-scan-result")
+async def agent_scan_result(
+    payload: AgentScanResultRequest,
+    db: AsyncSession = Depends(get_db),
+    agent_obj: Agent = Depends(get_current_agent)
+):
+    await _load_oui_cache()
+    discovered = []
+    for item in payload.scan_hosts:
+        host = await _upsert_host(db, item.ip_address, item.open_ports, source=f"agent-scan:{agent_obj.agent_id}", mac=item.mac_address)
+        if item.hostname:
+            host.hostname = item.hostname
+        if item.os_guess:
+            host.os_guess = item.os_guess
+            host.os_confidence = 80
+        discovered.append(host)
+    await db.commit()
+    return {
+        "status": "ok",
+        "agent_id": str(agent_obj.agent_id),
+        "cidr": payload.cidr,
+        "hosts_found": len(discovered),
+        "hosts": [_host_out(h) for h in discovered],
+    }

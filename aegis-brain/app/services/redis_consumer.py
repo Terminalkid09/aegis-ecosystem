@@ -91,10 +91,15 @@ class RedisConsumer:
                 agent_id=agent_id_uuid,
                 severity=analysis.severity,
                 pid=event.pid,
+                parent_pid=event.parent_pid,
+                parent_process_name=event.parent_process_name,
                 process_name=event.process_name or "unknown",
                 process_path=event.process_path,
                 event_type=event.event_type,
-                description=analysis.description
+                description=analysis.description,
+                mitre_tactic_name=analysis.mitre_tactic,
+                mitre_technique_name=analysis.mitre_technique,
+                mitre_technique_id=analysis.mitre_technique_id,
             )
             db.add(alert)
             await db.flush()

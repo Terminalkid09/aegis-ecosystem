@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+
 from app.database.connection import get_db
 from app.database.models import Agent
 from app.core.config import settings
@@ -34,8 +34,32 @@ async def enroll_agent(payload: EnrollRequest, db: AsyncSession = Depends(get_db
 
     agent_id = uuid.uuid4()
     agent_secret = secrets.token_urlsafe(32)
+
+    # Check if agent with same hostname+os already exists (race-safe via unique constraint)
+    result = await db.execute(
+        select(Agent).where(
+            Agent.hostname == payload.hostname,
+            Agent.os_type == payload.os
+        )
+    )
+    existing = result.scalars().first()
+    if existing:
+        # Re-enroll: issue a fresh secret so agent can authenticate again
+        new_secret = secrets.token_urlsafe(32)
+        existing.device_token_hash = hash_password(new_secret)
+        await db.commit()
+
+        # Update Redis cache
+        redis_client = redis.from_url(get_redis_url(), decode_responses=True)
+        await redis_client.set(f"auth:agent:{new_secret}", str(existing.agent_id))
+
+        logger.info(f"Agent re-enrolled: {existing.agent_id} ({payload.hostname})")
+        return EnrollResponse(
+            agent_id=str(existing.agent_id),
+            agent_secret=new_secret,
+            status="re-enrolled"
+        )
     
-    # Store in DB with unique constraint handling race condition
     new_agent = Agent(
         agent_id=agent_id,
         hostname=payload.hostname,
@@ -44,24 +68,8 @@ async def enroll_agent(payload: EnrollRequest, db: AsyncSession = Depends(get_db
         device_token_hash=hash_password(agent_secret)
     )
     db.add(new_agent)
-    try:
-        await db.commit()
-        await db.refresh(new_agent)
-    except IntegrityError:
-        await db.rollback()
-        # Agent already exists, fetch it
-        result = await db.execute(
-            select(Agent).where(
-                Agent.hostname == payload.hostname,
-                Agent.os_type == payload.os
-            )
-        )
-        existing = result.scalar_one()
-        return EnrollResponse(
-            agent_id=str(existing.agent_id),
-            agent_secret="ALREADY_ENROLLED",
-            status="enrolled"
-        )
+    await db.commit()
+    await db.refresh(new_agent)
     
     # Cache in Redis for fast validation
     redis_client = redis.from_url(get_redis_url(), decode_responses=True)

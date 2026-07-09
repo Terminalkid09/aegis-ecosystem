@@ -1,14 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from app.database.connection import get_db
-from app.database.models import Alert, Agent, Telemetry
+from app.database.models import Alert, Agent, Telemetry, ThreatReport, RemediationAction
 from app.core.deps import get_current_user
 from app.core.agent_deps import get_current_agent
 from app.api.schemas.common import AlertResponse, AgentResponse, StatsResponse, EventSchema
 from app.services import telemetry_service
+from app.core.audit import log_audit
 from pydantic import BaseModel
 
 router = APIRouter(tags=["Telemetry"])
@@ -21,26 +22,154 @@ async def get_alerts(
     db: AsyncSession = Depends(get_db), 
     _user = Depends(get_current_user),
     severity: Optional[str] = None,
-    is_resolved: Optional[bool] = None
+    is_resolved: Optional[bool] = Query(False),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=1000)
 ):
     stmt = select(Alert)
     if severity:
         stmt = stmt.where(Alert.severity == severity)
     if is_resolved is not None:
-        stmt = stmt.where(Alert.is_resolved == is_resolved)
+        if is_resolved:
+            stmt = stmt.where(Alert.is_resolved == True)
+        else:
+            stmt = stmt.where(or_(Alert.is_resolved == False, Alert.is_resolved == None))
     
-    stmt = stmt.order_by(Alert.timestamp.desc()).limit(100)
+    stmt = stmt.order_by(Alert.timestamp.desc()).offset(skip).limit(limit)
     result = await db.execute(stmt)
     return result.scalars().all()
 
+@router.get("/alerts/{alert_id}")
+async def get_alert_detail(
+    alert_id: int,
+    db: AsyncSession = Depends(get_db),
+    _user = Depends(get_current_user)
+):
+    alert = await db.get(Alert, alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    
+    agent = await db.get(Agent, alert.agent_id)
+    
+    threat_reports = []
+    tr_result = await db.execute(
+        select(ThreatReport).where(ThreatReport.alert_id == alert_id).order_by(ThreatReport.created_at.desc())
+    )
+    for tr in tr_result.scalars().all():
+        threat_reports.append({
+            "id": tr.id,
+            "summary": tr.summary,
+            "confidence": tr.confidence,
+            "recommended_actions": tr.recommended_actions,
+            "osint_data": tr.osint_data,
+            "ai_analysis": tr.ai_analysis,
+            "is_auto_generated": tr.is_auto_generated,
+            "created_at": tr.created_at.isoformat() if tr.created_at else None,
+        })
+    
+    remediations = []
+    rem_result = await db.execute(
+        select(RemediationAction).where(RemediationAction.alert_id == alert_id).order_by(RemediationAction.executed_at.desc())
+    )
+    for r in rem_result.scalars().all():
+        remediations.append({
+            "id": r.id,
+            "action": r.action,
+            "target": r.target,
+            "status": r.status,
+            "executed_at": r.executed_at.isoformat() if r.executed_at else None,
+            "details": r.details,
+        })
+    
+    telemetry_sample = None
+    tel_result = await db.execute(
+        select(Telemetry).where(Telemetry.device_id == alert.agent_id).order_by(Telemetry.timestamp.desc()).limit(1)
+    )
+    tel = tel_result.scalars().first()
+    if tel:
+        telemetry_sample = {
+            "cpu_usage": tel.cpu_usage,
+            "ram_usage": tel.ram_usage,
+            "processes": tel.processes,
+            "users": tel.users,
+            "network_flows": tel.network_flows,
+        }
+    
+    return {
+        "id": alert.id,
+        "agent_id": str(alert.agent_id),
+        "agent_hostname": agent.hostname if agent else None,
+        "timestamp": alert.timestamp.isoformat() if alert.timestamp else None,
+        "severity": alert.severity,
+        "pid": alert.pid,
+        "process_name": alert.process_name,
+        "process_path": alert.process_path,
+        "event_type": alert.event_type,
+        "description": alert.description,
+        "is_resolved": alert.is_resolved,
+        "telemetry": telemetry_sample,
+        "threat_reports": threat_reports,
+        "remediations": remediations,
+    }
+
+@router.post("/alerts/resolve-all")
+async def resolve_all_alerts(
+    db: AsyncSession = Depends(get_db),
+    _user = Depends(get_current_user),
+    request: Request = None,
+):
+    stmt = select(Alert).where(or_(Alert.is_resolved == False, Alert.is_resolved == None))
+    result = await db.execute(stmt)
+    alerts = result.scalars().all()
+    count = 0
+    for alert in alerts:
+        if not alert.is_resolved:
+            alert.is_resolved = True
+            count += 1
+    await db.commit()
+    await log_audit(
+        db, action="resolve_all_alerts", resource="alert",
+        details={"count": count}, user_id=_user.id, username=_user.username,
+        ip_address=request.client.host if request else None,
+    )
+    await db.commit()
+    return {"resolved": count, "detail": f"Resolved {count} unresolved alerts"}
+
+@router.delete("/alerts")
+async def delete_all_alerts(
+    db: AsyncSession = Depends(get_db),
+    _user = Depends(get_current_user),
+    request: Request = None,
+):
+    stmt = select(Alert)
+    result = await db.execute(stmt)
+    alerts = result.scalars().all()
+    count = len(alerts)
+    for alert in alerts:
+        await db.delete(alert)
+    await db.commit()
+    await log_audit(
+        db, action="delete_all_alerts", resource="alert",
+        details={"count": count}, user_id=_user.id, username=_user.username,
+        ip_address=request.client.host if request else None,
+    )
+    await db.commit()
+    return {"deleted": count, "detail": f"Deleted {count} alerts"}
+
 @router.patch("/alerts/{alert_id}/resolve", response_model=AlertResponse)
-async def resolve_alert(alert_id: int, body: ResolveRequest, db: AsyncSession = Depends(get_db), _user = Depends(get_current_user)):
+async def resolve_alert(
+    alert_id: int, body: ResolveRequest,
+    db: AsyncSession = Depends(get_db),
+    _user = Depends(get_current_user),
+    request: Request = None,
+):
     alert = await db.get(Alert, alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     
     if not alert.is_resolved and body.resolved:
-        if alert.pid:
+        safe_to_kill = alert.event_type in ("PROCESS_CREATED", "custom_rule")
+        if alert.pid and safe_to_kill:
             await telemetry_service.send_command_to_agent(alert.agent_id, {
                 "command": "KILL_PROCESS",
                 "pid": alert.pid,
@@ -49,6 +178,13 @@ async def resolve_alert(alert_id: int, body: ResolveRequest, db: AsyncSession = 
             })
 
     alert.is_resolved = body.resolved
+    await db.commit()
+    await log_audit(
+        db, action="resolve_alert", resource="alert", resource_id=str(alert.id),
+        details={"resolved": body.resolved, "agent_id": str(alert.agent_id), "killed": safe_to_kill and bool(alert.pid)},
+        user_id=_user.id, username=_user.username,
+        ip_address=request.client.host if request else None,
+    )
     await db.commit()
     await db.refresh(alert)
     return alert
@@ -157,11 +293,12 @@ async def get_stats(
     include_demo: bool = Query(False, description="Include demo agents in stats")
 ):
     total_alerts = (await db.execute(select(func.count(Alert.id)))).scalar() or 0
-    unresolved = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False))).scalar() or 0
-    current_critical = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False, func.upper(Alert.severity) == "CRITICAL"))).scalar() or 0
-    current_high = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False, func.upper(Alert.severity) == "HIGH"))).scalar() or 0
-    current_medium = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False, func.upper(Alert.severity) == "MEDIUM"))).scalar() or 0
-    current_low = (await db.execute(select(func.count(Alert.id)).where(Alert.is_resolved == False, func.upper(Alert.severity) == "LOW"))).scalar() or 0
+    not_resolved = or_(Alert.is_resolved == False, Alert.is_resolved == None)
+    unresolved = (await db.execute(select(func.count(Alert.id)).where(not_resolved))).scalar() or 0
+    current_critical = (await db.execute(select(func.count(Alert.id)).where(not_resolved, func.upper(Alert.severity) == "CRITICAL"))).scalar() or 0
+    current_high = (await db.execute(select(func.count(Alert.id)).where(not_resolved, func.upper(Alert.severity) == "HIGH"))).scalar() or 0
+    current_medium = (await db.execute(select(func.count(Alert.id)).where(not_resolved, func.upper(Alert.severity) == "MEDIUM"))).scalar() or 0
+    current_low = (await db.execute(select(func.count(Alert.id)).where(not_resolved, func.upper(Alert.severity) == "LOW"))).scalar() or 0
     
     threshold = datetime.now(timezone.utc) - timedelta(minutes=15)
     agent_query = select(func.count(Agent.agent_id)).where(Agent.last_seen >= threshold)
@@ -213,7 +350,7 @@ async def get_agent_commands(
     return None
 
 @router.get("/remediations")
-async def get_remediation_actions(limit: int = 20, db: AsyncSession = Depends(get_db)):
+async def get_remediation_actions(limit: int = 20, db: AsyncSession = Depends(get_db), _user = Depends(get_current_user)):
     from app.database.models import RemediationAction
     result = await db.execute(select(RemediationAction).order_by(RemediationAction.executed_at.desc()).limit(limit))
     actions = result.scalars().all()

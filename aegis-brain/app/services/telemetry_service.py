@@ -82,12 +82,53 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
     anomalies = await anomaly_engine.analyze(str(agent_id), metrics)
 
     for anomaly in anomalies:
+        top_proc = "unknown"
+        processes = data.get("processes", [])
+        if isinstance(processes, list) and processes:
+            try:
+                normalized = []
+                for p in processes:
+                    if isinstance(p, dict):
+                        normalized.append(p)
+                    elif isinstance(p, str) and '(' in p:
+                        name = p.split('(')[0].strip()
+                        try: pid = int(p.split('(')[1].rstrip(')'))
+                        except: pid = 0
+                        normalized.append({"name": name, "pid": pid, "cpu_percent": 0})
+                
+                metric_key = anomaly["metric"]
+                cpu_keys = ["cpu_percent", "cpu_usage", "cpu", "percent"]
+                ram_keys = ["memory_percent", "ram_usage", "memory_percent", "mem_usage", "ram", "memory"]
+                keys_to_check = cpu_keys if "cpu" in metric_key else ram_keys
+                def get_proc_score(p):
+                    for k in keys_to_check:
+                        v = p.get(k)
+                        if v is not None:
+                            try: return float(v)
+                            except: pass
+                    return 0
+                sorted_procs = sorted(
+                    [p for p in normalized if get_proc_score(p) > 0],
+                    key=get_proc_score, reverse=True
+                )
+                if sorted_procs:
+                    top_proc = sorted_procs[0].get("name") or sorted_procs[0].get("process_name") or "unknown"
+                elif normalized:
+                    top_proc = normalized[0].get("name") or "unknown"
+            except Exception:
+                pass
         alert = Alert(
             agent_id=agent_id,
             severity=anomaly["severity"],
-            process_name="System",
+            process_name=top_proc,
             event_type="statistical_anomaly",
-            description=f"Anomaly detected in {anomaly['metric']}: value={anomaly['value']} (z-score={anomaly['z_score']:.2f})"
+            description=(
+                f"Suspicious {anomaly['metric'].replace('_', ' ').title()} spike "
+                f"(z-score={anomaly['z_score']:.1f}, threshold=4.0) "
+                f"on process '{top_proc}': "
+                f"current={anomaly['value']:.1f}% — "
+                f"significantly above normal baseline. "
+            )
         )
         db.add(alert)
 
@@ -124,14 +165,18 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                             severity=rule.severity.upper(),
                             process_name=proc_name or "Unknown",
                             event_type="custom_rule",
-                            description=f"Rule '{rule.name}' matched: {field}='{value}' matched pattern /{pattern}/"
+                            description=f"Rule '{rule.name}' matched: {field}='{value}' matched pattern /{pattern}/",
+                            mitre_tactic_id=rule.mitre_tactic_id or rule.mitre_tactic,
+                            mitre_technique_id=rule.mitre_technique_id or rule.mitre_technique,
+                            mitre_tactic_name=rule.mitre_tactic,
+                            mitre_technique_name=rule.mitre_technique,
                         )
                         db.add(alert)
                         logger.info(f"Custom rule '{rule.name}' triggered for agent {agent_id} on process '{proc_name}'")
                         break  # one alert per rule per telemetry batch
 
     # 4. Static Heuristic Rule Matching (for PROCESS_CREATED events)
-    event_type = data.get("event_type", "")
+    event_type = data.get("event_type") or data.get("eventType") or ""
     if event_type == "PROCESS_CREATED":
         try:
             event = EventSchema(**data)
@@ -142,11 +187,17 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                         alert = Alert(
                             agent_id=agent_id,
                             severity=rule_result.severity,
-                            pid=data.get("pid"),
-                            process_name=data.get("process_name") or "unknown",
-                            process_path=data.get("process_path"),
-                            event_type=event_type,
-                            description=rule_result.description
+                            pid=event.pid,
+                            parent_pid=event.parent_pid,
+                            parent_process_name=event.parent_process_name,
+                            process_name=event.process_name or "unknown",
+                            process_path=event.process_path,
+                            event_type=event.event_type,
+                            description=rule_result.description,
+                            mitre_tactic_id=rule_result.mitre_tactic_id or rule_result.mitre_tactic,
+                            mitre_technique_id=rule_result.mitre_technique_id,
+                            mitre_tactic_name=rule_result.mitre_tactic,
+                            mitre_technique_name=rule_result.mitre_technique,
                         )
                         db.add(alert)
                         logger.warning(f"THREAT DETECTED on {agent_id}: {rule_result.description}")
@@ -157,6 +208,28 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
             logger.error("Failed to process static rules for event: %s", str(e))
 
     await db.commit()
+
+    # Trigger SOAR playbooks on newly created alerts (best-effort)
+    try:
+        from app.services.playbook_engine import check_and_execute_playbooks
+        alert_result = await db.execute(
+            select(Alert).where(Alert.agent_id == agent_id).order_by(Alert.timestamp.desc()).limit(5)
+        )
+        for alert in alert_result.scalars().all():
+            await check_and_execute_playbooks(db, alert)
+    except Exception:
+        logger.exception("SOAR playbook execution failed")
+
+    # Immediate enrichment (OSINT + AI) for newly created alerts
+    try:
+        from app.services.alert_enrichment import enrich_alert
+        alert_result = await db.execute(
+            select(Alert).where(Alert.agent_id == agent_id).order_by(Alert.timestamp.desc()).limit(5)
+        )
+        for alert in alert_result.scalars().all():
+            await enrich_alert(alert.id)
+    except Exception:
+        logger.exception("Alert enrichment failed")
 
 
 async def send_command_to_agent(agent_id: Any, command: Dict[str, Any]):

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.connection import AsyncSessionLocal
 from app.database.models import Alert, Agent, OSINTReport, ThreatReport, IPReputation
-from app.services.osint_service import lookup_ip
+from app.services.osint_service import fetch_ip_info
 from app.services.ai_service import generate_threat_report
 
 
@@ -40,9 +40,9 @@ async def enrich_alert(alert_id: int):
             if ip.startswith("10.") or ip.startswith("192.168.") or ip.startswith("172.16."):
                 continue
             try:
-                report_data = await lookup_ip(ip, db)
+                report_data = await fetch_ip_info(ip)
                 if report_data:
-                    osint_data[ip] = report_data.get("data", {})
+                    osint_data[ip] = report_data
                     await _update_ip_reputation(db, ip, report_data)
             except Exception:
                 pass
@@ -78,8 +78,7 @@ async def enrich_alert(alert_id: int):
 
 
 async def _update_ip_reputation(db: AsyncSession, ip: str, report_data: dict):
-    data = report_data.get("data", {})
-    vt = data.get("sources", {}).get("virustotal", {})
+    vt = report_data.get("sources", {}).get("virustotal", {})
     if vt and isinstance(vt, dict):
         malicious = vt.get("malicious", 0)
         total = vt.get("total", 1) or 1
@@ -93,7 +92,7 @@ async def _update_ip_reputation(db: AsyncSession, ip: str, report_data: dict):
             rec.label = label
             rec.confidence = max(rec.confidence, confidence)
             rec.source = "auto_osint"
-            rec.details = data
+            rec.details = report_data
             rec.updated_at = datetime.now(timezone.utc)
         else:
             rec = IPReputation(
@@ -101,7 +100,7 @@ async def _update_ip_reputation(db: AsyncSession, ip: str, report_data: dict):
                 label=label,
                 confidence=confidence,
                 source="auto_osint",
-                details=data,
+                details=report_data,
             )
             db.add(rec)
 

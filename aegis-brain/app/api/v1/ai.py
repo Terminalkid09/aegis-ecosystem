@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user
 from app.services import ai_service
@@ -112,3 +112,21 @@ async def ai_chat(payload: ChatRequest, db: AsyncSession = Depends(get_db), user
         return response
     except ai_service.PromptInjectionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+
+@router.delete("/threads/{thread_id}")
+async def delete_thread(
+    thread_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(AIThread).where(AIThread.id == thread_id, AIThread.user_id == user.id))
+    thread = result.scalars().first()
+    if not thread:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI thread not found")
+    
+    await db.execute(
+        sa_delete(AIMessage).where(AIMessage.thread_id == thread_id)
+    )
+    await db.delete(thread)
+    await db.commit()
+    return {"status": "deleted", "thread_id": thread_id}

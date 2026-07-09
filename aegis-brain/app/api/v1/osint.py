@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
-from app.core.deps import get_optional_user
+from app.core.deps import get_optional_user, get_current_user
 from app.services import osint_service
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -70,7 +70,7 @@ async def batch_ip_lookup(payload: BatchLookupRequest, db: AsyncSession = Depend
     return {"results": results}
 
 @router.post("/enrich")
-async def auto_enrich(ip: str = Query(...), background_tasks: BackgroundTasks = None, db: AsyncSession = Depends(get_db)):
+async def auto_enrich(ip: str = Query(...), background_tasks: BackgroundTasks = None, db: AsyncSession = Depends(get_db), _user = Depends(get_current_user)):
     try:
         ipaddress.ip_address(ip)
     except ValueError:
@@ -89,7 +89,7 @@ async def auto_enrich(ip: str = Query(...), background_tasks: BackgroundTasks = 
         return {"status": "enriched", "ip": ip}
 
 @router.get("/history")
-async def osint_history(limit: int = Query(10, ge=1, le=100), db: AsyncSession = Depends(get_db), user=Depends(get_optional_user)):
+async def osint_history(limit: int = Query(10, ge=1, le=100), db: AsyncSession = Depends(get_db), _user = Depends(get_current_user)):
     stmt = select(OSINTReport).order_by(OSINTReport.created_at.desc()).limit(limit)
     result = await db.execute(stmt)
     items = [

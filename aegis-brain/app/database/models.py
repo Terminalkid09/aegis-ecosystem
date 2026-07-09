@@ -80,11 +80,22 @@ class Alert(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    parent_pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    parent_process_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     process_name: Mapped[str] = mapped_column(String(255), nullable=False)
     process_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     event_type: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     is_resolved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # MITRE ATT&CK mapping (populated from CustomRule or enrichment)
+    mitre_tactic_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    mitre_technique_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    mitre_tactic_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    mitre_technique_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    # relation
+    agent: Mapped["Agent"] = relationship()
 
 class Telemetry(Base):
     __tablename__ = "telemetry"
@@ -134,9 +145,10 @@ class CustomRule(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # MITRE ATT&CK mapping
+    mitre_tactic_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     mitre_tactic: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    mitre_technique: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     mitre_technique_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    mitre_technique: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     # Logic type: "simple" (default) or "and"/"or" for multi-condition
     logic_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
@@ -210,3 +222,69 @@ class IPReputation(Base):
     source: Mapped[str] = mapped_column(String(100), default="manual", nullable=False)
     details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    action: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    resource: Mapped[str] = mapped_column(String(255), nullable=False)
+    resource_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+class Playbook(Base):
+    __tablename__ = "playbooks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    
+    # Trigger conditions
+    trigger_event_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    trigger_severity: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    trigger_process_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    trigger_condition: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    actions: Mapped[List["PlaybookAction"]] = relationship(back_populates="playbook", cascade="all, delete-orphan")
+
+class PlaybookAction(Base):
+    __tablename__ = "playbook_actions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    playbook_id: Mapped[int] = mapped_column(ForeignKey("playbooks.id", ondelete="CASCADE"), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    target: Mapped[str] = mapped_column(String(255), nullable=False)
+    params: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    playbook: Mapped["Playbook"] = relationship(back_populates="actions")
+
+class PlaybookExecution(Base):
+    __tablename__ = "playbook_executions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    playbook_id: Mapped[int] = mapped_column(ForeignKey("playbooks.id", ondelete="CASCADE"), nullable=False)
+    alert_id: Mapped[Optional[int]] = mapped_column(ForeignKey("alerts.id", ondelete="SET NULL"), nullable=True)
+    triggered_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    result: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class SyslogEvent(Base):
+    __tablename__ = "syslog_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    facility: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    severity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    hostname: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    app_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    raw: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
