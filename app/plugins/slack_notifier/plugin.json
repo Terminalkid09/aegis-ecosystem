@@ -1,0 +1,13 @@
+{
+  "id": "slack_notifier",
+  "name": "Slack Notifier",
+  "version": "1.0.0",
+  "description": "Sends real-time attack alerts to a Slack channel via incoming webhook. Configure the webhook URL in plugin settings.",
+  "author": "Kraken Team",
+  "hooks": ["attack.ingested", "system.startup"],
+  "config": {
+    "webhook_url": "",
+    "notify_on_known_threats_only": false,
+    "include_commands": true
+  }
+}

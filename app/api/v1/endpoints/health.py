@@ -72,7 +72,7 @@ async def health_detailed(db: AsyncSession = Depends(get_db)):
         if overall == "healthy":
             overall = "degraded"
 
-    status_code = 200 if overall == "healthy" else (207 if overall == "degraded" else 503)
+    status_code = 200 if overall == "healthy" else 503
 
     from fastapi.responses import JSONResponse
     return JSONResponse(

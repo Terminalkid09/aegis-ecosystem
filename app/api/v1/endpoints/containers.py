@@ -1,6 +1,8 @@
+import re
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
-from sqlalchemy.ext.asyncio import AsyncSession
+from jose import jwt as _jwt
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.docker_manager import docker_manager
 from app.api.v1.endpoints.deps import get_current_user
 from app.core.security import decode_access_token
@@ -8,6 +10,8 @@ from app.core.config import settings
 from app.db.redis import is_token_blacklisted
 from app.db.session import get_db
 from app.models.models import User
+
+_VALID_SESSION_ID = re.compile(r"^[\w\-]{8,64}$")
 
 router = APIRouter(prefix="/containers", tags=["containers"])
 
@@ -28,7 +32,13 @@ async def _get_admin_or_internal(
         if auth.startswith("Bearer "):
             token = auth[7:]
     if token:
-        if await is_token_blacklisted(token[:32]):
+        try:
+            import jwt as _jwt
+            payload = _jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM], options={"verify_exp": False})
+            jti = payload.get("jti", token[:32])
+        except Exception:
+            jti = token[:32]
+        if await is_token_blacklisted(jti):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked.")
         username = decode_access_token(token)
         if username:
@@ -55,6 +65,8 @@ async def create(
     _auth=Depends(_get_admin_or_internal),
 ):
     """Create a sandbox (admin or internal API key)."""
+    if not _VALID_SESSION_ID.match(session_id):
+        raise HTTPException(status_code=400, detail="Invalid session_id format")
     result = await docker_manager.create_sandbox(session_id)
     if not result:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not create sandbox.")
@@ -68,6 +80,8 @@ async def exec_command(
     _auth=Depends(_get_admin_or_internal),
 ):
     """Execute a command in a running sandbox."""
+    if not _VALID_SESSION_ID.match(session_id):
+        raise HTTPException(status_code=400, detail="Invalid session_id format")
     output = await docker_manager.exec_command(session_id, cmd)
     return {"output": output}
 

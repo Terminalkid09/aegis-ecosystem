@@ -20,7 +20,6 @@ async def init_redis():
         decode_responses=True,
         socket_connect_timeout=5,
         socket_timeout=5,
-        password=settings.REDIS_PASSWORD,
     )
     await redis_client.ping()
     logger.info("✅ Redis connected.")
@@ -40,6 +39,7 @@ async def blacklist_token(jti: str, ttl_seconds: int) -> None:
     """Add token ID to blacklist with TTL equal to token lifetime."""
     r = await get_redis()
     if r is None:
+        logger.warning("Redis unavailable — token blacklist skipped")
         return
     key = f"{TOKEN_BLACKLIST_PREFIX}{jti}"
     await r.set(key, "1", ex=ttl_seconds)
@@ -48,6 +48,7 @@ async def blacklist_token(jti: str, ttl_seconds: int) -> None:
 async def is_token_blacklisted(jti: str) -> bool:
     r = await get_redis()
     if r is None:
-        return False
+        logger.warning("Redis unavailable — rejecting request (fail-closed)")
+        return True
     key = f"{TOKEN_BLACKLIST_PREFIX}{jti}"
     return await r.exists(key) == 1

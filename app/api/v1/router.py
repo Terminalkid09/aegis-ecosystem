@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, events, export, containers, health
+from app.api.v1.endpoints import auth, events, export, containers, health, plugins, reports
 
 tags_metadata = [
     {
@@ -23,6 +23,14 @@ tags_metadata = [
         "name": "Health",
         "description": "System health checks for monitoring and orchestration.",
     },
+    {
+        "name": "Plugins",
+        "description": "Plugin management: enable, disable, configure, install, and uninstall plugins with event-driven hook system.",
+    },
+    {
+        "name": "Reports",
+        "description": "Professional report generation with executive summaries, findings matrices, recommendations, HTML preview, and PDF download.",
+    },
 ]
 
 api_router = APIRouter(prefix="/api/v1")
@@ -31,3 +39,5 @@ api_router.include_router(events.router, tags=["Events"])
 api_router.include_router(export.router, tags=["Export"])
 api_router.include_router(containers.router, tags=["Containers"])
 api_router.include_router(health.router, tags=["Health"])
+api_router.include_router(plugins.router, tags=["Plugins"])
+api_router.include_router(reports.router, tags=["Reports"])

@@ -17,9 +17,10 @@ COPY . .
 
 RUN mkdir -p /app/data /app/app/static /app/data/malware /app/data/logs
 
-# Run as non-root user
+# Run as non-root user with docker socket access
 RUN adduser --disabled-password --gecos "" --home /app kraken && \
-    chown -R kraken:kraken /app/data /app/app/static
+    chown -R kraken:kraken /app/data /app/app/static && \
+    usermod -aG root kraken
 USER kraken
 
 EXPOSE 8000

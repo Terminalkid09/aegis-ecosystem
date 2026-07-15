@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -29,7 +30,7 @@ async def login(request: Request, response: Response, payload: LoginRequest, db:
         key="kraken_token",
         value=access_token,
         httponly=True,
-        samesite="lax",
+        samesite="strict",
         secure=not settings.DEBUG,
         max_age=settings.JWT_ACCESS_EXPIRE_MINUTES * 60,
     )
@@ -66,7 +67,7 @@ async def logout(request: Request, response: Response):
                 options={"verify_exp": False},
             )
             exp = payload.get("exp")
-            now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).timestamp()
+            now = datetime.now(timezone.utc).timestamp()
             ttl = max(int(exp - now), 0) if exp else 3600
             jti = payload.get("jti", token[:32])
             from app.db.redis import blacklist_token

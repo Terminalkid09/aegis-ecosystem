@@ -42,7 +42,7 @@ async def seed():
     await init_db()
     async with AsyncSessionLocal() as db:
         events_created = 0
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for day_offset in range(30):
             day = now - timedelta(days=day_offset)

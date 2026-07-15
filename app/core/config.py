@@ -1,7 +1,10 @@
-from pydantic_settings import BaseSettings
-from typing import Optional
+from __future__ import annotations
+import secrets
 import sys
 from pathlib import Path
+from typing import Optional
+from pydantic_settings import BaseSettings
+from loguru import logger
 
 
 class Settings(BaseSettings):
@@ -9,8 +12,8 @@ class Settings(BaseSettings):
     APP_NAME: str = "Kraken"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
-    SECRET_KEY: str = "changeme_super_secret_key_please_change"
-    INTERNAL_API_KEY: str = "changeme_internal_api_key_please_change"
+    SECRET_KEY: str = ""
+    INTERNAL_API_KEY: str = ""
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://kraken:kraken_pass@localhost:5432/krakendb"
@@ -71,17 +74,22 @@ class Settings(BaseSettings):
         case_sensitive = True
 
     def validate_secrets(self):
-        """Refuse to start in production with default secrets."""
-        defaults = {
-            "changeme_super_secret_key_please_change",
-            "changeme_internal_api_key_please_change",
-        }
-        if not self.DEBUG:
-            if self.SECRET_KEY in defaults or len(self.SECRET_KEY) < 32:
-                print("❌ SECRET_KEY is insecure. Set a random value of 32+ chars in .env")
+        """Auto-generate secrets if not configured, refuse weak keys in production."""
+        if not self.SECRET_KEY or len(self.SECRET_KEY) < 32:
+            if self.DEBUG:
+                self.SECRET_KEY = secrets.token_hex(32)
+                logger.warning(f"Auto-generated SECRET_KEY for DEBUG mode: {self.SECRET_KEY}")
+            else:
+                gen = secrets.token_hex(32)
+                print(f"❌ SECRET_KEY not configured. Set in .env or use this generated key:\n   SECRET_KEY={gen}")
                 sys.exit(1)
-            if self.INTERNAL_API_KEY in defaults or len(self.INTERNAL_API_KEY) < 32:
-                print("❌ INTERNAL_API_KEY is insecure. Set a random value of 32+ chars in .env")
+        if not self.INTERNAL_API_KEY or len(self.INTERNAL_API_KEY) < 32:
+            if self.DEBUG:
+                self.INTERNAL_API_KEY = secrets.token_hex(32)
+                logger.warning(f"Auto-generated INTERNAL_API_KEY for DEBUG mode")
+            else:
+                gen = secrets.token_hex(32)
+                print(f"❌ INTERNAL_API_KEY not configured. Set in .env or use this generated key:\n   INTERNAL_API_KEY={gen}")
                 sys.exit(1)
 
     def get_cors_origins(self) -> list[str]:

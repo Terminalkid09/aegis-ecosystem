@@ -1,55 +1,37 @@
 #!/bin/bash
+# Kraken backup script — exports PostgreSQL database and configuration
 set -euo pipefail
 
-BACKUP_DIR="/backups"
-DATE=$(date +%Y%m%d_%H%M%S)
-RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
+BACKUP_DIR="${BACKUP_DIR:-/backups}"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="${BACKUP_DIR}/kraken_backup_${TIMESTAMP}.sql.gz"
+CONFIG_BACKUP="${BACKUP_DIR}/kraken_config_${TIMESTAMP}.tar.gz"
 
-mkdir -p "${BACKUP_DIR}/postgres"
-mkdir -p "${BACKUP_DIR}/redis"
-mkdir -p "${BACKUP_DIR}/malware"
-mkdir -p "${BACKUP_DIR}/config"
+mkdir -p "$BACKUP_DIR"
 
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
-}
+echo "=== Kraken Backup: $(date) ==="
 
-log "Starting Kraken backup..."
+# Database backup
+echo "Backing up PostgreSQL database..."
+PGPASSWORD="${DB_PASSWORD:-kraken_pass}" pg_dump \
+    -h "${DB_HOST:-localhost}" \
+    -U "${DB_USER:-kraken}" \
+    -d "${DB_NAME:-krakendb}" \
+    --no-owner \
+    --no-acl \
+    | gzip > "$BACKUP_FILE"
+echo "Database backup: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"
 
-# PostgreSQL Dump PostgreSQL
-log "Backing up PostgreSQL..."
-docker exec kraken_db pg_dump -U kraken -d krakendb | gzip > "${BACKUP_DIR}/postgres/krakendb_${DATE}.sql.gz"
-log "PostgreSQL backup completed: ${BACKUP_DIR}/postgres/krakendb_${DATE}.sql.gz"
+# Configuration backup
+echo "Backing up configuration files..."
+tar czf "$CONFIG_BACKUP" \
+    -C /app .env 2>/dev/null || true
+tar czf "$CONFIG_BACKUP" \
+    -C /app/data reports plugins 2>/dev/null || true
+echo "Config backup: $CONFIG_BACKUP"
 
-# Dump Redis
-log "Backing up Redis..."
-docker exec kraken_redis redis-cli -a "${REDIS_PASSWORD:-kraken_redis_pass}" --rdb /data/dump.rdb
-docker cp kraken_redis:/data/dump.rdb "${BACKUP_DIR}/redis/dump_${DATE}.rdb"
-gzip "${BACKUP_DIR}/redis/dump_${DATE}.rdb"
-log "Redis backup completed: ${BACKUP_DIR}/redis/dump_${DATE}.rdb.gz"
+# Cleanup backups older than 30 days
+find "$BACKUP_DIR" -name "kraken_backup_*.sql.gz" -mtime +30 -delete
+find "$BACKUP_DIR" -name "kraken_config_*.tar.gz" -mtime +30 -delete
 
-# Backup malware samples
-log "Backing up malware samples..."
-tar -czf "${BACKUP_DIR}/malware/malware_${DATE}.tar.gz" -C /app/data malware/ 2>/dev/null || true
-log "Malware backup completed: ${BACKUP_DIR}/malware/malware_${DATE}.tar.gz"
-
-# Backup config
-log "Backing up configuration..."
-tar -czf "${BACKUP_DIR}/config/config_${DATE}.tar.gz" \
-    /app/.env \
-    /app/docker-compose.yml \
-    /app/Dockerfile \
-    /app/Dockerfile.sandbox \
-    /app/alembic.ini \
-    /app/alembic/versions/ \
-    2>/dev/null || true
-log "Config backup completed: ${BACKUP_DIR}/config/config_${DATE}.tar.gz"
-
-# Cleanup old backups
-log "Cleaning up backups older than ${RETENTION_DAYS} days..."
-find "${BACKUP_DIR}" -type f -name "*.gz" -mtime +${RETENTION_DAYS} -delete
-find "${BACKUP_DIR}" -type f -name "*.rdb" -mtime +${RETENTION_DAYS} -delete
-find "${BACKUP_DIR}" -type f -name "*.tar.gz" -mtime +${RETENTION_DAYS} -delete
-log "Cleanup completed"
-
-log "All backups completed successfully"
+echo "=== Backup complete ==="

@@ -12,7 +12,7 @@ class TestExport:
                 timestamp_start=datetime.now(timezone.utc),
                 country="US", city="NYC", asn="AS12345", is_known_threat=False,
             ))
-        await db_session.commit()
+        await db_session.flush()
 
         response = await client.get("/api/v1/export/csv", headers=auth_headers)
         assert response.status_code == 200
@@ -31,7 +31,7 @@ class TestExport:
             timestamp_start=datetime.now(timezone.utc),
             country="UK", city="London", asn="AS999", is_known_threat=True,
         ))
-        await db_session.commit()
+        await db_session.flush()
 
         response = await client.get("/api/v1/export/json", headers=auth_headers)
         assert response.status_code == 200
@@ -51,7 +51,7 @@ class TestExport:
                 timestamp_start=datetime.now(timezone.utc),
                 country="FR", city="Paris", asn="AS555", is_known_threat=False,
             ))
-        await db_session.commit()
+        await db_session.flush()
 
         response = await client.get("/api/v1/export/pdf", headers=auth_headers)
         assert response.status_code == 200

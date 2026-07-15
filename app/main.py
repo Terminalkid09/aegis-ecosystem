@@ -14,6 +14,8 @@ from app.core.metrics import MetricsMiddleware, metrics_endpoint
 from app.api.v1.router import api_router, tags_metadata
 from app.db.session import init_db
 from app.db.redis import init_redis, close_redis
+from app.services.plugin_manager import plugin_manager
+from app.core.event_bus import event_bus
 
 
 async def verify_web_session(request: Request):
@@ -37,8 +39,12 @@ async def lifespan(app: FastAPI):
     settings.ensure_dirs()
     await init_db()
     await init_redis()
+    await plugin_manager.initialize()
+    await event_bus.emit_async("system.startup")
     logger.info("All systems ready.")
     yield
+    await plugin_manager.shutdown()
+    await event_bus.emit_async("system.shutdown")
     await close_redis()
     logger.info("Kraken shut down cleanly.")
 
@@ -103,7 +109,7 @@ app.add_middleware(
     allow_origins=settings.get_cors_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE", "PUT"],
-    allow_headers=["Authorization", "Content-Type", "X-Internal-API-Key"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # ── Security Headers middleware ────────────────────────────────────────────────
@@ -122,6 +128,10 @@ async def security_headers(request: Request, call_next):
 async def limit_body_size(request: Request, call_next):
     max_body = settings.MAX_BODY_SIZE
     content_length = request.headers.get("content-length")
+    transfer_encoding = request.headers.get("transfer-encoding", "")
+    if "chunked" in transfer_encoding.lower():
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Transfer-Encoding not supported."}, status_code=413)
     if content_length and int(content_length) > max_body:
         from fastapi.responses import JSONResponse
         return JSONResponse({"detail": "Request body too large."}, status_code=413)
@@ -151,5 +161,13 @@ async def login_page(request: Request):
 @app.get("/events", include_in_schema=False)
 async def events_page(request: Request, _=Depends(verify_web_session)):
     return templates.TemplateResponse("events.html", {"request": request})
+
+@app.get("/plugins", include_in_schema=False)
+async def plugins_page(request: Request, _=Depends(verify_web_session)):
+    return templates.TemplateResponse("plugins.html", {"request": request})
+
+@app.get("/reports", include_in_schema=False)
+async def reports_page(request: Request, _=Depends(verify_web_session)):
+    return templates.TemplateResponse("reports.html", {"request": request})
 
 # Health endpoints are served via /api/v1/health (router)

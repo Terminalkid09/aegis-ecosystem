@@ -1,6 +1,8 @@
 FROM alpine:3.19
 RUN adduser -D -h /home/sandbox sandbox && \
-    apk add --no-cache bash coreutils procps curl
+    apk add --no-cache bash coreutils procps curl socat
 USER sandbox
 WORKDIR /home/sandbox
-CMD ["/bin/sh"]
+COPY --chown=sandbox:sandbox sandbox-init.sh /home/sandbox/init.sh
+RUN chmod +x /home/sandbox/init.sh
+CMD ["/home/sandbox/init.sh"]

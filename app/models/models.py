@@ -1,4 +1,3 @@
-from typing import Any
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -7,6 +6,7 @@ from app.db.session import Base
 
 class User(Base):
     __tablename__ = "users"
+    __allow_unmapped__ = True
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(64), unique=True, nullable=False, index=True)
@@ -18,6 +18,7 @@ class User(Base):
 
 class AttackEvent(Base):
     __tablename__ = "attack_events"
+    __allow_unmapped__ = True
 
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String(64), unique=True, index=True, nullable=False)
@@ -40,9 +41,9 @@ class AttackEvent(Base):
     is_known_threat = Column(Boolean, default=False)
     threat_tags = Column(String(256), nullable=True)
 
-    commands: Any = relationship("AttackCommand", back_populates="event", cascade="all, delete-orphan")
-    credentials: Any = relationship("CredentialAttempt", back_populates="event", cascade="all, delete-orphan")
-    malware_samples: Any = relationship("MalwareSample", back_populates="event", cascade="all, delete-orphan")
+    commands = relationship("AttackCommand", back_populates="event", cascade="all, delete-orphan", uselist=True)
+    credentials = relationship("CredentialAttempt", back_populates="event", cascade="all, delete-orphan", uselist=True)
+    malware_samples = relationship("MalwareSample", back_populates="event", cascade="all, delete-orphan", uselist=True)
 
     __table_args__ = (
         Index("ix_attack_events_ip_sensor", "attacker_ip", "sensor_type"),
@@ -52,17 +53,19 @@ class AttackEvent(Base):
 
 class AttackCommand(Base):
     __tablename__ = "attack_commands"
+    __allow_unmapped__ = True
 
     id = Column(Integer, primary_key=True, index=True)
     event_id = Column(Integer, ForeignKey("attack_events.id", ondelete="CASCADE"), nullable=False)
     command = Column(Text, nullable=False)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
-    event: Any = relationship("AttackEvent", back_populates="commands")
+    event = relationship("AttackEvent", back_populates="commands")
 
 
 class CredentialAttempt(Base):
     __tablename__ = "credential_attempts"
+    __allow_unmapped__ = True
 
     id = Column(Integer, primary_key=True, index=True)
     event_id = Column(Integer, ForeignKey("attack_events.id", ondelete="CASCADE"), nullable=False)
@@ -71,11 +74,12 @@ class CredentialAttempt(Base):
     success = Column(Boolean, default=False)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
-    event: Any = relationship("AttackEvent", back_populates="credentials")
+    event = relationship("AttackEvent", back_populates="credentials")
 
 
 class MalwareSample(Base):
     __tablename__ = "malware_samples"
+    __allow_unmapped__ = True
 
     id = Column(Integer, primary_key=True, index=True)
     event_id = Column(Integer, ForeignKey("attack_events.id", ondelete="CASCADE"), nullable=False)
@@ -85,4 +89,4 @@ class MalwareSample(Base):
     size = Column(Integer, nullable=True)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
-    event: Any = relationship("AttackEvent", back_populates="malware_samples")
+    event = relationship("AttackEvent", back_populates="malware_samples")

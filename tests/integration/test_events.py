@@ -30,7 +30,7 @@ class TestEvents:
         ))
         db_session.add(AttackCommand(event_id=event.id, command="whoami"))
         db_session.add(AttackCommand(event_id=event.id, command="ls -la"))
-        await db_session.commit()
+        await db_session.flush()
 
         response = await client.get("/api/v1/events/", headers=auth_headers)
         assert response.status_code == 200
@@ -47,7 +47,7 @@ class TestEvents:
                 sensor_type="ssh",
                 sensor_port=2222,
             ))
-        await db_session.commit()
+        await db_session.flush()
 
         response = await client.get("/api/v1/events/?limit=10", headers=auth_headers)
         assert response.status_code == 200
@@ -64,7 +64,7 @@ class TestEvents:
         db_session.add(AttackEvent(
             session_id="http-001", attacker_ip="2.2.2.2", sensor_type="http", sensor_port=8080
         ))
-        await db_session.commit()
+        await db_session.flush()
 
         response = await client.get("/api/v1/events/?sensor_type=ssh", headers=auth_headers)
         assert response.status_code == 200
@@ -84,7 +84,7 @@ class TestEvents:
         db_session.add(event)
         await db_session.flush()
         db_session.add(CredentialAttempt(event_id=event.id, username="root", password="toor"))
-        await db_session.commit()
+        await db_session.flush()
 
         response = await client.get(f"/api/v1/events/{event.session_id}", headers=auth_headers)
         assert response.status_code == 200
@@ -104,7 +104,7 @@ class TestEvents:
                 sensor_type="ssh" if i % 2 == 0 else "http", sensor_port=2222,
                 country="US" if i % 2 == 0 else "DE",
             ))
-        await db_session.commit()
+        await db_session.flush()
 
         response = await client.get("/api/v1/events/stats", headers=auth_headers)
         assert response.status_code == 200

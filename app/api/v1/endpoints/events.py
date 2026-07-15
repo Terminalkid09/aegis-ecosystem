@@ -23,7 +23,12 @@ async def ingest(
     _key: str = Depends(verify_internal_api_key),
 ):
     """Receive telemetry from sensors. Requires X-Internal-API-Key header."""
-    return await ingest_sensor_event(db, payload)
+    from sqlalchemy.exc import IntegrityError
+    try:
+        return await ingest_sensor_event(db, payload)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Duplicate session_id")
 
 
 @router.get("/stats", response_model=DashboardStats)

@@ -1,14 +1,10 @@
 #!/bin/bash
+# Kraken restore script — restores PostgreSQL database from a backup file
 set -euo pipefail
 
-BACKUP_DIR="/backups"
-
 usage() {
-    echo "Usage: $0 <backup_date> [postgres|redis|malware|config|all]"
-    echo "Example: $0 20240115_120000 all"
-    echo "Available backups:"
-    ls -1 "${BACKUP_DIR}/postgres/" 2>/dev/null | head -10 || echo "  No postgres backups"
-    ls -1 "${BACKUP_DIR}/redis/" 2>/dev/null | head -10 || echo "  No redis backups"
+    echo "Usage: $0 <backup_file.sql.gz>"
+    echo "Restores a Kraken PostgreSQL backup."
     exit 1
 }
 
@@ -16,64 +12,36 @@ if [ $# -lt 1 ]; then
     usage
 fi
 
-DATE=$1
-COMPONENT=${2:-all}
+BACKUP_FILE="$1"
 
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
-}
+if [ ! -f "$BACKUP_FILE" ]; then
+    echo "Error: Backup file not found: $BACKUP_FILE"
+    exit 1
+fi
 
-restore_postgres() {
-    log "Restoring PostgreSQL from ${DATE}..."
-    gunzip -c "${BACKUP_DIR}/postgres/krakendb_${DATE}.sql.gz" | docker exec -i kraken_db psql -U kraken -d krakendb
-    log "PostgreSQL restore completed"
-}
+echo "=== Kraken Restore: $(date) ==="
+echo "Restoring from: $BACKUP_FILE"
 
-restore_redis() {
-    log "Restoring Redis from ${DATE}..."
-    gunzip -c "${BACKUP_DIR}/redis/dump_${DATE}.rdb.gz" > /tmp/dump.rdb
-    docker cp /tmp/dump.rdb kraken_redis:/data/dump.rdb
-    docker exec kraken_redis redis-cli -a "${REDIS_PASSWORD:-kraken_redis_pass}" SHUTDOWN NOSAVE
-    sleep 2
-    docker restart kraken_redis
-    log "Redis restore completed"
-}
+# Confirm
+read -p "This will DROP ALL EXISTING DATA in the database. Continue? (y/N) " confirm
+if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+    echo "Restore cancelled."
+    exit 0
+fi
 
-restore_malware() {
-    log "Restoring malware samples from ${DATE}..."
-    tar -xzf "${BACKUP_DIR}/malware/malware_${DATE}.tar.gz" -C /app/data/
-    log "Malware restore completed"
-}
+# Drop and recreate schema
+echo "Dropping existing schema..."
+PGPASSWORD="${DB_PASSWORD:-kraken_pass}" psql \
+    -h "${DB_HOST:-localhost}" \
+    -U "${DB_USER:-kraken}" \
+    -d "${DB_NAME:-krakendb}" \
+    -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 
-restore_config() {
-    log "Restoring configuration from ${DATE}..."
-    tar -xzf "${BACKUP_DIR}/config/config_${DATE}.tar.gz" -C /
-    log "Config restore completed"
-}
+# Restore
+echo "Restoring database..."
+gunzip -c "$BACKUP_FILE" | PGPASSWORD="${DB_PASSWORD:-kraken_pass}" psql \
+    -h "${DB_HOST:-localhost}" \
+    -U "${DB_USER:-kraken}" \
+    -d "${DB_NAME:-krakendb}"
 
-case "${COMPONENT}" in
-    postgres)
-        restore_postgres
-        ;;
-    redis)
-        restore_redis
-        ;;
-    malware)
-        restore_malware
-        ;;
-    config)
-        restore_config
-        ;;
-    all)
-        restore_postgres
-        restore_redis
-        restore_malware
-        restore_config
-        ;;
-    *)
-        echo "Unknown component: ${COMPONENT}"
-        usage
-        ;;
-esac
-
-log "Restore completed for ${COMPONENT}"
+echo "=== Restore complete ==="

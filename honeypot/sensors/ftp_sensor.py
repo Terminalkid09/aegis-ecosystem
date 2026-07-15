@@ -23,7 +23,7 @@ class FTPSensor:
         commands = []
         
         async def pasv_handler(d_reader, d_writer):
-            malware_dir = "/app/data/malware"
+            malware_dir = settings.MALWARE_DIR
             os.makedirs(malware_dir, exist_ok=True)
             content = await d_reader.read()
             if content:

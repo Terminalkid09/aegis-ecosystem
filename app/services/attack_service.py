@@ -43,6 +43,26 @@ async def ingest_sensor_event(db: AsyncSession, payload: SensorEventIn) -> Attac
     await db.commit()
     await db.refresh(event, ["credentials", "commands", "malware_samples"])
 
+    from app.core.event_bus import event_bus
+    event_dict = {
+        "id": event.id,
+        "session_id": event.session_id,
+        "attacker_ip": event.attacker_ip,
+        "attacker_port": event.attacker_port,
+        "sensor_type": event.sensor_type,
+        "sensor_port": event.sensor_port,
+        "timestamp_start": str(event.timestamp_start),
+        "country": event.country,
+        "city": event.city,
+        "asn": event.asn,
+        "isp": event.isp,
+        "is_known_threat": event.is_known_threat,
+        "threat_tags": event.threat_tags,
+        "username": payload.username,
+        "commands": payload.commands or [],
+    }
+    await event_bus.emit_async("attack.ingested", attack_event=event_dict)
+
     try:
         await telegram_service.send_alert({
             **payload.model_dump(),
@@ -87,6 +107,11 @@ async def get_events(
 ) -> List[AttackEvent]:
     q = (
         select(AttackEvent)
+        .options(
+            selectinload(AttackEvent.credentials),
+            selectinload(AttackEvent.commands),
+            selectinload(AttackEvent.malware_samples),
+        )
         .order_by(desc(AttackEvent.timestamp_start))
     )
     if sensor_type:

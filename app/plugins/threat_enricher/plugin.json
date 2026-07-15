@@ -1,0 +1,13 @@
+{
+  "id": "threat_enricher",
+  "name": "Threat Enricher",
+  "version": "1.0.0",
+  "description": "Enriches attack events with threat intelligence tags based on IP reputation, attack patterns, and suspicious activity heuristics.",
+  "author": "Kraken Team",
+  "hooks": ["attack.ingested", "system.startup"],
+  "config": {
+    "known_bad_ips_file": "",
+    "auto_tag_admin_bruteforce": true,
+    "max_commands_threshold": 5
+  }
+}

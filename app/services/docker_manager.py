@@ -21,6 +21,7 @@ def _safe_extract(tar: tarfile.TarFile, dest: str) -> list[dict]:
         if f is None:
             continue
         content = f.read()
+        f.close()
         sha256_hash = hashlib.sha256(content).hexdigest()
         safe_path = os.path.join(dest, sha256_hash)
         with open(safe_path, "wb") as out:

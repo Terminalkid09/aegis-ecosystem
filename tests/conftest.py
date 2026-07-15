@@ -14,8 +14,12 @@ from app.core.config import settings
 from app.models.models import User
 from app.core.security import hash_password, create_access_token
 
-# Use in-memory SQLite for tests
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+import tempfile
+
+_tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+
+# Use file-based SQLite so all connections share the same database
+TEST_DATABASE_URL = f"sqlite+aiosqlite:///{_tmp_db.name}"
 
 test_engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool, echo=False)
 TestAsyncSessionLocal = async_sessionmaker(
@@ -42,6 +46,10 @@ async def setup_database():
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await test_engine.dispose()
+    try:
+        os.unlink(_tmp_db.name)
+    except OSError:
+        pass
 
 
 @pytest.fixture
@@ -67,28 +75,30 @@ async def client(db_session):
 
 @pytest.fixture
 async def test_user(db_session):
+    import uuid
     user = User(
-        username="testuser",
+        username=f"testuser-{uuid.uuid4().hex[:8]}",
         hashed_password=hash_password("testpass123"),
         is_admin=False,
         is_active=True,
     )
     db_session.add(user)
-    await db_session.commit()
+    await db_session.flush()
     await db_session.refresh(user)
     return user
 
 
 @pytest.fixture
 async def admin_user(db_session):
+    import uuid
     user = User(
-        username="admin",
+        username=f"admin-{uuid.uuid4().hex[:8]}",
         hashed_password=hash_password("adminpass123"),
         is_admin=True,
         is_active=True,
     )
     db_session.add(user)
-    await db_session.commit()
+    await db_session.flush()
     await db_session.refresh(user)
     return user
 

@@ -78,7 +78,7 @@ const SENSOR_COLORS = {
 
 function sensorBadge(s) {
     const cls = SENSOR_COLORS[s] || 'bg-slate-100 text-slate-600';
-    return `<span class="text-xs font-semibold px-2 py-0.5 rounded-full ${cls}">${s.toUpperCase()}</span>`;
+    return `<span class="text-xs font-semibold px-2 py-0.5 rounded-full ${cls}">${escapeHtml(s).toUpperCase()}</span>`;
 }
 
 async function loadEvents(reset = false) {
@@ -102,21 +102,29 @@ async function loadEvents(reset = false) {
         if (!events.length) {
             tbody.innerHTML = '<tr><td colspan="7" class="px-5 py-10 text-center text-slate-400">No events found.</td></tr>';
         } else {
-            tbody.innerHTML = events.map(e => `
+            tbody.innerHTML = events.map(e => {
+                const ts = e.timestamp_start ? e.timestamp_start.replace('T',' ').slice(0,19) : '';
+                const sip = escapeHtml(e.attacker_ip || '');
+                const ssensor = escapeHtml(e.sensor_type || '');
+                const scountry = escapeHtml(e.country || '');
+                const scity = escapeHtml(e.city || '');
+                const ssid = escapeHtml(e.session_id || '');
+                return `
                 <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
-                    <td class="px-5 py-3 text-xs font-mono text-slate-400">${e.timestamp_start.replace('T',' ').slice(0,19)}</td>
-                    <td class="px-5 py-3 font-mono font-semibold text-indigo-500">${e.attacker_ip}</td>
-                    <td class="px-5 py-3">${sensorBadge(e.sensor_type)}</td>
-                    <td class="px-5 py-3">${e.country || '—'}</td>
-                    <td class="px-5 py-3 text-slate-400 text-xs">${e.city || '—'}</td>
+                    <td class="px-5 py-3 text-xs font-mono text-slate-400">${ts}</td>
+                    <td class="px-5 py-3 font-mono font-semibold text-indigo-500">${sip}</td>
+                    <td class="px-5 py-3">${sensorBadge(ssensor)}</td>
+                    <td class="px-5 py-3">${scountry || '—'}</td>
+                    <td class="px-5 py-3 text-slate-400 text-xs">${scity || '—'}</td>
                     <td class="px-5 py-3">${e.is_known_threat
                         ? '<span class="text-xs font-semibold text-rose-500">⚠ Known</span>'
                         : '<span class="text-xs text-slate-400">—</span>'}</td>
                     <td class="px-5 py-3">
-                        <a href="/api/v1/events/${e.session_id}" target="_blank"
+                        <a href="/api/v1/events/${ssid}" target="_blank"
                            class="text-xs text-indigo-400 hover:text-indigo-300 hover:underline">JSON ↗</a>
                     </td>
-                </tr>`).join('');
+                </tr>`;
+            }).join('');
         }
 
         document.getElementById('page-info').textContent =

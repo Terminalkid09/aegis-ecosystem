@@ -1,5 +1,7 @@
 import pytest
 import pytest_asyncio
+import tempfile
+import os
 from unittest.mock import AsyncMock, patch
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
@@ -8,7 +10,8 @@ from app.schemas.schemas import SensorEventIn
 from app.services.attack_service import ingest_sensor_event, get_events, get_dashboard_stats
 from app.services.geoip import GeoIPService
 
-TEST_DB = "sqlite+aiosqlite:///:memory:"
+_tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+TEST_DB = f"sqlite+aiosqlite:///{_tmp_db.name}"
 engine = create_async_engine(TEST_DB, echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
@@ -20,6 +23,11 @@ async def setup_db():
     yield
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
+    try:
+        os.unlink(_tmp_db.name)
+    except OSError:
+        pass
 
 
 @pytest_asyncio.fixture
