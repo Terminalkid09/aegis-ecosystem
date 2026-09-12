@@ -1,6 +1,9 @@
 import pytest
 import time
-from app.core.security import hash_password, verify_password, needs_rehash, create_access_token, decode_access_token
+from app.core.security import (
+    hash_password, verify_password, needs_rehash, create_access_token,
+    decode_access_token, blacklist_token,
+)
 
 def test_password_hashing():
     password = "MySecurePassword123!"
@@ -30,6 +33,17 @@ def test_jwt_creation_and_decoding():
 def test_jwt_decoding_invalid():
     invalid_token = "eyJhbGciOiJIUzI1NiIsInR5cCI.invalid.signature"
     assert decode_access_token(invalid_token) is None
+
+
+@pytest.mark.asyncio
+async def test_blacklist_fails_closed_when_redis_write_fails(monkeypatch):
+    from app.core import security
+
+    async def fail_setex(*args, **kwargs):
+        raise OSError("redis unavailable")
+
+    monkeypatch.setattr(security.redis_client, "setex", fail_setex)
+    assert await blacklist_token("jti-test", int(time.time()) + 60) is False
 
 
 def test_legacy_passlib_hash_migrates_to_pwdlib():

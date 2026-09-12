@@ -86,14 +86,24 @@ def decode_access_token(token: str) -> dict | None:
 # Token blacklist (Redis ASYNC). Revocation is security-critical: if Redis is
 # unavailable we fail closed instead of accepting a token that may have been
 # revoked. Callers can surface the resulting 401/503 as a degraded auth state.
-async def blacklist_token(jti: str, expires_at_ts: int):
+async def blacklist_token(jti: str, expires_at_ts: int) -> bool:
+    """Revoca un token e conferma la persistenza.
+
+    La revoca è fail-closed: se Redis non conferma la scrittura, il chiamante
+    non deve dichiarare il logout completato.
+    """
     now_ts = int(datetime.now(timezone.utc).timestamp())
     ttl = max(0, expires_at_ts - now_ts)
-    if ttl > 0:
-        try:
-            await redis_client.setex(f"bl:{jti}", ttl, "1")
-        except Exception:
-            pass
+    if ttl <= 0:
+        return True
+    try:
+        await redis_client.setex(f"bl:{jti}", ttl, "1")
+        return True
+    except Exception as exc:
+        # Non esporre dettagli Redis al client, ma lasciare traccia operativa.
+        import logging
+        logging.getLogger(__name__).error("JWT blacklist persistence failed: %s", exc)
+        return False
 
 
 async def is_token_blacklisted(jti: str) -> bool:

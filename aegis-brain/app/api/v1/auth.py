@@ -88,7 +88,11 @@ async def logout(
             jti = payload.get("jti")
             exp = payload.get("exp")
             if jti and exp:
-                await blacklist_token(jti, int(exp))
+                if not await blacklist_token(jti, int(exp)):
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Token revocation service unavailable",
+                    )
     response.delete_cookie(
         key="aegis_token",
         path="/api/",
