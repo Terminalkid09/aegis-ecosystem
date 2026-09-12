@@ -66,6 +66,16 @@ aegis.bat
 
 Menu: `[1]` Start Backend + Frontend, `[2]` Start Local Agents, `[3]` Stop, `[4]` Clean DB, `[5]` View Logs, `[6]` Exit, `[B]` Build.
 
+### Deployment profiles
+
+| Profile | Command | Notes |
+|---|---|---|
+| Lab (default) | `docker compose up -d --build` | Dev TLS internal, porte localhost |
+| Pilot | `docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.mtls.yml up -d --build` | mTLS :8443, richiede `.env` senza placeholder + `BACKUP_PASSPHRASE` |
+| Observability (lab) | `docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile observability up -d --build` | Prometheus `localhost:9090` + Grafana `localhost:3001`, richiede `GRAFANA_ADMIN_PASSWORD` |
+
+Equivalent installer scripts: `./install.sh lab|pilot [--observability]` and `.\install.ps1 lab|pilot [-Observability]` (never combined with pilot).
+
 ### Standalone Agent Builds
 
 Pre-compiled agents ship without Python/JDK runtime dependencies:
