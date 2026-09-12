@@ -6,6 +6,7 @@ from datetime import datetime
 from app.database.connection import get_db
 from app.database.models import Playbook, PlaybookAction, PlaybookExecution, Alert
 from app.core.deps import get_current_user
+from app.services.playbook_engine import describe_action
 from pydantic import BaseModel
 
 router = APIRouter(tags=["Playbooks"])

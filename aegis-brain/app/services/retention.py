@@ -15,6 +15,7 @@ Tutte le cancellazioni sono in transazione, con controllo righe orfane
 via FK CASCADE/SET NULL già modellate.
 """
 import asyncio
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any
 from sqlalchemy import delete, select, func
