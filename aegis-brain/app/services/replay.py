@@ -15,10 +15,15 @@ from app.rules.rule_definitions import (
 )
 
 CORPUS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "tests", "corpus")
-# Il corpus rappresenta ~1 host-day di attività mista: la stima
-# falsi-positivi/host/giorno è onesta solo a questa assunzione documentata.
+# Ogni split è un corpus INDIPENDENTE (eventi disgiunti, host/timestamp/procedure
+# differenti): training = gli eventi su cui le regole sono state sviluppate;
+# validation = eventi tenuti fuori durante lo sviluppo (generalizzazione);
+# regression = casi noti passati che non devono mai ri-regredire.
+# La stima falsi-positivi/host/giorno è onesta solo a host_days documentato.
 CORPUS_HOST_DAYS = 1.0
-DATASET_VERSION = "corpus-v1"
+DATASET_VERSION = "corpus-v2"
+DATASET_SPLITS = ("training", "validation", "regression")
+ALLOWED_RULE_ID_PREFIX = "AEGIS-S"
 
 
 def run_static_replay(
@@ -74,8 +79,17 @@ def run_static_replay(
             "events": len(events)}
 
 
-def _load_corpus(name: str) -> List[Dict[str, Any]]:
-    path = os.path.join(CORPUS_DIR, name)
+def _split_dir(split: str = "training") -> str:
+    """Directory del corpus per split. Training = radice (retro-compatibile)."""
+    if split == "training":
+        return CORPUS_DIR
+    if split not in DATASET_SPLITS:
+        raise ValueError(f"unknown split: {split!r}; expected one of {DATASET_SPLITS}")
+    return os.path.join(CORPUS_DIR, split)
+
+
+def _load_corpus(name: str, split: str = "training") -> List[Dict[str, Any]]:
+    path = os.path.join(_split_dir(split), name)
     out = []
     with open(path, encoding="utf-8") as f:
         for line in f:
@@ -85,10 +99,10 @@ def _load_corpus(name: str) -> List[Dict[str, Any]]:
     return out
 
 
-def _load_corpus_tolerant(name: str) -> tuple[List[Dict[str, Any]], int]:
+def _load_corpus_tolerant(name: str, split: str = "training") -> tuple[List[Dict[str, Any]], int]:
     """Come _load_corpus ma conta le righe non-JSON senza alzare eccezioni:
     il corpus «malformed» DEVE contenere anche roba non parseabile."""
-    path = os.path.join(CORPUS_DIR, name)
+    path = os.path.join(_split_dir(split), name)
     out = []
     invalid = 0
     with open(path, encoding="utf-8") as f:
@@ -120,19 +134,24 @@ def score_corpus(
     host_days: float = CORPUS_HOST_DAYS,
     include_canary: bool = False,
     seed: int | None = None,
+    split: str = "training",
 ) -> Dict[str, Any]:
     """TP = riga sospetta con almeno una regola attesa tra gli hit;
     FN = riga sospetta senza hit attesi; FP = riga benigna con hit.
     Hit extra su righe sospette: informativi, non penalizzati.
     «malformed»: righe corrotte/incomplete che il pipeline deve scartare
     contandole come invalid (mai eccezioni, mai crash).
+    `split` seleziona il corpus indipendente: training (default, retro-compatibile),
+    validation o regression.
     """
+    if split not in DATASET_SPLITS:
+        raise ValueError(f"unknown split: {split!r}; expected one of {DATASET_SPLITS}")
     if benign is None:
-        benign = _load_corpus("benign.jsonl")
+        benign = _load_corpus("benign.jsonl", split)
     if suspicious is None:
-        suspicious = _load_corpus("suspicious.jsonl")
+        suspicious = _load_corpus("suspicious.jsonl", split)
     _malformed, _malformed_nonjson = (malformed, 0) if malformed is not None \
-        else _load_corpus_tolerant("malformed.jsonl")
+        else _load_corpus_tolerant("malformed.jsonl", split)
 
     per_rule: Dict[str, Dict[str, int]] = {}
     for s in STATIC_RULES:
@@ -178,6 +197,7 @@ def score_corpus(
     return {
         "engine": "static-replay-v1",
         "dataset_version": DATASET_VERSION,
+        "split": split,
         "seed": seed,
         "rules": len(STATIC_RULES),
         "benign_lines": len(benign),
@@ -194,4 +214,16 @@ def score_corpus(
         "mttd_seconds": None,
         "triage_seconds": None,
         "mttd_note": "not measurable in replay; measured live from alert timestamps",
+    }
+
+
+def score_all_splits(include_canary: bool = False, seed: int | None = None) -> Dict[str, Dict[str, Any]]:
+    """Scora ogni split indipendente (training/validation/regression).
+
+    I dataset sono disgiunti: validation e regression NON condividono eventi
+    con training, quindi le metriche misurano generalizzazione e non overfitting.
+    """
+    return {
+        split: score_corpus(include_canary=include_canary, seed=seed, split=split)
+        for split in DATASET_SPLITS
     }

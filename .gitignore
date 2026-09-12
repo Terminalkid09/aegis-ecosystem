@@ -73,6 +73,8 @@ Thumbs.db
 .settings/
 .classpath
 .pytest_cache/
+.pytest-temp/
+.pytest-audit-temp/
 .coverage
 htmlcov/
 .eslintcache
@@ -93,6 +95,7 @@ logs/
 # CI / Reports
 .gitlab-ci.yml.local
 AEGIS_*_REPORT.md
+audit_report.json
 docs/AEGIS_*_REPORT.md
 docs/TEST_REPORT.md
 docs/VALIDATION_REPORT.md

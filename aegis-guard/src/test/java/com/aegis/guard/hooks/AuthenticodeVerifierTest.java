@@ -4,6 +4,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assumptions;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AuthenticodeVerifierTest {
@@ -51,6 +52,9 @@ class AuthenticodeVerifierTest {
         if (!System.getProperty("os.name", "").toLowerCase().contains("win")) return;
         String notepad = System.getenv("SystemRoot") + "\\System32\\notepad.exe";
         if (!Files.isRegularFile(Path.of(notepad))) return;
+        String providerStatus = AuthenticodeVerifier.authenticodeStatus(notepad);
+        Assumptions.assumeTrue("Valid".equalsIgnoreCase(providerStatus),
+                "Windows trust provider non disponibile per il test: " + providerStatus);
         AuthenticodeVerifier.Result r = AuthenticodeVerifier.verify(notepad);
         assertTrue(r.signed(), "notepad.exe di sistema deve essere firmato: " + r.error());
         assertEquals(0, r.errorCode());

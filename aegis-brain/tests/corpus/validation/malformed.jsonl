@@ -1,0 +1,3 @@
+not json {{{{ broken{"expect": [], "event": {"agent_id": "val-host-01", "timestamp": "not-a-date", "event_type": "PROCESS_CREATED", "process_name": "x.exe"}}
+{"expect": [], "event": {"agent_id": "val-host-01", "timestamp": "2026-10-01T08:00:00+00:00", "event_type": "PROCESS_CREATED", "seq": -1}}
+{"expect": [], "event": {"agent_id": "val-host-01", "timestamp": "2026-10-01T08:00:00+00:00", "event_type": "NOT_A_TYPE", "process_name": "x.exe"}}

@@ -8,8 +8,12 @@ indicate come stime.
 ## Replay engine (senza DB)
 
 - 1 000 eventi sintetici (5% sospetti): **~5–6k ev/s**, latenza singola **<0.1 ms**
-- Corpus ufficiale 12+12: precision/recall/F1 **1.0**, **0 FP/host/day** su
-  **1 host-day sintetico** (limite: dataset piccolo, non globale).
+- Corpus training 12+12: precision/recall/F1 **1.0**, **0 FP/host/day** su
+  **1 host-day sintetico**.
+- Corpus validation indipendente 16+9: precision/recall/F1 **1.0**, **0 FP/host/day**.
+- Corpus regression 7+6: precision/recall/F1 **1.0**, **0 FP/host/day**.
+- Gli split validation/regression sono sintetici e non sostituiscono dati reali:
+  non è corretto generalizzare questi valori a un ambiente enterprise.
 - MTTD non misurabile in replay (solo live).
 
 ## Throughput per agent e profili
@@ -76,6 +80,9 @@ oltre servono worker async + partizionamento PG (ARCH_REVIEW).
 ```bash
 python scripts/benchmark.py --quick
 python scripts/benchmark.py --agents 100 --events 100
+python scripts/generate_corpus_splits.py --dry-run
+python scripts/replay_report.py --all --json
+python scripts/audit_report.py --skip-slow
 python aegis-ebpf/bench.sh            # overhead eBPF worst-case
 python aegis-ebpf/check-contract.py   # compat v1/v2
 pytest aegis-brain/tests/test_benchmark.py -v

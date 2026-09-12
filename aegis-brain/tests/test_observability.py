@@ -65,3 +65,32 @@ def test_logging_formatter_injects_service():
     assert SERVICE_NAME == "aegis-brain"
     logger = get_logger("test.svc")
     assert logger is not None
+
+
+def test_optional_ollama_does_not_make_core_unready():
+    from app.core.health import HealthChecker, HealthCheckResult, HealthStatus
+
+    checker = HealthChecker()
+    results = {
+        "database": HealthCheckResult("database", HealthStatus.HEALTHY, 0, {}),
+        "redis": HealthCheckResult("redis", HealthStatus.HEALTHY, 0, {}),
+        "pipeline": HealthCheckResult("pipeline", HealthStatus.HEALTHY, 0, {}),
+        "pki": HealthCheckResult("pki", HealthStatus.HEALTHY, 0, {}),
+        "mtls": HealthCheckResult("mtls", HealthStatus.HEALTHY, 0, {}),
+        "ollama": HealthCheckResult("ollama", HealthStatus.UNHEALTHY, 0, {}, "offline"),
+    }
+
+    assert checker.get_overall_status(results) == HealthStatus.DEGRADED
+
+
+def test_critical_dependency_failure_remains_unhealthy():
+    from app.core.health import HealthChecker, HealthCheckResult, HealthStatus
+
+    checker = HealthChecker()
+    results = {
+        "database": HealthCheckResult("database", HealthStatus.UNHEALTHY, 0, {}, "offline"),
+        "redis": HealthCheckResult("redis", HealthStatus.HEALTHY, 0, {}),
+        "ollama": HealthCheckResult("ollama", HealthStatus.HEALTHY, 0, {}),
+    }
+
+    assert checker.get_overall_status(results) == HealthStatus.UNHEALTHY

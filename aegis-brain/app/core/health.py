@@ -26,6 +26,10 @@ class HealthCheckResult:
     error: Optional[str] = None
 
 class HealthChecker:
+    # Ollama è un assistente opzionale: la sua indisponibilità deve essere
+    # visibile, ma non può rendere non pronto il core EDR/XDR.
+    OPTIONAL_CHECKS = {"ollama"}
+
     def __init__(self):
         self._checks = {}
         self._register_default_checks()
@@ -146,9 +150,16 @@ class HealthChecker:
             return HealthCheckResult("mtls", HealthStatus.DEGRADED, 0, {}, str(e))
 
     def get_overall_status(self, results: Dict[str, HealthCheckResult]) -> HealthStatus:
-        if any(r.status == HealthStatus.UNHEALTHY for r in results.values()):
+        critical = {
+            name: result for name, result in results.items()
+            if name not in self.OPTIONAL_CHECKS
+        }
+        if any(r.status == HealthStatus.UNHEALTHY for r in critical.values()):
             return HealthStatus.UNHEALTHY
-        if any(r.status == HealthStatus.DEGRADED for r in results.values()):
+        # Un optional unhealthy è comunque un segnale operativo da mostrare,
+        # ma resta una degradazione e non un outage del servizio principale.
+        if any(r.status in {HealthStatus.DEGRADED, HealthStatus.UNHEALTHY}
+               for r in results.values()):
             return HealthStatus.DEGRADED
         return HealthStatus.HEALTHY
 
