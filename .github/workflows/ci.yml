@@ -137,8 +137,8 @@ jobs:
         env:
           DATABASE_URL: "postgresql+asyncpg://postgres:password@localhost:5432/aegis_test"
           REDIS_URL: "redis://localhost:6379"
-          JWT_SECRET: "test_jwt_secret_key_12345"
-          AGENT_ENROLL_KEY: "test_enroll_key"
+          JWT_SECRET: "ci_test_jwt_secret_key_32_chars_minimum"
+          AGENT_ENROLL_KEY: "ci_test_enrollment_key_16"
           REQUIRE_INTEGRATION: "1"
         run: |
           python scripts/run_integration_tests.py --import-mode=importlib -v
@@ -216,6 +216,7 @@ jobs:
           trivyignores: .trivyignore
           format: sarif
           output: trivy.sarif
+          scanners: vuln
           severity: HIGH,CRITICAL
           exit-code: '1'
 

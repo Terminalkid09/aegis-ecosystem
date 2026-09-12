@@ -11,8 +11,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$install = Join-Path $root "..\aegis-guard\install\windows\install.ps1"
-$uninstall = Join-Path $root "..\aegis-guard\install\windows\uninstall.ps1"
+$install = Join-Path $root ".." "aegis-guard" "install" "windows" "install.ps1"
+$uninstall = Join-Path $root ".." "aegis-guard" "install" "windows" "uninstall.ps1"
 $failures = 0
 
 function Assert-True([bool]$cond, [string]$msg) {
@@ -35,7 +35,7 @@ function Test-Contains([string]$path, [string]$pattern, [string]$msg) {
 
 Assert-True (Test-Path -LiteralPath $install) "install.ps1 esiste"
 Assert-True (Test-Path -LiteralPath $uninstall) "uninstall.ps1 esiste"
-Assert-True (Test-Path -LiteralPath (Join-Path $root "..\aegis-guard\install\windows\nssm.exe")) "nssm.exe presente"
+Assert-True (Test-Path -LiteralPath (Join-Path $root ".." "aegis-guard" "install" "windows" "nssm.exe")) "nssm.exe presente"
 
 if ($failures -eq 0) {
     Test-Syntax $install
