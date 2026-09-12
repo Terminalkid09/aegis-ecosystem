@@ -140,7 +140,7 @@ jobs:
           pip install -r requirements.txt
       - name: Wait for integration services
         env:
-          DATABASE_URL: "postgresql+asyncpg://postgres:password@127.0.0.1:5432/aegis_test"
+          DATABASE_URL: "postgresql://postgres:password@127.0.0.1:5432/aegis_test"
           REDIS_URL: "redis://127.0.0.1:6379"
         run: |
           python - <<'PY'
