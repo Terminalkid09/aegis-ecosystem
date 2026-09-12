@@ -1,0 +1,49 @@
+services:
+  aegis-prometheus:
+    image: prom/prometheus:v2.53.1@sha256:6ec2b8ac8e33b5959a0b4d36a2fbbce216bc31998a3c83ed9f8c35a0b097acbd
+    container_name: aegis-prometheus
+    profiles: ["observability"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=${PROM_RETENTION_DAYS:-14d}
+    ports:
+      - "127.0.0.1:${PROM_PORT_EXTERNAL:-9090}:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - aegis-brain
+      - aegis-link
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  aegis-grafana:
+    image: grafana/grafana:11.2.2@sha256:4f1423bfd74af07df65f6d785b991e98f14698f127ae2b58fe8096e5199e12b6
+    container_name: aegis-grafana
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set (compose profile observability)}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3001}
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT_EXTERNAL:-3001}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - aegis-prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  prometheus_data:
+  grafana_data:

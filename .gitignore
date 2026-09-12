@@ -116,3 +116,8 @@ aegis-guard/install/windows/install_log.txt
 # Docs suggestions / scratch
 *.suggestion.*
 scratch/
+
+# Aegis eBPF sensor (generati dal BTF del kernel target, mai committare)
+aegis-ebpf/vmlinux.h
+aegis-ebpf/*.o
+aegis-ebpf/aegis-collector

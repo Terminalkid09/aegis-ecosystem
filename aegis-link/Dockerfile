@@ -9,6 +9,7 @@ RUN mvn clean package -Dmaven.test.skip=true -B
 
 # ─── Runtime stage ────────────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine
+RUN apk upgrade --no-cache
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
 

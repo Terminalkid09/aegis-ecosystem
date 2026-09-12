@@ -1,0 +1,84 @@
+# Aegis mTLS termination (pilot opt-in, M6 post-audit).
+#
+# Uso: montare ./Caddyfile.mtls come Caddyfile al posto di quello base SOLO
+# dopo aver (1) emesso i certificati device, (2) distribuito AEGIS_MANIFEST_PUBKEY,
+# (3) impostato MTLS_MODE=required sul brain, (4) validato con:
+#   docker compose exec aegis-caddy caddy validate --config /etc/caddy/Caddyfile
+#
+# Disegno: due listener separati perché client_auth in Caddy è a livello TLS
+# (connessione), non per-path. I browser restano su :443 senza cert; gli
+# agent usano :8443 con certificato device obbligatorio verificato contro
+# la CA montata da volume pki_data (vedi docker-compose.yml).
+# Il brain ri-verifica comunque l'header X-Client-Cert (difesa in profondità):
+# Caddy lo inoltra così com'è dal client.
+
+{
+	auto_https disable_redirects
+}
+
+# ─── Dashboard e API browser (invariato rispetto al Caddyfile base) ───
+aegis.local {
+	tls internal
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	@api path /api/*
+	handle @api {
+		reverse_proxy aegis-brain:8000
+	}
+
+	@ws path /ws/*
+	handle @ws {
+		reverse_proxy aegis-brain:8000
+	}
+
+	handle {
+		reverse_proxy aegis-frontend:3000
+	}
+}
+
+# ─── Agent API con mTLS obbligatorio ───
+# `trusted_ca_cert_file` emette warning di deprecation su v2.11 ma resta
+# funzionale (verificato live: handshake senza cert e con cert di CA
+# sbagliata vengono rifiutati; vedi report post-audit).
+https://aegis.local:8443 {
+	tls internal {
+		client_auth {
+			mode require_and_verify
+			trusted_ca_cert_file /etc/caddy/pki/ca.crt
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	# Solo le rotte agent attraversano il listener mTLS.
+	@agent path /api/v1/telemetry/* /api/v1/enroll/* /api/v1/deploy/artifacts/*
+	handle @agent {
+		reverse_proxy aegis-brain:8000 {
+			# DER base64 del cert presentato (single-line, header-safe,
+			# placeholder verificato live): il brain riesegue verifica
+			# completa (catena, validità, CN, revoche).
+			header_up X-Client-Cert-Der {http.request.tls.client.certificate_der_base64}
+		}
+	}
+
+	# Qualunque altro path su :8443 = 404 (niente dashboard senza browser-TLS).
+	handle {
+		respond "not found" 404
+	}
+}
+
+:80 {
+	redir https://aegis.local{uri} permanent
+}

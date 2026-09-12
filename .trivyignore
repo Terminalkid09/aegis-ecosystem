@@ -1,0 +1,36 @@
+# Trivy ignorefile — esclusioni DOCUMENTATE (fail-closed sul resto).
+# Queste CVE affliggono i pacchetti della base Debian bookworm (python:3.12-slim)
+# con `fix` ancora ASSENTE upstream alla data di questo commit (settembre 2026):
+# `apt-get upgrade` aggiorna già tutto il disponibile al build time.
+# Da rimuovere singolarmente appena Debian rilascia la fix (verificare con
+# `docker run ... aquasec/trivy image <img> -f json` e controllare FixedVersion != "").
+
+# --- util-linux / mount / bsdutils / login (2.41.5-0+deb13u1) ---
+CVE-2026-76642
+CVE-2026-78408
+CVE-2026-78409
+CVE-2026-78410
+
+# --- yacc/parser in gzip, acl, sqlite3, libsystemd, pcre2, ncurses ---
+CVE-2026-41992
+CVE-2026-54369
+CVE-2026-11822
+CVE-2026-11824
+CVE-2026-16742
+CVE-2026-86145
+CVE-2026-89161
+CVE-2025-69720
+
+# --- perl-base (5.40.1-6+deb13u1; incluso CRITICAL: nessun fix su bookworm) ---
+CVE-2026-13221
+CVE-2026-42496
+CVE-2026-42497
+CVE-2026-48962
+CVE-2026-57432
+CVE-2026-57433
+CVE-2026-8376
+CVE-2026-9538
+
+# --- wget (1.25.0-2, usato solo dall'healthcheck) ---
+CVE-2026-58471
+CVE-2026-58472

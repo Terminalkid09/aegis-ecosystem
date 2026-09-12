@@ -1,0 +1,14 @@
+# Mai segreti o scarti nell'immagine: env solo da Compose esterni.
+.env
+.env.*
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+tests/
+.git/
+.gitignore
+*.db
+*.sqlite3
+artifacts/*
+!artifacts/.gitkeep

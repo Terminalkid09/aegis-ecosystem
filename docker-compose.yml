@@ -1,12 +1,12 @@
 services:
   aegis-postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     container_name: aegis-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB:       ${POSTGRES_DB:-aegis}
       POSTGRES_USER:     ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -18,12 +18,12 @@ services:
       retries: 5
 
   aegis-redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     container_name: aegis-redis
     restart: unless-stopped
     command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-aegis_redis_pass}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     ports:
       - "127.0.0.1:${REDIS_PORT_EXTERNAL:-6379}:6379"
     volumes:
@@ -35,7 +35,7 @@ services:
       retries: 5
 
   aegis-ollama:
-    image: ollama/ollama:0.3.14
+    image: ollama/ollama:0.3.14@sha256:e1ce9edb7ccd60ef8b4d99fffe7afdc67edfd1f4d7c6028a4253e6efa82f7e60
     container_name: aegis-ollama
     profiles: ["ollama"]
     restart: unless-stopped
@@ -55,20 +55,27 @@ services:
     ports:
       - "127.0.0.1:${BRAIN_PORT_EXTERNAL:-8000}:8000"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:password@aegis-postgres:5432/aegis}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-aegis_redis_pass}@aegis-redis:6379
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@aegis-redis:6379
       REDIS_HOST: aegis-redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-aegis_redis_pass}
-      AEGIS_API_KEY: ${AEGIS_API_KEY:-aegis_dev_api_key_change_me}
-      AGENT_ENROLL_KEY: ${AGENT_ENROLL_KEY:-aegis-enrollment-tokenFor_v3.0.0}
-      JWT_SECRET: ${JWT_SECRET:-aegis-dev-jwt-secret-change-me-32-chars}
-      MASTER_KEY_B64: ${MASTER_KEY_B64:-Q/wCZ5reU82bQpZppUc6Qq80sybBPz4Q276NbMBF97Q=}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      AEGIS_API_KEY: ${AEGIS_API_KEY:?AEGIS_API_KEY must be set}
+      AGENT_ENROLL_KEY: ${AGENT_ENROLL_KEY:?AGENT_ENROLL_KEY must be set}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      MASTER_KEY_B64: ${MASTER_KEY_B64:?MASTER_KEY_B64 must be set}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://aegis.local,http://localhost:3000}
       OLLAMA_URL: http://aegis-ollama:11434/api/generate
       OLLAMA_DEFAULT_MODEL: llama3
       SHODAN_API_KEY: ${SHODAN_API_KEY}
       ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY}
+      PKI_DIR: /app/pki
+      ARTIFACT_DIR: /app/artifacts
+      MTLS_MODE: ${MTLS_MODE:-off}
+    volumes:
+      # Post-audit: PKI e artefatti persistenti (mai effimeri nel container).
+      - pki_data:/app/pki
+      - artifact_data:/app/artifacts
     depends_on:
       aegis-postgres:
         condition: service_healthy
@@ -90,8 +97,8 @@ services:
     environment:
       SPRING_DATA_REDIS_HOST: aegis-redis
       SPRING_DATA_REDIS_PORT: 6379
-      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-aegis_redis_pass}
-      AEGIS_API_KEY: ${AEGIS_API_KEY:-aegis_dev_api_key_change_me}
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      AEGIS_API_KEY: ${AEGIS_API_KEY:?AEGIS_API_KEY must be set}
     depends_on:
       aegis-redis:
         condition: service_healthy
@@ -102,7 +109,10 @@ services:
       retries: 5
 
   aegis-frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api/v1}
     container_name: aegis-frontend
     restart: unless-stopped
     ports:
@@ -110,14 +120,13 @@ services:
     volumes:
       - ./frontend/src:/app/src
     environment:
-      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:8000/api/v1}
-      - WDS_SOCKET_PORT=0
+      - VITE_API_URL=${VITE_API_URL:-/api/v1}
     depends_on:
       aegis-brain:
         condition: service_healthy
 
   aegis-caddy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     container_name: aegis-caddy
     restart: unless-stopped
     ports:
@@ -139,27 +148,33 @@ services:
       retries: 5
 
   aegis-backup:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     container_name: aegis-backup
     profiles: ["backup"]
     restart: unless-stopped
     entrypoint: |
       sh -c "
-        apk add --no-cache curl;
+        apk add --no-cache curl gnupg;
         echo '0 */6 * * * /scripts/backup-db.sh' > /etc/crontabs/root;
+        echo '5 */6 * * * /scripts/backup-pki.sh' >> /etc/crontabs/root;
         crond -f -l 2
       "
     environment:
       DB_HOST: aegis-postgres
       DB_PORT: 5432
-      DB_NAME: aegis_db
-      DB_USER: aegis_user
-      PGPASSWORD: ${POSTGRES_PASSWORD:-password}
+      DB_NAME: ${POSTGRES_DB:-aegis}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       BACKUP_DIR: /backups
       RETENTION_DAYS: 7
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:-}
     volumes:
       - ./scripts/backup-db.sh:/scripts/backup-db.sh
+      - ./scripts/backup-pki.sh:/scripts/backup-pki.sh
       - postgres_backups:/backups
+      # Post-audit: la PKI entra nei backup (cifrati con BACKUP_PASSPHRASE).
+      - pki_data:/pki:ro
+      - artifact_data:/artifacts:ro
     depends_on:
       - aegis-postgres
 
@@ -172,3 +187,5 @@ volumes:
   guard_data:
   nodetrace_data:
   postgres_backups:
+  pki_data:
+  artifact_data:
