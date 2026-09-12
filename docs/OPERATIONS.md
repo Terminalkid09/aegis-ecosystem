@@ -96,8 +96,11 @@ incident, playbook) sono CASCADE/SET NULL: la purge non orfana righe.
   `events_duplicated`, `events_seq_gaps` (perdite misurate).
 - `GET /telemetry/agents?site=<sito>`: copertura per sito.
 - Log container: rotazione 5×10 MB (overlay prod).
-- `GET /health/live`: `database`, `redis`, `ollama`, `pipeline` (pik+mtls in
-  pilot). Un check non-`healthy` non blocca l'avvio degli altri servizi.
+- `GET /health/live`: `database`, `redis`, `ollama`, `pipeline`, `pki` e `mtls`.
+  `ollama` è opzionale: se non configurato o offline compare come `degraded`,
+  ma non rende non pronta la piattaforma core. Database, Redis, pipeline, PKI e
+  mTLS restano dipendenze critiche. Usare `/health/ready` per decidere se
+  accettare traffico e leggere sempre il dettaglio di ogni check.
 
 ## 7. Osservabilità (profilo lab "observability")
 
