@@ -33,7 +33,6 @@ public class Main {
 
         AegisClient client = new AegisClient();
         String agentId = Config.AGENT_ID;
-
         // 1. Enrollment Lifecycle
         File f = new File(Config.SECRET_FILE);
         if (f.exists()) {
@@ -42,13 +41,22 @@ public class Main {
                 agentId = secretJson.get("agent_id").getAsString();
                 client.setAgentSecret(secretJson.get("agent_secret").getAsString());
                 log.info("Loaded credentials from {}. Agent ID: {}", Config.SECRET_FILE, agentId);
+                // M6 Fase 7: pin del server — cambio silenzioso vietato.
+                String storedServer = secretJson.has("server_url")
+                        ? secretJson.get("server_url").getAsString() : null;
+                String pinError = com.aegis.guard.utils.ServerPin.check(
+                        storedServer, Config.BRAIN_URL);
+                if (pinError != null && storedServer != null && !storedServer.isBlank()) {
+                    log.error("[FATAL] {}", pinError);
+                    System.exit(1);
+                }
             } catch (Exception e) {
                 log.error("Failed to read secret.json: {}. Retrying enrollment...", e.getMessage());
             }
         }
 
         if (client.fetchCommand(agentId) == null && !f.exists()) {
-            log.info("No valid credentials found. Enrolling with key: {}", Config.ENROLL_KEY);
+            log.info("No valid credentials found. Enrolling (key from env, never logged).");
             try {
                 JsonObject resp = client.enroll(Config.ENROLL_KEY);
                 agentId = resp.get("agent_id").getAsString();
@@ -63,6 +71,7 @@ public class Main {
                     JsonObject save = new JsonObject();
                     save.addProperty("agent_id", agentId);
                     save.addProperty("agent_secret", secret);
+                    save.addProperty("server_url", Config.BRAIN_URL);
                     writer.write(save.toString());
                 }
                 log.info("Enrollment successful. Credentials saved to {}", Config.SECRET_FILE);
@@ -77,6 +86,14 @@ public class Main {
         ProcessMonitor monitor = ProcessMonitorFactory.create(client, hasher, agentId);
 
         final String finalAgentId = agentId;
+        client.setAgentId(finalAgentId);
+
+        // 2b. Identità device mTLS: bootstrap controllato (solo se assente o
+        // in scadenza) + rinnovo orario. Mai overwrite di un'identità valida,
+        // mai crash: senza identità l'agente lavora come prima (compat).
+        ensureDeviceIdentity(client, finalAgentId);
+        final java.util.concurrent.atomic.AtomicLong lastIdentityCheckMs =
+                new java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Stopping monitor...");
@@ -90,8 +107,15 @@ public class Main {
         new Thread(() -> {
             while (true) {
                 try {
+                    // Rinnovo identità al massimo una volta all'ora.
+                    long nowMs = System.currentTimeMillis();
+                    if (nowMs - lastIdentityCheckMs.get() > 3600000L) {
+                        lastIdentityCheckMs.set(nowMs);
+                        ensureDeviceIdentity(client, finalAgentId);
+                    }
                     SystemEvent hb = new SystemEvent(finalAgentId, 0, 0, "", "aegis-guard", "", "", System.getProperty("os.name"), "AGENT_HEARTBEAT");
                     hb.setHostname(SystemInfoCollector.getHostname());
+                    hb.setAgentVersion(Config.AGENT_VERSION);
                     client.sendEvent(hb);
                     Thread.sleep(HEARTBEAT_INTERVAL_SEC * 1000);
                 } catch (Exception e) {
@@ -100,13 +124,13 @@ public class Main {
             }
         }, "heartbeat").start();
 
-        // Commands
+        // Commands — drain adattivo: batch prima, singolo come fallback;
+        // se il batch torna pieno si ripolla subito (niente sleep sotto burst).
         new Thread(() -> {
             while (true) {
                 try {
-                    String raw = client.fetchCommand(finalAgentId);
-                    if (raw != null) processCommand(raw);
-                    Thread.sleep(COMMAND_POLL_INTERVAL_SEC * 1000);
+                    boolean more = pollCommandsOnce(client, finalAgentId);
+                    Thread.sleep(more ? 200 : COMMAND_POLL_INTERVAL_SEC * 1000);
                 } catch (Exception e) {}
             }
         }, "commands").start();
@@ -118,10 +142,31 @@ public class Main {
     //  Command Dispatch
     // ----------------------------------------------------------------
 
-    private static void processCommand(String rawJson) {
+    /** Un giro di poll: true se probabilmente c'è altro in coda (ripollare subito). */
+    static boolean pollCommandsOnce(AegisClient client, String agentId) {
+        java.util.List<String> batch = client.fetchCommandsBatch(agentId, 50);
+        if (batch == null) {
+            // Brain vecchio senza /batch: singolo comando come prima.
+            String raw = client.fetchCommand(agentId);
+            if (raw != null) processCommand(client, agentId, raw);
+            return false;
+        }
+        for (String raw : batch) {
+            try { processCommand(client, agentId, raw); }
+            catch (Exception e) { log.warn("Command error: {}", e.getMessage()); }
+        }
+        return batch.size() >= 50;
+    }
+
+    private static void processCommand(AegisClient client, String agentId, String rawJson) {
+        String type = "unknown";
+        Long alertId = null;
         try {
             JsonObject cmd = JsonParser.parseString(rawJson).getAsJsonObject();
-            String type = cmd.get("command").getAsString();
+            type = cmd.get("command").getAsString();
+            if (cmd.has("alert_id") && !cmd.get("alert_id").isJsonNull()) {
+                try { alertId = cmd.get("alert_id").getAsLong(); } catch (Exception ignored) {}
+            }
 
             switch (type) {
                 case "KILL_PROCESS":
@@ -152,11 +197,25 @@ public class Main {
                 case "VERIFY":
                     handleVerify(cmd);
                     break;
+                case "ISOLATE_HOST":
+                    handleIsolateHost(cmd);
+                    break;
+                case "DEISOLATE_HOST":
+                    handleDeisolateHost(cmd);
+                    break;
+                case "UPDATE_AGENT":
+                    handleUpdateAgent(client, cmd);
+                    break;
                 default:
                     log.info("[MITIGATION] Unknown command type: {}", type);
+                    client.ackCommand(agentId, type, "failed", "Unknown command type", alertId);
+                    return;
             }
+            client.ackCommand(agentId, type, "ok", null, alertId);
         } catch (Exception e) {
             log.warn("[MITIGATION] Command processing error: {}", e.getMessage());
+            try { client.ackCommand(agentId, type, "failed", e.getMessage(), alertId); }
+            catch (Exception ignored) {}
         }
     }
 
@@ -485,6 +544,160 @@ public class Main {
             log.info("[MITIGATION] DNS_SINKHOLE: {} -> 0.0.0.0 added to {}", domain, hostsPath);
         } catch (Exception e) {
             log.warn("[MITIGATION] DNS_SINKHOLE failed: {}", e.getMessage());
+        }
+    }
+
+    // ----------------------------------------------------------------
+    //  ISOLATE_HOST / DEISOLATE_HOST (contain & release, CrowdStrike-style)
+    // ----------------------------------------------------------------
+
+    private static void handleIsolateHost(JsonObject cmd) {
+        String brain = com.aegis.guard.utils.IsolationManager.extractBrainHost(
+                com.aegis.guard.utils.Config.BRAIN_URL);
+        boolean ok = true;
+        for (String[] argv : com.aegis.guard.utils.IsolationManager.buildIsolateCommands(brain)) {
+            if (exec(argv) == null) ok = false;
+        }
+        try {
+            String state = "isolated=true\nts=" + Instant.now() + "\nbrain=" + brain + "\n";
+            Files.writeString(Paths.get(com.aegis.guard.utils.IsolationManager.STATE_FILE), state);
+        } catch (IOException e) {
+            log.warn("[MITIGATION] ISOLATE_HOST: state file write failed: {}", e.getMessage());
+        }
+        log.info("[MITIGATION] ISOLATE_HOST: {} (brain exception: {})",
+                ok ? "host isolated" : "isolation PARTIAL — check firewall", brain.isEmpty() ? "none" : brain);
+        if (!ok) throw new RuntimeException("Isolation partially applied — see logs");
+    }
+
+    private static void handleDeisolateHost(JsonObject cmd) {
+        String brain = com.aegis.guard.utils.IsolationManager.extractBrainHost(
+                com.aegis.guard.utils.Config.BRAIN_URL);
+        boolean ok = true;
+        for (String[] argv : com.aegis.guard.utils.IsolationManager.buildRestoreCommands(brain)) {
+            if (exec(argv) == null) ok = false;
+        }
+        try { Files.deleteIfExists(Paths.get(com.aegis.guard.utils.IsolationManager.STATE_FILE)); }
+        catch (IOException ignored) {}
+        log.info("[MITIGATION] DEISOLATE_HOST: {}", ok ? "connectivity restored" : "restore PARTIAL — check firewall");
+        if (!ok) throw new RuntimeException("Restore partially applied — see logs");
+    }
+
+    // ----------------------------------------------------------------
+    //  Identità device mTLS (bootstrap + rinnovo controllato)
+    // ----------------------------------------------------------------
+
+    /**
+     * Garantisce un'identità valida: carica dal PKCS#12, oppure genera
+     * chiave+CSR e chiede il certificato al SOC, oppure rinnova in scadenza.
+     * Non tocca mai un'identità valida; non lancia mai (log + degrado).
+     */
+    static void ensureDeviceIdentity(AegisClient client, String agentId) {
+        try {
+            String secret = readDeviceSecret();
+            if (secret == null || secret.isBlank()) {
+                log.debug("Identità device: nessun secret, skip (pre-enroll)");
+                return;
+            }
+            java.nio.file.Path dir = java.nio.file.Paths.get(Config.IDENTITY_DIR);
+            char[] pw = com.aegis.guard.security.DeviceIdentity.deriveStorePassword(secret);
+            com.aegis.guard.security.DeviceIdentity.LoadedIdentity id =
+                    com.aegis.guard.security.DeviceIdentity.load(dir, pw);
+            if (id != null && !com.aegis.guard.security.DeviceIdentity.needsRenewal(id.leaf())) {
+                attachIdentity(client, id);
+                return;
+            }
+            log.info("Identità device assente o in scadenza: bootstrap/rinnovo CSR...");
+            java.security.KeyPair kp = com.aegis.guard.security.DeviceIdentity.generateKey();
+            String csr = com.aegis.guard.security.DeviceIdentity.buildCsrPem(
+                    kp.getPublic(), kp.getPrivate(), agentId);
+            String certPem = client.postCsr(agentId, csr);
+            java.security.cert.X509Certificate cert =
+                    com.aegis.guard.security.DeviceIdentity.parseCertPem(certPem);
+            com.aegis.guard.security.DeviceIdentity.store(
+                    dir, kp.getPrivate(), new java.security.cert.X509Certificate[]{cert});
+            log.info("Identità device emessa (serial {})", cert.getSerialNumber().toString(16));
+            attachIdentity(client, new com.aegis.guard.security.DeviceIdentity.LoadedIdentity(
+                    kp.getPrivate(), new java.security.cert.X509Certificate[]{cert}));
+        } catch (Exception e) {
+            log.warn("Identità device non disponibile ({}): agente senza mTLS", e.getMessage());
+        }
+    }
+
+    /** Collega chiave+cert al client + contesto TLS se la CA è provisionata. */
+    private static void attachIdentity(AegisClient client,
+            com.aegis.guard.security.DeviceIdentity.LoadedIdentity id) {
+        java.security.cert.X509Certificate serverCa = null;
+        if (!Config.SERVER_CA_FILE.isBlank()) {
+            serverCa = com.aegis.guard.security.DeviceTls.loadServerCa(
+                    java.nio.file.Paths.get(Config.SERVER_CA_FILE));
+            if (serverCa == null) {
+                log.warn("AEGIS_SERVER_CA illeggibile: solo header X-Client-Cert, niente TLS mutuo");
+            }
+        }
+        client.setIdentity(id.key(), id.chain(), serverCa);
+    }
+
+    private static String readDeviceSecret() {
+        try (FileReader reader = new FileReader(new File(Config.SECRET_FILE))) {
+            JsonObject o = JsonParser.parseReader(reader).getAsJsonObject();
+            return o.has("agent_secret") ? o.get("agent_secret").getAsString() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ----------------------------------------------------------------
+    //  UPDATE_AGENT (staged OTA — verify, stage, ack; apply on restart)
+    // ----------------------------------------------------------------
+
+    private static void handleUpdateAgent(AegisClient client, JsonObject cmd) {
+        String url = cmd.has("url") && !cmd.get("url").isJsonNull() ? cmd.get("url").getAsString() : "";
+        String sha = cmd.has("sha256") && !cmd.get("sha256").isJsonNull() ? cmd.get("sha256").getAsString() : "";
+        String sig = cmd.has("signature") && !cmd.get("signature").isJsonNull() ? cmd.get("signature").getAsString() : "";
+        String version = cmd.has("version") && !cmd.get("version").isJsonNull() ? cmd.get("version").getAsString() : "latest";
+        if (url.isEmpty() || sha.isEmpty() || sig.isEmpty()) {
+            throw new RuntimeException("UPDATE_AGENT: missing url/sha256/signature — refusing (fail-closed)");
+        }
+        // 1. HMAC con la enroll key dell'agente (niente firma valida → stop)
+        if (!com.aegis.guard.utils.UpdateManager.verifySignature(sha, sig, com.aegis.guard.utils.Config.ENROLL_KEY)) {
+            throw new SecurityException("UPDATE_AGENT: bad signature — possible tampering, refusing");
+        }
+        // 1b. Manifest Ed25519 (M6 Fase 7): se il comando lo porta e la pubkey
+        // è configurata, l'artefatto deve esserne coperto — altrimenti stop.
+        // Senza pubkey configurata resta l'HMAC (compat, loggato).
+        String manifest = cmd.has("manifest") && !cmd.get("manifest").isJsonNull()
+                ? cmd.get("manifest").getAsString() : "";
+        String manifestSig = cmd.has("manifest_sig") && !cmd.get("manifest_sig").isJsonNull()
+                ? cmd.get("manifest_sig").getAsString() : "";
+        String fileName = url.contains("/") ? url.substring(url.lastIndexOf('/') + 1) : url;
+        if (!manifest.isEmpty() && !manifestSig.isEmpty()
+                && !com.aegis.guard.utils.Config.MANIFEST_PUBKEY.isBlank()) {
+            boolean okSig = com.aegis.guard.utils.ManifestVerifier.verifyEd25519(
+                    manifest, manifestSig, com.aegis.guard.utils.Config.MANIFEST_PUBKEY);
+            boolean covered = com.aegis.guard.utils.ManifestVerifier.manifestCovers(
+                    manifest, fileName, sha);
+            if (!okSig || !covered) {
+                throw new SecurityException(
+                        "UPDATE_AGENT: manifest Ed25519 invalido o artefatto non coperto — refusing");
+            }
+            log.info("[MITIGATION] UPDATE_AGENT: manifest Ed25519 verificato per {}", fileName);
+        } else if (!com.aegis.guard.utils.Config.MANIFEST_PUBKEY.isBlank()) {
+            log.warn("[MITIGATION] UPDATE_AGENT: comando senza manifest firmato, solo HMAC");
+        }
+        // 2. Download in temp + stage (riverifica SHA, sposta, scrive update.state)
+        try {
+            Path tmp = Files.createTempFile("aegis-update-", ".pkg");
+            try {
+                client.downloadFile(url, tmp);
+                Path staged = com.aegis.guard.utils.UpdateManager.stagePackage(tmp, sha);
+                log.info("[MITIGATION] UPDATE_AGENT: v{} staged at {} — restart service to apply", version, staged);
+            } finally {
+                try { Files.deleteIfExists(tmp); } catch (IOException ignored) {}
+            }
+        } catch (SecurityException se) {
+            throw se;
+        } catch (Exception e) {
+            throw new RuntimeException("UPDATE_AGENT download/stage failed: " + e.getMessage(), e);
         }
     }
 

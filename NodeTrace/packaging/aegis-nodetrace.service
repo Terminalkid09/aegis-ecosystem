@@ -1,0 +1,24 @@
+[Unit]
+Description=Aegis NodeTrace telemetry agent
+Documentation=https://aegis.local/docs/agent-install
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/aegis/nodetrace
+ExecStart=/opt/aegis/nodetrace/nodetrace-agent
+Restart=on-failure
+RestartSec=10
+# Least privilege: solo le capability per eBPF opt-in, niente NewPrivileges.
+NoNewPrivileges=true
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_DAC_READ_SEARCH
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+# Env via file separato (mai segreti nell'unit): AEGIS_ENROLL_KEY, NODETRACE_*.
+EnvironmentFile=-/etc/aegis/nodetrace.env
+
+[Install]
+WantedBy=multi-user.target

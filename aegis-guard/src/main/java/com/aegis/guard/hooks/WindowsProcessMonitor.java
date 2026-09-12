@@ -33,12 +33,19 @@ public class WindowsProcessMonitor implements ProcessMonitor {
 
     // PID visti nell'ultimo ciclo — usati per rilevare nuovi processi.
     private final Set<Long> knownPids = new HashSet<>();
-    
+    private com.aegis.guard.network.EventOutbox outbox;
+
+    // Copertura reale (M2 Fase 3): Tier 1 ETW se disponibile, altrimenti
+    // polling Toolhelp32 dichiarato come fallback.
+    private volatile String coverageProvenance = "toolhelp";
+    private volatile String coverageQuality = "full";
+
     private final String hostname;
     private final String ipAddress;
 
     // Cache netstat: mappa PID → JSON array di connessioni
     private Map<Long, String> netstatCache = new HashMap<>();
+    private long lastNetstatRefreshMs = -1;
 
     public WindowsProcessMonitor(AegisClient client, HashCalculator hasher, String agentId) {
         this.client  = client;
@@ -56,21 +63,86 @@ public class WindowsProcessMonitor implements ProcessMonitor {
         log.info("WindowsProcessMonitor started (interval {}ms)", Config.SCAN_INTERVAL_MS);
 
         scanProcesses().forEach(e -> knownPids.add(e.getPid()));
+        outbox = new com.aegis.guard.network.EventOutbox(client);
+        outbox.start();
+
+        // Copertura reale: probe ETW (mai crash) + snapshot persistenze (read-only).
+        try {
+            EtwPipeSource etw = new EtwPipeSource(agentId, Config.AGENT_VERSION);
+            if (etw.probe()) {
+                coverageProvenance = "etw";
+                coverageQuality = "full";
+                log.info("ETW disponibile: telemetria event-driven");
+            } else {
+                coverageProvenance = "toolhelp";
+                coverageQuality = "degraded:etw-" + etw.degradedReason();
+                log.info("ETW non disponibile ({}): polling Toolhelp32 come fallback dichiarato",
+                        etw.degradedReason());
+            }
+        } catch (Exception e) {
+            coverageQuality = "degraded:etw-probe-failed";
+            log.warn("Probe ETW fallita: polling come fallback ({})", e.getMessage());
+        }
+        try {
+            WindowsPersistenceSnapshot.Snapshot snap = WindowsPersistenceSnapshot.collect();
+            log.info("Persistenze osservate (read-only): {} voci{}",
+                    snap.items().size(),
+                    snap.degraded().isEmpty() ? "" : " [degraded:" + snap.degraded() + "]");
+        } catch (Exception e) {
+            log.debug("Snapshot persistenze fallito: {}", e.getMessage());
+        }
+        try {
+            WindowsServiceSnapshot.Snapshot svc = WindowsServiceSnapshot.collect();
+            log.info("Servizi installati (read-only): {}{}",
+                    svc.services().size(),
+                    svc.degraded().isEmpty() ? "" : " [degraded:" + svc.degraded() + "]");
+        } catch (Exception e) {
+            log.debug("Snapshot servizi fallito: {}", e.getMessage());
+        }
+        try {
+            DefenderExclusions.Snapshot def = DefenderExclusions.collect();
+            if (DefenderExclusions.looksDisabled(def)) {
+                log.warn("Defender risulta DISABILITATO o con esclusioni: flags={} exclusions={}",
+                        def.tamperFlags(), def.exclusions().keySet());
+            } else {
+                log.info("Defender: {} tipi esclusione{}",
+                        def.exclusions().size(),
+                        def.degraded().isEmpty() ? "" : " [degraded:" + def.degraded() + "]");
+            }
+        } catch (Exception e) {
+            log.debug("Snapshot Defender fallito: {}", e.getMessage());
+        }
 
         while (running) {
             try {
-                // Refresh netstat cache every cycle
-                netstatCache = parseNetstat();
+                // netstat spawna un processo: al massimo ogni NETSTAT_INTERVAL_MS
+                long now = System.currentTimeMillis();
+                if (com.aegis.guard.utils.MonitorTuning.shouldRefreshNetstat(
+                        lastNetstatRefreshMs, now, Config.NETSTAT_INTERVAL_MS)) {
+                    netstatCache = parseNetstat();
+                    lastNetstatRefreshMs = now;
+                }
 
                 List<SystemEvent> current = scanProcesses();
                 for (SystemEvent event : current) {
                     if (!knownPids.contains(event.getPid())) {
+                        // Arricchimento costoso SOLO sui nuovi: path + hash
+                        // (in scanProcesses() per non rompere il contratto)
+                        enrichNewEvent(event);
+                        // Chiave anti-PID-reuse (v2 procStartNs) + copertura.
+                        try {
+                            ProcessStartTime.creationFileTime(event.getPid())
+                                    .ifPresent(event::setProcStartNs);
+                        } catch (Exception ignored) {
+                        }
+                        event.setProvenance(coverageProvenance);
+                        event.setQuality(coverageQuality);
                         // Attach network connections for this PID
                         String conns = netstatCache.getOrDefault(event.getPid(), "[]");
                         event.setNetworkConnections(conns);
 
                         log.info("New process detected: {}", event);
-                        client.sendEvent(event);
+                        outbox.add(event);
                         knownPids.add(event.getPid());
                     }
                 }
@@ -92,6 +164,7 @@ public class WindowsProcessMonitor implements ProcessMonitor {
     @Override
     public void stopMonitoring() {
         running = false;
+        if (outbox != null) outbox.stop();
     }
 
     @Override
@@ -136,10 +209,12 @@ public class WindowsProcessMonitor implements ProcessMonitor {
         for (ProcessEntry pe : rawEntries) {
             String parentName = pidNameMap.getOrDefault(pe.ppid, "unknown");
 
+            // Scan leggero: path + hash si calcolano solo sui NUOVI
+            // (enrichNewEvent) — non su tutti i processi ogni secondo.
             SystemEvent event = new SystemEvent(
                     agentId, pe.pid, pe.ppid, parentName,
                     pe.name,
-                    resolveProcessPath(pe.pid),
+                    "",
                     currentUser,
                     "Windows",
                     "PROCESS_CREATED"
@@ -147,10 +222,7 @@ public class WindowsProcessMonitor implements ProcessMonitor {
             event.setHostname(hostname);
             event.setIpAddress(ipAddress);
             event.setThreadCount(pe.threads);
-
-            if (!event.getProcessPath().isEmpty()) {
-                event.setFileHash(hasher.calculateHash(event.getProcessPath()));
-            }
+            event.setProvenance(coverageProvenance);
 
             // Attach cached netstat if available
             String conns = netstatCache.getOrDefault(pe.pid, "[]");
@@ -162,38 +234,118 @@ public class WindowsProcessMonitor implements ProcessMonitor {
         return events;
     }
 
+    /** Arricchimento costoso riservato ai processi nuovi (path + SHA-256 + Command Line). */
+    void enrichNewEvent(SystemEvent event) {
+        try {
+            String path = resolveProcessPath(event.getPid());
+            if (path != null && !path.isEmpty()) {
+                event.setProcessPath(path);
+                event.setFileHash(hasher.calculateHash(path));
+                // Firma Authenticode (best-effort, cache interna): alimenta
+                // detection firmate/falsi-positivi e prevalenza publisher.
+                try {
+                    AuthenticodeVerifier.Result sig = AuthenticodeVerifier.verify(path);
+                    if (sig.signed()) {
+                        event.setSignature("authenticode-trusted");
+                        AuthenticodeVerifier.publisher(path).ifPresent(event::setPublisher);
+                    } else if (!sig.error().isEmpty()
+                            && !sig.error().equals("not-found")
+                            && !sig.error().equals("not-windows")) {
+                        event.setSignature("unsigned:" + sig.error());
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+
+            // Extract Command Line via WMIC
+            String cmd = getCommandLine(event.getPid());
+            if (cmd != null && !cmd.isEmpty()) {
+                event.setCommandLine(cmd);
+            }
+
+            // Evaluate Behavioral Heuristics
+            evaluateHeuristics(event);
+
+        } catch (Exception e) {
+            log.debug("Enrich failed for PID {}: {}", event.getPid(), e.getMessage());
+        }
+    }
+
+    private String getCommandLine(long pid) {
+        // WMIC prima (veloce dove presente), poi CIM via PowerShell (Win11
+        // senza WMIC). Entrambi best-effort con timeout: mai bloccare lo scan.
+        String cmd = runCapture(new String[]{
+                "wmic", "process", "where", "processid=" + pid, "get", "commandline"}, 3);
+        String parsed = WindowsSensorKit.parseWmicOutput(cmd);
+        if (!parsed.isEmpty()) return parsed;
+        String ps = runCapture(new String[]{
+                "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                "(Get-CimInstance Win32_Process -Filter 'ProcessId=" + pid + "').CommandLine"}, 3);
+        return ps.trim();
+    }
+
+    private String runCapture(String[] command, int timeoutSeconds) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes()).trim();
+            p.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
+            return out;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private void evaluateHeuristics(SystemEvent event) {
+        // Match su nomi normalizzati (basename, case-insensitive): niente più
+        // FP su path che contengono la parola né miss su case diversi.
+        String parentName = event.getParentProcessName() != null ? event.getParentProcessName() : "";
+        String cmd = WindowsSensorKit.normalizeCmdline(event.getCommandLine());
+
+        // 1. Process Hollowing / Suspicious Parents
+        if (WindowsSensorKit.procNameEquals(event.getProcessName(), "svchost.exe")
+                && !WindowsSensorKit.procNameEquals(parentName, "services.exe")) {
+            event.addBehavioralTag("SUSPICIOUS_SVCHOST_PARENT");
+        }
+        if (WindowsSensorKit.procNameEquals(event.getProcessName(), "cmd.exe")
+                || WindowsSensorKit.procNameEquals(event.getProcessName(), "powershell.exe")) {
+            if (WindowsSensorKit.procNameEquals(parentName, "winword.exe")
+                    || WindowsSensorKit.procNameEquals(parentName, "excel.exe")
+                    || WindowsSensorKit.procNameEquals(parentName, "mshta.exe")) {
+                event.addBehavioralTag("OFFICE_SPAWNED_SHELL");
+            }
+        }
+
+        // 2. Suspicious Command Line Arguments
+        if (cmd.contains("-enc") || cmd.contains("-encodedcommand") || cmd.contains("iex") || cmd.contains("invoke-expression")) {
+            event.addBehavioralTag("SUSPICIOUS_POWERSHELL_ARGS");
+        }
+        if (cmd.contains("bypass") || cmd.contains("hidden")) {
+            event.addBehavioralTag("HIDDEN_OR_BYPASS_EXECUTION");
+        }
+
+        // 3. Known Keyloggers / Credential Dumpers (Basic string matching)
+        if (WindowsSensorKit.baseName(event.getProcessName()).contains("mimikatz")
+                || WindowsSensorKit.baseName(event.getProcessName()).contains("lazagne")
+                || cmd.contains("dumpcreds")) {
+            event.addBehavioralTag("CREDENTIAL_DUMPING_TOOL_DETECTED");
+        }
+    }
+
     // Parse netstat -ano output into pid → JSON connections map
     private Map<Long, String> parseNetstat() {
         Map<Long, List<Map<String, String>>> connMap = new HashMap<>();
-        try {
-            ProcessBuilder pb = new ProcessBuilder("netstat", "-ano");
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-            String out = new String(p.getInputStream().readAllBytes());
-            p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
-
-            for (String line : out.split("\\r?\\n")) {
-                line = line.trim();
-                if (line.isEmpty()) continue;
-                String[] parts = line.split("\\s+");
-                // netstat -ano output: Proto LocalAddr RemoteAddr State PID
-                if (parts.length >= 5) {
-                    try {
-                        long pid = Long.parseLong(parts[parts.length - 1]);
-                        if (pid <= 0) continue;
-
-                        Map<String, String> conn = new LinkedHashMap<>();
-                        conn.put("proto", parts[0]);
-                        conn.put("local", parts[1]);
-                        conn.put("remote", parts[2]);
-                        conn.put("state", parts.length >= 5 ? parts[3] : "UNKNOWN");
-
-                        connMap.computeIfAbsent(pid, k -> new ArrayList<>()).add(conn);
-                    } catch (NumberFormatException ignored) {}
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Failed to parse netstat: {}", e.getMessage());
+        String out = runCapture(new String[]{"netstat", "-ano"}, 5);
+        for (String line : out.split("\\r?\\n")) {
+            Map<String, String> conn = WindowsSensorKit.parseNetstatLine(line);
+            if (conn.isEmpty()) continue;
+            try {
+                long pid = Long.parseLong(conn.get("pid"));
+                Map<String, String> entry = new LinkedHashMap<>(conn);
+                entry.remove("pid");
+                connMap.computeIfAbsent(pid, k -> new ArrayList<>()).add(entry);
+            } catch (NumberFormatException ignored) {}
         }
 
         // Serialize to JSON
@@ -222,7 +374,7 @@ public class WindowsProcessMonitor implements ProcessMonitor {
         }
 
         try {
-            byte[] pathBuffer = new byte[1024];
+            byte[] pathBuffer = new byte[32768];
             WindowsKernel32.IntByReference size = new WindowsKernel32.IntByReference();
             size.setValue(pathBuffer.length);
 

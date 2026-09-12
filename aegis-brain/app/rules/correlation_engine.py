@@ -16,27 +16,34 @@ class CorrelationEngine:
         self.redis = redis.from_url(get_redis_url(), decode_responses=True)
 
     async def analyze(self, event: EventSchema, db: AsyncSession):
-        await self._brute_force_detection(event, db)
-        await self._process_lineage_alert(event, db)
-        await self._beacon_detection(event, db)
+        # Fail-open: se Redis è giù, la correlazione salta ma l'evento
+        # è già stato processato dalle regole statiche (niente 500 a cascata).
+        try:
+            await self._brute_force_detection(event, db)
+            await self._process_lineage_alert(event, db)
+            await self._beacon_detection(event, db)
+        except Exception as e:
+            logger.warning(f"Correlation engine skipped (redis down?): {e}")
 
     async def _brute_force_detection(self, event: EventSchema, db: AsyncSession):
         if event.event_type == "SYSLOG_NETWORK" and event.file_hash:
             msg = event.file_hash.lower()
             if "failed password" in msg or "authentication failure" in msg:
                 key = f"corr:bf:{event.agent_id}"
+                window = settings.CORR_BRUTEFORCE_WINDOW_S
+                threshold = settings.CORR_BRUTEFORCE_THRESHOLD
                 count = await self.redis.incr(key)
                 if count == 1:
-                    await self.redis.expire(key, 60)
+                    await self.redis.expire(key, window)
 
-                if count >= 5:
+                if count >= threshold:
                     await self._generate_alert(
                         db,
                         agent_id=event.agent_id,
                         severity="CRITICAL",
                         process_name="syslog_auth",
                         event_type="correlation_bruteforce",
-                        description=f"Multiple failed login attempts ({count}) detected within 60 seconds on {event.hostname}."
+                        description=f"Multiple failed login attempts ({count}) detected within {window} seconds on {event.hostname}."
                     )
                     await self.redis.delete(key)
 
@@ -64,18 +71,33 @@ class CorrelationEngine:
                 description=f"Child process '{event.process_name}' (PID {event.pid}) spawned by previously flagged parent '{event.parent_process_name}' (PID {event.parent_pid}). Possible ongoing compromise."
             )
 
-        # Check for suspicious parent-child combinations dynamically
-        parent = (event.parent_process_name or "").lower()
-        child = (event.process_name or "").lower()
+        # Check for suspicious parent-child combinations (stem matching,
+        # non substring: "mywordviewer" non deve matchare "word").
+        def _stem(n: str) -> str:
+            b = (n or "").lower().strip().replace("\\", "/").rsplit("/", 1)[-1]
+            for ext in (".exe", ".com", ".dll"):
+                if b.endswith(ext):
+                    b = b[: -len(ext)]
+                    break
+            return b
+
+        parent = _stem(event.parent_process_name)
+        child = _stem(event.process_name)
 
         # Office/productivity spawning network tools
-        office_parents = ["winword.exe", "word.exe", "excel.exe", "powerpnt.exe", "outlook.exe",
-                          "acrord32.exe", "acrord64.exe", "foxitreader.exe"]
-        network_tools = ["curl.exe", "curl", "wget.exe", "wget", "nc.exe", "ncat.exe",
-                         "powershell.exe", "powershell", "cmd.exe", "bitsadmin.exe"]
+        office_parents = ["winword", "word", "excel", "powerpnt", "outlook",
+                          "acrord32", "acrord64", "foxitreader"]
+        network_tools = ["curl", "wget", "nc", "ncat",
+                         "powershell", "cmd", "bitsadmin"]
 
-        if any(p in parent for p in office_parents):
-            if any(c in child for c in network_tools):
+        if parent in office_parents:
+            if child in network_tools:
+                # Cooldown: stesso (agent,parent,child) una volta ogni finestra,
+                # altrimenti ogni evento del figlio rifà l'alert (FP storm).
+                cool = f"corr:lineage-sent:{event.agent_id}:{parent}:{child}"
+                if await self.redis.get(cool):
+                    return
+                await self.redis.setex(cool, settings.CORR_LINEAGE_COOLDOWN_S, "1")
                 await self._generate_alert(
                     db,
                     agent_id=event.agent_id,
@@ -86,7 +108,7 @@ class CorrelationEngine:
                 )
                 # Mark parent as malicious for future child tracking
                 parent_key = f"corr:mal-parent:{event.agent_id}:{event.parent_pid or 'unknown'}"
-                await self.redis.setex(parent_key, 300, "1")
+                await self.redis.setex(parent_key, settings.CORR_LINEAGE_PARENT_TTL_S, "1")
 
     async def _beacon_detection(self, event: EventSchema, db: AsyncSession):
         """
@@ -113,42 +135,42 @@ class CorrelationEngine:
 
             beacon_key = f"corr:beacon:{event.agent_id}:{event.pid or 'unknown'}:{host}"
             try:
+                min_samples = settings.CORR_BEACON_MIN_SAMPLES
                 # Add timestamp to sorted set
                 await self.redis.zadd(beacon_key, {json.dumps({"ts": now, "port": port}): now})
                 # Keep only last 20 entries
                 await self.redis.zremrangebyrank(beacon_key, 0, -21)
-                # Expire key after 1 hour
-                await self.redis.expire(beacon_key, 3600)
+                # Expire key after window
+                await self.redis.expire(beacon_key, settings.CORR_BEACON_WINDOW_S)
 
                 # Check if we have enough data points for beacon analysis
                 count = await self.redis.zcard(beacon_key)
-                if count >= 5:
+                if count >= min_samples:
                     entries = await self.redis.zrange(beacon_key, 0, -1)
                     timestamps = sorted([json.loads(e)["ts"] for e in entries])
 
-                    if len(timestamps) >= 5:
-                        intervals = [timestamps[i+1] - timestamps[i] for i in range(len(timestamps)-1)]
-                        if intervals:
-                            avg_interval = sum(intervals) / len(intervals)
-                            variance = sum((i - avg_interval)**2 for i in intervals) / len(intervals)
+                    if len(timestamps) >= min_samples:
+                        from app.services.incident_grouping import beacon_verdict
+                        verdict = beacon_verdict(
+                            timestamps, min_samples,
+                            settings.CORR_BEACON_MAX_VARIANCE)
 
-                            # Low variance = regular intervals = beaconing
-                            if variance < 5.0 and avg_interval > 0:
-                                ports_used = list(set([json.loads(e).get("port", "") for e in entries]))
-                                port_str = ",".join(ports_used[:5])
+                        if verdict["beacon"]:
+                            ports_used = list(set([json.loads(e).get("port", "") for e in entries]))
+                            port_str = ",".join(ports_used[:5])
 
-                                await self._generate_alert(
-                                    db,
-                                    agent_id=event.agent_id,
-                                    severity="HIGH",
-                                    process_name=event.process_name or "unknown",
-                                    event_type="correlation_beacon",
-                                    description=f"Potential C2 beacon detected: process '{event.process_name}' (PID {event.pid}) "
-                                                f"connecting to {host}:{port_str} every {avg_interval:.1f}s "
-                                                f"(variance={variance:.2f}, {count} samples)."
-                                )
-                                # Reset counter to avoid duplicate alerts
-                                await self.redis.delete(beacon_key)
+                            await self._generate_alert(
+                                db,
+                                agent_id=event.agent_id,
+                                severity="HIGH",
+                                process_name=event.process_name or "unknown",
+                                event_type="correlation_beacon",
+                                description=f"Potential C2 beacon detected: process '{event.process_name}' (PID {event.pid}) "
+                                            f"connecting to {host}:{port_str} every {verdict['avg_interval']:.1f}s "
+                                            f"(variance={verdict['variance']:.2f}, {count} samples)."
+                            )
+                            # Reset counter to avoid duplicate alerts
+                            await self.redis.delete(beacon_key)
             except Exception as e:
                 logger.warning(f"Beacon detection error: {e}")
 

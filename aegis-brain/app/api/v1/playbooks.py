@@ -4,12 +4,17 @@ from sqlalchemy import select
 from typing import List, Optional
 from datetime import datetime
 from app.database.connection import get_db
-from app.database.models import Playbook, PlaybookAction, PlaybookExecution
+from app.database.models import Playbook, PlaybookAction, PlaybookExecution, Alert
 from app.core.deps import get_current_user
-from app.core.audit import log_audit
 from pydantic import BaseModel
 
 router = APIRouter(tags=["Playbooks"])
+
+
+def _require_playbook_operator(user, admin_only: bool = False):
+    allowed = {"admin"} if admin_only else {"admin", "analyst"}
+    if (user.role or "user").lower() not in allowed:
+        raise HTTPException(status_code=403, detail="Playbook changes require analyst or admin role")
 
 class PlaybookActionCreate(BaseModel):
     action_type: str
@@ -61,9 +66,14 @@ async def list_playbooks(db: AsyncSession = Depends(get_db), _user = Depends(get
 
 @router.post("/playbooks")
 async def create_playbook(data: PlaybookCreate, db: AsyncSession = Depends(get_db), _user = Depends(get_current_user)):
+    _require_playbook_operator(_user)
     existing = await db.execute(select(Playbook).where(Playbook.name == data.name))
     if existing.scalars().first():
         raise HTTPException(status_code=400, detail="Playbook with this name already exists")
+    # `script` runs shell ON THE SERVER — admin only (analyst/viewer blocked).
+    if any((a.action_type or "").lower() == "script" for a in data.actions):
+        if (_user.role or "user").lower() != "admin":
+            raise HTTPException(status_code=403, detail="Playbook 'script' actions require admin role")
     
     playbook = Playbook(
         name=data.name,
@@ -93,6 +103,7 @@ async def create_playbook(data: PlaybookCreate, db: AsyncSession = Depends(get_d
 
 @router.put("/playbooks/{playbook_id}")
 async def update_playbook(playbook_id: int, data: PlaybookUpdate, db: AsyncSession = Depends(get_db), _user = Depends(get_current_user)):
+    _require_playbook_operator(_user)
     playbook = await db.get(Playbook, playbook_id)
     if not playbook:
         raise HTTPException(status_code=404, detail="Playbook not found")
@@ -117,6 +128,7 @@ async def update_playbook(playbook_id: int, data: PlaybookUpdate, db: AsyncSessi
 
 @router.delete("/playbooks/{playbook_id}")
 async def delete_playbook(playbook_id: int, db: AsyncSession = Depends(get_db), _user = Depends(get_current_user)):
+    _require_playbook_operator(_user, admin_only=True)
     playbook = await db.get(Playbook, playbook_id)
     if not playbook:
         raise HTTPException(status_code=404, detail="Playbook not found")
@@ -141,3 +153,42 @@ async def list_executions(limit: int = 50, db: AsyncSession = Depends(get_db), _
             "completed_at": e.completed_at.isoformat() if e.completed_at else None,
         })
     return execs
+
+
+class DryRunRequest(BaseModel):
+    alert_id: int
+
+
+@router.post("/playbooks/{playbook_id}/dry-run")
+async def dry_run_playbook(playbook_id: int, payload: DryRunRequest,
+                           db: AsyncSession = Depends(get_db), _user = Depends(get_current_user)):
+    """Simula un playbook su un alert reale: zero effetti collaterali.
+
+    Valuta trigger e azioni (con rischio/approvatore/rollback), registra
+    l'esecuzione come `dry_run` per audit. Operatore analyst/admin.
+    """
+    _require_playbook_operator(_user)
+    playbook = await db.get(Playbook, playbook_id)
+    if not playbook:
+        raise HTTPException(status_code=404, detail="Playbook not found")
+    alert = await db.get(Alert, payload.alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    from app.services.playbook_engine import _matches_trigger
+    from sqlalchemy import select as _select
+    acts = (await db.execute(
+        _select(PlaybookAction).where(PlaybookAction.playbook_id == playbook.id)
+        .order_by(PlaybookAction.order))).scalars().all()
+    matched = bool(playbook.is_active) and _matches_trigger(playbook, alert)
+    would = [{
+        "action_type": a.action_type, "target": a.target, "params": a.params,
+        "order": a.order, **describe_action(a.action_type),
+    } for a in acts] if matched else []
+    if matched:
+        db.add(PlaybookExecution(
+            playbook_id=playbook.id, alert_id=alert.id,
+            triggered_by=_user.id, status="dry_run",
+            result={"dry_run": True, "actions": would},
+        ))
+        await db.commit()
+    return {"matched": matched, "dry_run": True, "actions": would}

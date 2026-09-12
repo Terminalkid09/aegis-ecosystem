@@ -32,21 +32,25 @@ SENSITIVE_PATTERNS = {
 class PromptInjectionError(Exception):
     pass
 
-def _stub_ml_classifier(prompt: str) -> float:
-    # Stub for a real ML model inference
+def _heuristic_suspicion_score(prompt: str) -> float:
+    # Euristica dichiarata ( NON un modello ML): conta pattern noti.
+    # Storicamente si chiamava _stub_ml_classifier con soglia 0.85 —
+    # rinominato perché il nome mentiva sul metodo.
     lower_prompt = prompt.lower()
+    hits = sum(1 for p in SUSPICIOUS_PATTERNS if p.search(prompt))
     if "ignore" in lower_prompt and "instructions" in lower_prompt:
-        return 0.95
-    return 0.1
+        hits += 2
+    return min(0.99, hits * 0.45)
+
 
 def is_prompt_suspicious(prompt: str) -> bool:
-    # Evaluate with ML model (stubbed)
-    ml_score = _stub_ml_classifier(prompt)
-    if ml_score > 0.85:
-        logger.warning(f"Prompt classified as malicious with ML score: {ml_score}")
+    # Soglia 0.85 invariata per compatibilità di comportamento.
+    score = _heuristic_suspicion_score(prompt)
+    if score > 0.85:
+        logger.warning(f"Prompt classified as malicious with heuristic score: {score}")
         return True
 
-    # Fallback to Regex heuristics
+    # Fallback ridondante tenuto per difesa in profondità
     for patt in SUSPICIOUS_PATTERNS:
         if patt.search(prompt):
             logger.warning(f"Prompt suspicious pattern matched: {patt.pattern}")

@@ -52,6 +52,8 @@ public class MacOSProcessMonitor implements ProcessMonitor {
     private final String ipAddress;
 
     private Map<Long, String> netstatCache = new HashMap<>();
+    private long lastNetstatRefreshMs = -1;
+    private com.aegis.guard.network.EventOutbox outbox;
 
     public MacOSProcessMonitor(AegisClient client, HashCalculator hasher, String agentId) {
         this.client  = client;
@@ -69,19 +71,29 @@ public class MacOSProcessMonitor implements ProcessMonitor {
         log.info("MacOSProcessMonitor started (interval {}ms)", Config.SCAN_INTERVAL_MS);
 
         scanProcesses().forEach(e -> knownPids.add(e.getPid()));
+        outbox = new com.aegis.guard.network.EventOutbox(client);
+        outbox.start();
 
         while (running) {
             try {
-                netstatCache = parseNetstat();
+                // lsof spawna un processo: al massimo ogni NETSTAT_INTERVAL_MS
+                long now = System.currentTimeMillis();
+                if (com.aegis.guard.utils.MonitorTuning.shouldRefreshNetstat(
+                        lastNetstatRefreshMs, now, Config.NETSTAT_INTERVAL_MS)) {
+                    netstatCache = parseNetstat();
+                    lastNetstatRefreshMs = now;
+                }
                 List<SystemEvent> current = scanProcesses();
 
                 for (SystemEvent event : current) {
                     if (!knownPids.contains(event.getPid())) {
+                        // Arricchimento costoso SOLO sui nuovi (ppid+hash)
+                        enrichNewEvent(event);
                         String conns = netstatCache.getOrDefault(event.getPid(), "[]");
                         event.setNetworkConnections(conns);
 
                         log.info("New process detected: {}", event);
-                        client.sendEvent(event);
+                        outbox.add(event);
                         knownPids.add(event.getPid());
                     }
                 }
@@ -98,12 +110,14 @@ public class MacOSProcessMonitor implements ProcessMonitor {
                 log.error("Error during macOS monitoring", e);
             }
         }
+        if (outbox != null) outbox.stop();
         log.info("MacOSProcessMonitor stopped.");
     }
 
     @Override
     public void stopMonitoring() {
         running = false;
+        if (outbox != null) outbox.stop();
     }
 
     @Override
@@ -118,30 +132,23 @@ public class MacOSProcessMonitor implements ProcessMonitor {
         int actual = libProc.proc_listallpids(pidBuffer, (int) pidBuffer.size());
         if (actual <= 0) return events;
 
-        // Get PPID map from ps command
-        Map<Long, Long> ppidMap = getPpidMap();
-
         String currentUser = System.getProperty("user.name");
 
+        // Scan leggero: solo pid+path+name via libproc (syscall, niente
+        // sottoprocessi). ppid/hash solo sui NUOVI in enrichNewEvent.
         for (int i = 0; i < actual; i++) {
             int pid = pidBuffer.getInt((long) i * Integer.BYTES);
             if (pid <= 0) continue;
 
             String path = resolveProcessPath(libProc, pid);
             String name = extractName(path, pid);
-            long ppid = ppidMap.getOrDefault((long) pid, 0L);
-            String parentName = ppid > 0 ? getProcessNameByPid(ppid) : "unknown";
 
             SystemEvent event = new SystemEvent(
-                    agentId, pid, ppid, parentName, name,
+                    agentId, pid, 0, "unknown", name,
                     path, currentUser, "macOS", "PROCESS_CREATED"
             );
             event.setHostname(hostname);
             event.setIpAddress(ipAddress);
-
-            if (!path.isEmpty()) {
-                event.setFileHash(hasher.calculateHash(path));
-            }
 
             String conns = netstatCache.getOrDefault((long) pid, "[]");
             event.setNetworkConnections(conns);
@@ -150,6 +157,35 @@ public class MacOSProcessMonitor implements ProcessMonitor {
         }
 
         return events;
+    }
+
+    /** Arricchimento costoso riservato ai processi nuovi (ppid+parent+hash). */
+    void enrichNewEvent(SystemEvent event) {
+        try {
+            long ppid = readPpidOnce(event.getPid());
+            if (ppid > 0) {
+                event.setParentPid(ppid);
+                event.setParentProcessName(getProcessNameByPid(ppid));
+            }
+            if (!event.getProcessPath().isEmpty()) {
+                event.setFileHash(hasher.calculateHash(event.getProcessPath()));
+            }
+        } catch (Exception e) {
+            log.debug("Enrich failed for PID {}: {}", event.getPid(), e.getMessage());
+        }
+    }
+
+    /** Un solo `ps` per il parent del processo nuovo (non full-table ogni ciclo). */
+    private long readPpidOnce(long pid) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder("ps", "-o", "ppid=", "-p", String.valueOf(pid));
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes()).trim();
+            p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            if (!out.isEmpty()) return Long.parseLong(out.split("\\s+")[0]);
+        } catch (Exception ignored) {}
+        return 0;
     }
 
     // Parse lsof or netstat for macOS
@@ -191,34 +227,6 @@ public class MacOSProcessMonitor implements ProcessMonitor {
             result.put(e.getKey(), gson.toJson(e.getValue()));
         }
         return result;
-    }
-
-    // Get pid → ppid map from ps command
-    private Map<Long, Long> getPpidMap() {
-        Map<Long, Long> map = new HashMap<>();
-        try {
-            ProcessBuilder pb = new ProcessBuilder("ps", "-eo", "pid,ppid,comm");
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-            String out = new String(p.getInputStream().readAllBytes());
-            p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
-
-            for (String line : out.split("\\r?\\n")) {
-                line = line.trim();
-                if (line.isEmpty() || line.startsWith("PID")) continue;
-                String[] parts = line.split("\\s+");
-                if (parts.length >= 3) {
-                    try {
-                        long pid = Long.parseLong(parts[0]);
-                        long ppid = Long.parseLong(parts[1]);
-                        map.put(pid, ppid);
-                    } catch (NumberFormatException ignored) {}
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Failed to get PPID map: {}", e.getMessage());
-        }
-        return map;
     }
 
     // Get process name by PID from /proc or ps

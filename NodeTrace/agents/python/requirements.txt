@@ -1,2 +1,4 @@
 psutil==5.9.8
 requests==2.32.3
+# mTLS device identity (chiave/CSR/TLS client). Obbligatoria per MTLS_MODE=required.
+cryptography==50.0.1

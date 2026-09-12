@@ -49,7 +49,7 @@ public class ApiKeyFilter extends OncePerRequestFilter {
 
         // 1. Verifica se è un agente registrato tramite Redis
         String agentId = redisService.getAgentIdBySecret(requestKey);
-        
+
         if (agentId != null) {
             UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                     agentId, null, Collections.emptyList()
@@ -60,14 +60,26 @@ public class ApiKeyFilter extends OncePerRequestFilter {
         }
 
         // 2. Fallback alla chiave globale (per test o management) - constant-time comparison
-        if (globalApiKey != null && !globalApiKey.isBlank() && MessageDigest.isEqual(globalApiKey.getBytes(), requestKey.getBytes())) {
-            UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                    "aegis-admin", null, Collections.emptyList()
-            );
-            SecurityContextHolder.getContext().setAuthentication(auth);
-            filterChain.doFilter(request, response);
-        } else {
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid X-Api-Key");
+        if (globalApiKey != null && !globalApiKey.isBlank()) {
+            try {
+                MessageDigest md = MessageDigest.getInstance("SHA-256");
+                byte[] expectedHash = md.digest(globalApiKey.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                md.reset();
+                byte[] actualHash = md.digest(requestKey.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+                if (MessageDigest.isEqual(expectedHash, actualHash)) {
+                    UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                            "aegis-admin", null, Collections.emptyList()
+                    );
+                    SecurityContextHolder.getContext().setAuthentication(auth);
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+            } catch (java.security.NoSuchAlgorithmException e) {
+                // Non dovrebbe mai succedere con SHA-256
+            }
         }
+
+        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid X-Api-Key");
     }
 }

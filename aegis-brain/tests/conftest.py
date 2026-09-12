@@ -47,7 +47,8 @@ async def _ensure_test_db():
     """Create aegis_test database if it doesn't exist."""
     try:
         root_url = TEST_DATABASE_URL.rsplit("/", 1)[0] + "/postgres"
-        engine = create_async_engine(root_url, isolation_level="AUTOCOMMIT", poolclass=NullPool)
+        engine = create_async_engine(root_url, isolation_level="AUTOCOMMIT", poolclass=NullPool,
+                                     connect_args={"timeout": 2})
         async with engine.begin() as conn:
             from sqlalchemy import text
             db_name = TEST_DATABASE_URL.rsplit("/", 1)[-1]
@@ -65,8 +66,10 @@ except Exception:
     pass
 
 _db_available = False
+_require_integration = os.getenv("REQUIRE_INTEGRATION", "").strip().lower() in ("1", "true", "yes")
 try:
-    test_engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool, echo=False)
+    test_engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool, echo=False,
+                                      connect_args={"timeout": 2})
     TestAsyncSessionLocal = async_sessionmaker(
         bind=test_engine,
         class_=AsyncSession,
@@ -74,17 +77,36 @@ try:
         autocommit=False,
         autoflush=False,
     )
-    _db_available = True
-except Exception:
+    async def _probe_database():
+        async with test_engine.connect():
+            return True
+    try:
+        asyncio.run(_probe_database())
+        _db_available = True
+    except Exception as exc:
+        _db_available = False
+        if _require_integration:
+            raise RuntimeError(f"REQUIRE_INTEGRATION=1 ma DB non raggiungibile: {exc}") from exc
+except Exception as exc:
+    if _require_integration:
+        raise RuntimeError(f"REQUIRE_INTEGRATION=1 ma engine non inizializzabile: {exc}") from exc
     test_engine = None
     TestAsyncSessionLocal = None
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+def pytest_runtest_setup(item):
+    # Quando la CI dichiara REQUIRE_INTEGRATION=1, nessun test di integrazione
+    # può essere skippato silenziosamente per "Database not available".
+    if _require_integration and not _db_available:
+        pytest.fail("REQUIRE_INTEGRATION=1 ma DB/Redis non disponibili: i test di integrazione non possono essere skippati")
+
+
+def pytest_collection_modifyitems(config, items):
+    # Doppia guardia: se la suite è stata raccolta con DB assente ma
+    # REQUIRE_INTEGRATION=1, fallisce prima ancora di eseguire i test.
+    if _require_integration and not _db_available and any("integration" in str(i.fspath) for i in items):
+        # Non alziamo qui per non rompere --collect-only, ma il runtest_setup farà fallire.
+        pass
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -110,7 +132,10 @@ async def setup_database():
 async def db_session():
     if not _db_available:
         pytest.skip("Database not available")
-    conn = await test_engine.connect()
+    try:
+        conn = await test_engine.connect()
+    except Exception as exc:
+        pytest.skip(f"Database not available: {exc}")
     trans = await conn.begin()
     session = TestAsyncSessionLocal(bind=conn)
     yield session

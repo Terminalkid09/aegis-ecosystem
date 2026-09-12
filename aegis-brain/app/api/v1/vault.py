@@ -18,12 +18,23 @@ async def create_note(payload: NoteCreate, db: AsyncSession = Depends(get_db), u
         db.add(user)
 
     encrypted_content = encrypt_for_user(user.encrypted_dek, payload.content)
+    # Normalize tags to {"tags": [...]} — frontend sends CSV/list, discovery
+    # reads dict|list|str. Single canonical shape kills a whole bug class.
+    raw_tags = payload.tags
+    if isinstance(raw_tags, dict):
+        norm_tags = raw_tags
+    elif isinstance(raw_tags, list):
+        norm_tags = {"tags": [str(t).strip() for t in raw_tags if str(t).strip()]}
+    elif isinstance(raw_tags, str):
+        norm_tags = {"tags": [t.strip() for t in raw_tags.split(",") if t.strip()]}
+    else:
+        norm_tags = {"tags": []}
     note = Note(
         user_id=user.id,
         title=payload.title,
         content=encrypted_content,
         mood=payload.mood,
-        tags=payload.tags
+        tags=norm_tags,
     )
     db.add(note)
     await db.commit()
@@ -34,7 +45,7 @@ async def create_note(payload: NoteCreate, db: AsyncSession = Depends(get_db), u
         title=note.title,
         content=payload.content,
         mood=note.mood,
-        tags=note.tags
+        tags=norm_tags.get("tags", []),
     )
 
 @router.get("/notes", response_model=List[NoteOut])
@@ -49,7 +60,11 @@ async def get_notes(db: AsyncSession = Depends(get_db), user: User = Depends(get
             plaintext = decrypt_for_user(user.encrypted_dek, n.content)
         except Exception:
             plaintext = "[decryption_error]"
-        out.append(NoteOut(id=n.id, title=n.title, content=plaintext, mood=n.mood, tags=n.tags))
+        # DB canonical shape is {"tags": [...]} — response contract is List[str].
+        t = n.tags
+        if isinstance(t, dict):
+            t = t.get("tags", [])
+        out.append(NoteOut(id=n.id, title=n.title, content=plaintext, mood=n.mood, tags=t if isinstance(t, list) else []))
     return out
 
 @router.delete("/notes/{note_id}")

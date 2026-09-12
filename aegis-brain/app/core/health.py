@@ -34,6 +34,9 @@ class HealthChecker:
         self.register("database", self._check_database)
         self.register("redis", self._check_redis)
         self.register("ollama", self._check_ollama)
+        self.register("pipeline", self._check_pipeline)
+        self.register("pki", self._check_pki)
+        self.register("mtls", self._check_mtls)
 
     def register(self, name: str, check_func):
         self._checks[name] = check_func
@@ -97,6 +100,50 @@ class HealthChecker:
                 return HealthCheckResult("ollama", HealthStatus.DEGRADED, 0, {"status_code": resp.status_code})
         except Exception as e:
             return HealthCheckResult("ollama", HealthStatus.UNHEALTHY, 0, {}, str(e))
+
+    async def _check_pipeline(self) -> HealthCheckResult:
+        """Salute della pipeline eventi: duplicati scartati e gap di sequenza
+        misurati non sono un'anomalia di per sé, ma segnalano consegna incerta."""
+        from app.services import event_dedup
+        details = {
+            "duplicates": getattr(event_dedup, "DEDUP", None) and event_dedup.DEDUP.duplicates,
+            "seq_gaps": getattr(event_dedup, "SEQ", None) and event_dedup.SEQ.gaps,
+        }
+        try:
+            client = redis.from_url(get_redis_url(), socket_connect_timeout=2, socket_timeout=2)
+            pending = await client.llen("aegis:events:pending")
+            await client.aclose()
+            details["queue_depth"] = pending
+        except Exception:
+            details["queue_depth"] = None
+        status = HealthStatus.HEALTHY
+        if (details["seq_gaps"] or 0) > 0:
+            status = HealthStatus.DEGRADED
+        return HealthCheckResult("pipeline", status, 0, details)
+
+    async def _check_pki(self) -> HealthCheckResult:
+        """PKI operativa: la revoke list file cache è leggibile e non vuota
+        (o la directory PKI esiste). Fail-closed se illeggibile."""
+        try:
+            import os
+            from app.services.pki import RevokeList, REVOKED
+            rl = RevokeList(os.path.join(settings.PKI_DIR, REVOKED))
+            entries = rl.entries() if hasattr(rl, "entries") else []
+            return HealthCheckResult("pki", HealthStatus.HEALTHY, 0, {"revoked_count": len(entries)})
+        except Exception as e:
+            return HealthCheckResult("pki", HealthStatus.UNHEALTHY, 0, {}, str(e))
+
+    async def _check_mtls(self) -> HealthCheckResult:
+        try:
+            from app.services.mtls import mtls_mode
+            mode = mtls_mode()
+            status = HealthStatus.HEALTHY
+            if getattr(settings, "ENTERPRISE_STRICT", False) and mode != "required":
+                status = HealthStatus.UNHEALTHY
+                return HealthCheckResult("mtls", status, 0, {"mode": mode}, "ENTERPRISE_STRICT richiede MTLS_MODE=required")
+            return HealthCheckResult("mtls", status, 0, {"mode": mode})
+        except Exception as e:
+            return HealthCheckResult("mtls", HealthStatus.DEGRADED, 0, {}, str(e))
 
     def get_overall_status(self, results: Dict[str, HealthCheckResult]) -> HealthStatus:
         if any(r.status == HealthStatus.UNHEALTHY for r in results.values()):

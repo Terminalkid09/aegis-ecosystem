@@ -12,6 +12,7 @@ from app.api.schemas.common import EventSchema
 from app.rules.heuristic_engine import HeuristicEngine
 from app.rules.correlation_engine import correlation_engine
 from app.services.anomaly_engine import anomaly_engine
+from app.core.metrics import inc, observe_hist, set_gauge
 from sqlalchemy import select
 
 logger = get_logger(__name__)
@@ -42,6 +43,8 @@ class RedisConsumer:
         self._running = False
 
     async def _process_raw(self, raw_data):
+        import time as _time
+        _t0 = _time.perf_counter()
         try:
             data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
             event = EventSchema.model_validate(data)
@@ -61,7 +64,11 @@ class RedisConsumer:
                 await correlation_engine.analyze(event, db)
 
                 await db.commit()
+            observe_hist("aegis_detection_latency_seconds", _time.perf_counter() - _t0)
+            depth = await self._client.llen("aegis:events")
+            set_gauge("aegis_queue_depth", depth, 'stage="redis"')
         except Exception as e:
+            inc("aegis_events_lost_total", 1, 'reason="consumer_error"')
             logger.error(f"Processing error: {e}")
 
     def _get_agent_uuid(self, agent_id_str: str) -> uuid.UUID:
@@ -125,12 +132,20 @@ class RedisConsumer:
         )
         db.add(remediation)
         if action == 'kill_process' and event.pid:
+            # MAI os.kill qui: questo è il SERVER, il PID vive sull'AGENTE.
+            # (Prima: os.kill(event.pid) uccideva un processo casuale del server
+            # con lo stesso PID — bug pericoloso.) Si accoda il comando.
             try:
-                import os, signal
-                os.kill(event.pid, signal.SIGTERM)
-                logger.info(f"[AUTO-REMEDIATION] Killed process PID {event.pid}")
-            except (ProcessLookupError, PermissionError, OSError) as e:
-                logger.warning(f"[AUTO-REMEDIATION] kill_process failed: {e}")
+                from app.services.telemetry_service import send_command_to_agent
+                await send_command_to_agent(event.agent_id, {
+                    "command": "KILL_PROCESS",
+                    "pid": event.pid,
+                    "process_name": event.process_name,
+                    "alert_id": alert.id,
+                })
+                logger.info(f"[AUTO-REMEDIATION] KILL_PROCESS queued for PID {event.pid} on {event.agent_id}")
+            except Exception as e:
+                logger.warning(f"[AUTO-REMEDIATION] queue failed: {e}")
                 remediation.status = 'failed'
 
     async def _process_telemetry(self, db, event: EventSchema):

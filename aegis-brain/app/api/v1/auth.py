@@ -7,6 +7,7 @@ from app.core.security import hash_password, verify_password, needs_rehash, crea
 from app.api.schemas.common import TokenResponse, UserOut
 from app.core.rate_limit import limiter
 from app.core.deps import get_current_user
+from app.core.config import settings
 from pydantic import BaseModel
 
 router = APIRouter(tags=["Authentication"])
@@ -27,7 +28,7 @@ def _set_auth_cookie(response: Response, token: str):
         value=token,
         httponly=True,
         samesite="strict",
-        secure=False,  # True in production with HTTPS
+        secure=not settings.DEBUG,  # True in production with HTTPS
         max_age=3600,  # 1 hour
         path="/api/",
     )
@@ -93,7 +94,7 @@ async def logout(
         path="/api/",
         httponly=True,
         samesite="strict",
-        secure=False,
+        secure=not settings.DEBUG,
     )
     return {"status": "logged_out", "detail": "Token blacklisted and cookie cleared."}
 

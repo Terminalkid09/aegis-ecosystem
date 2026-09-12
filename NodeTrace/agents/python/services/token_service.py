@@ -29,8 +29,11 @@ class TokenService:
                 time.sleep(0.2 * (attempt + 1))
         raise last_err
 
-    def save(self, token, device_id):
-        self._atomic_write({"token": token, "device_id": device_id})
+    def save(self, token, device_id, server_url=None):
+        data = {"token": token, "device_id": device_id}
+        if server_url:
+            data["server_url"] = server_url
+        self._atomic_write(data)
 
     def load(self):
         if not os.path.exists(self.FILE):
@@ -49,3 +52,26 @@ class TokenService:
             except (OSError, PermissionError):
                 time.sleep(0.2 * (attempt + 1))
         return None, None
+
+    def load_server(self):
+        """URL server pinnato all'enrollment (None sui token legacy)."""
+        try:
+            with open(self.FILE, "r", encoding="utf-8") as f:
+                return json.load(f).get("server_url")
+        except (OSError, ValueError):
+            return None
+
+    @staticmethod
+    def check_server_pin(stored, current):
+        """Come ServerPin Java: None se ok, altrimenti errore fatale."""
+        current = (current or "").strip()
+        if not current:
+            return "register URL non configurato — refusing"
+        if not stored or not str(stored).strip():
+            return None  # legacy: pin da ora
+        s = str(stored).strip().rstrip("/")
+        c = current.rstrip("/")
+        if s.lower() == c.lower():
+            return None
+        return (f"Server cambiato (stored={s} current={c}): "
+                "re-enroll richiesto, rifiuto connessioni")

@@ -102,27 +102,47 @@ async def fetch_ip_info(ip: str) -> Dict[str, Any]:
             "sources": {"shodan": shodan, "abuseipdb": abuse, "virustotal": vt}
         }
 
+async def _virustotal_domain_lookup(client: httpx.AsyncClient, domain: str) -> Dict[str, Any]:
+    if not settings.VIRUSTOTAL_API_KEY or settings.VIRUSTOTAL_API_KEY == "your_virustotal_key_here":
+        return {"error": "api_key_not_configured"}
+    url = f"https://www.virustotal.com/api/v3/domains/{domain}"
+    headers = {"x-apikey": settings.VIRUSTOTAL_API_KEY, "Accept": "application/json"}
+    try:
+        r = await client.get(url, headers=headers, timeout=10.0)
+        if r.status_code == 200:
+            data = r.json().get("data", {}).get("attributes", {})
+            last_stats = data.get("last_analysis_stats", {})
+            return {
+                "malicious": last_stats.get("malicious", 0),
+                "suspicious": last_stats.get("suspicious", 0),
+                "harmless": last_stats.get("harmless", 0),
+                "undetected": last_stats.get("undetected", 0),
+                "reputation": data.get("reputation", 0),
+                "registrar": data.get("registrar", ""),
+                "creation_date": str(data.get("creation_date", "")),
+            }
+        return {"error": "provider_error", "status": r.status_code}
+    except Exception as e:
+        return {"error": "exception", "message": str(e)}
+
+
 async def fetch_domain_info(domain: str) -> Dict[str, Any]:
     import socket
     try:
         ip = await asyncio.to_thread(socket.gethostbyname, domain)
-        return {
-            "target": domain,
-            "fetched_at": datetime.now(timezone.utc).isoformat(),
-            "sources": {
-                "dns": {
-                    "resolved_ip": ip,
-                    "reputation": "Clean (Simulated)"
-                },
-                "domain": {
-                    "note": "Reputation check simulated for " + domain,
-                    "domain": domain
-                }
-            }
-        }
     except Exception as e:
         return {
             "target": domain,
             "error": str(e),
             "sources": {"error": "Failed to resolve domain"}
         }
+    async with httpx.AsyncClient() as client:
+        vt = await _virustotal_domain_lookup(client, domain)
+    return {
+        "target": domain,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "sources": {
+            "dns": {"resolved_ip": ip},
+            "virustotal": vt,
+        },
+    }

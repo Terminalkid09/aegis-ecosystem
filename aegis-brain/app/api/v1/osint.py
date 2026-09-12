@@ -75,17 +75,21 @@ async def auto_enrich(ip: str = Query(...), background_tasks: BackgroundTasks = 
         ipaddress.ip_address(ip)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid IP")
-    async def _enrich(ip: str, db: AsyncSession):
-        cached = await osint_service.get_cached_result(db, "ip", ip)
-        if not cached:
-            data = await osint_service.fetch_ip_info(ip)
-            await osint_service.save_osint_result(db, "ip", ip, data)
-            logger.info("Auto-enriched IP: %s", ip)
+    async def _enrich(ip: str):
+        # Fresh session: the request-scoped `db` is closed after response,
+        # so background work must open its own (was reusing `db` -> crash).
+        from app.database.connection import AsyncSessionLocal
+        async with AsyncSessionLocal() as fresh:
+            cached = await osint_service.get_cached_result(fresh, "ip", ip)
+            if not cached:
+                data = await osint_service.fetch_ip_info(ip)
+                await osint_service.save_osint_result(fresh, "ip", ip, data)
+                logger.info("Auto-enriched IP: %s", ip)
     if background_tasks:
-        background_tasks.add_task(_enrich, ip, db)
+        background_tasks.add_task(_enrich, ip)
         return {"status": "enrichment_scheduled", "ip": ip}
     else:
-        await _enrich(ip, db)
+        await _enrich(ip)
         return {"status": "enriched", "ip": ip}
 
 @router.get("/history")

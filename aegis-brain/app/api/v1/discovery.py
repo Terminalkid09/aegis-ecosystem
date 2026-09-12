@@ -6,6 +6,7 @@ import re
 import shlex
 import socket
 import subprocess
+from urllib.parse import urlparse
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -16,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.agent_deps import get_current_agent
+from app.core.config import settings
 from app.core.deps import get_current_user
 from app.database.connection import get_db
 from app.database.models import Agent, DiscoveredHost, IPReputation, Note
@@ -34,7 +36,11 @@ async def _load_oui_cache():
         return
     try:
         import urllib.request
-        with urllib.request.urlopen(_OUI_URL, timeout=5) as f:
+        parsed = urlparse(_OUI_URL)
+        if parsed.scheme != "https" or parsed.netloc != "raw.githubusercontent.com":
+            raise ValueError("OUI source must be the pinned HTTPS source")
+        request = urllib.request.Request(_OUI_URL, headers={"User-Agent": "Aegis-Discovery/3"})
+        with urllib.request.urlopen(request, timeout=5) as f:  # nosec B310 - scheme/host pinned above
             for line in f.read().decode("utf-8", errors="ignore").splitlines():
                 if line.strip() and not line.startswith("#"):
                     parts = line.split("\t")
@@ -185,13 +191,14 @@ class ReputationUpsert(BaseModel):
 class DeploymentPlanRequest(BaseModel):
     ip_address: str
     os_type: str = Field(default="linux", pattern="^(linux|windows)$")
-    agent_type: str = Field(default="nodetrace", pattern="^(nodetrace|aegis-guard)$")
-    method: str = Field(default="manual", pattern="^(manual|ssh|winrm)$")
-
+    agent_type: str = Field(default="nodetrace", pattern="^(nodetrace|aegis-guard|unified)$")
+    method: str = Field(default="manual", pattern="^(manual|ssh|winrm|interactive)$")
+    job_id: Optional[int] = None
+    pin: Optional[str] = None
 
 class AutoDeployRequest(BaseModel):
     ip_address: str
-    agent_type: str = Field(default="nodetrace", pattern="^(nodetrace|aegis-guard)$")
+    agent_type: str = Field(default="nodetrace", pattern="^(nodetrace|aegis-guard|unified)$")
     username: Optional[str] = None
     password: Optional[str] = None
 
@@ -381,6 +388,8 @@ async def list_reputation(db: AsyncSession = Depends(get_db), user=Depends(get_c
 
 @router.post("/demo/start")
 async def start_demo(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    if not settings.ALLOW_DEMO and not settings.DEBUG:
+        raise HTTPException(status_code=403, detail="Demo endpoints disabled in production (ALLOW_DEMO=false)")
     now = datetime.now(timezone.utc)
     demo_hosts = [
         {"ip": "10.10.10.21", "hostname": "demo-win-endpoint", "os": "windows", "type": "aegis-guard", "ports": [135, 445, 3389]},
@@ -421,6 +430,8 @@ async def start_demo(db: AsyncSession = Depends(get_db), user=Depends(get_curren
 
 @router.post("/demo/heartbeat")
 async def demo_heartbeat(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    if not settings.ALLOW_DEMO and not settings.DEBUG:
+        raise HTTPException(status_code=403, detail="Demo endpoints disabled in production (ALLOW_DEMO=false)")
     now = datetime.now(timezone.utc)
     result = await db.execute(select(Agent).where(Agent.is_demo == True))
     agents = result.scalars().all()
@@ -432,6 +443,11 @@ async def demo_heartbeat(db: AsyncSession = Depends(get_db), user=Depends(get_cu
 
 @router.post("/deployment/plan")
 async def deployment_plan(payload: DeploymentPlanRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    if payload.method in {"ssh", "winrm", "interactive"}:
+        raise HTTPException(
+            status_code=501,
+            detail="Password-based remote deployment is disabled; use signed one-line enrollment",
+        )
     try:
         ipaddress.ip_address(payload.ip_address)
     except ValueError as exc:
@@ -462,10 +478,55 @@ async def deployment_plan(payload: DeploymentPlanRequest, db: AsyncSession = Dep
     safe_user = _sanitize_cred(creds["username"] or "")
     safe_pass = _sanitize_cred(creds["password"] or "")
 
-    if payload.method == "winrm" and safe_user and safe_pass:
+    if payload.method == "interactive" and safe_user and safe_pass and payload.job_id and payload.pin:
         quoted_pass = shlex.quote(safe_pass)
         quoted_user = shlex.quote(safe_user)
-        if payload.agent_type == "aegis-guard":
+        base = settings.PUBLIC_BASE_URL.rstrip('/')
+        if payload.os_type == "windows":
+            # Windows: Run a scheduled task as the interactive user to pop up a Message Box and ask for PIN
+            ps_script = (
+                f"$pin = [Microsoft.VisualBasic.Interaction]::InputBox('Aegis IT has requested to install security agents on this device. Please enter the PIN to approve:', 'Aegis Deployment Approval', ''); "
+                f"if ($pin) {{ Invoke-RestMethod -Uri '{base}/api/v1/deploy/jobs/{payload.job_id}/approve' -Method Post -Body (@{{ip_address='{payload.ip_address}';pin=$pin}} | ConvertTo-Json) -ContentType 'application/json' }} "
+                f"else {{ Write-Host 'Cancelled' }}"
+            )
+            ps_encoded = "[Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes('" + ps_script.replace("'", "''") + "'))"
+            deploy_command = (
+                f"powershell -Command \"$secpass=ConvertTo-SecureString {quoted_pass} -AsPlainText -Force; "
+                f"$cred=New-Object System.Management.Automation.PSCredential({quoted_user}, $secpass); "
+                f"$s=New-PSSession -ComputerName {payload.ip_address} -Credential $cred; "
+                f"Invoke-Command -Session $s -ScriptBlock {{ "
+                f"$script = {ps_encoded}; "
+                f"$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-WindowStyle Hidden -EncodedCommand ' + $script; "
+                f"$trigger = New-ScheduledTaskTrigger -At ((Get-Date).AddSeconds(3)) -Once; "
+                f"Register-ScheduledTask -TaskName 'AegisApproval' -Action $action -Trigger $trigger -User 'BUILTIN\\Users' -Force; "
+                f"Start-Sleep -Seconds 5; Unregister-ScheduledTask -TaskName 'AegisApproval' -Confirm:$false "
+                f"}}; Remove-PSSession $s\""
+            )
+        else:
+            deploy_command = (
+                f"sshpass -p {shlex.quote(safe_pass)} ssh -o StrictHostKeyChecking=accept-new "
+                f"{shlex.quote(safe_user)}@{payload.ip_address} "
+                f"'export DISPLAY=:0 && pin=$(zenity --entry --text=\"Aegis IT wants to install security agents. Enter PIN:\" --title=\"Aegis Deployment\") && "
+                f"[ ! -z \"$pin\" ] && curl -X POST {base}/api/v1/deploy/jobs/{payload.job_id}/approve -H \"Content-Type: application/json\" -d \"{{\\\"ip_address\\\":\\\"{payload.ip_address}\\\",\\\"pin\\\":\\\"$pin\\\"}}\"'"
+            )
+        payload_method = "interactive"
+    elif payload.method == "winrm" and safe_user and safe_pass:
+        quoted_pass = shlex.quote(safe_pass)
+        quoted_user = shlex.quote(safe_user)
+        if payload.agent_type == "unified":
+            deploy_command = (
+                f"powershell -Command \"$secpass=ConvertTo-SecureString {quoted_pass} -AsPlainText -Force; "
+                f"$cred=New-Object System.Management.Automation.PSCredential({quoted_user}, $secpass); "
+                f"$s=New-PSSession -ComputerName {payload.ip_address} -Credential $cred; "
+                f"Invoke-Command -Session $s -ScriptBlock {{ New-Item -ItemType Directory -Force -Path 'C:\\AegisGuard'; New-Item -ItemType Directory -Force -Path 'C:\\NodeTrace' }}; "
+                f"Copy-Item -ToSession $s -Path 'aegis-guard\\target\\aegis-guard.jar' -Destination 'C:\\AegisGuard\\aegis-guard.jar'; "
+                f"Copy-Item -ToSession $s -Path 'NodeTrace\\agents\\python\\dist\\nodetrace-agent\\*' -Destination 'C:\\NodeTrace\\' -Recurse -Force; "
+                f"Invoke-Command -Session $s -ScriptBlock {{ "
+                f"Start-Process -FilePath 'java' -ArgumentList '-jar','C:\\AegisGuard\\aegis-guard.jar' -NoNewWindow; "
+                f"Start-Process -FilePath 'C:\\NodeTrace\\nodetrace-agent.exe' -NoNewWindow "
+                f"}}; Remove-PSSession $s\""
+            )
+        elif payload.agent_type == "aegis-guard":
             deploy_command = (
                 f"powershell -Command \"$secpass=ConvertTo-SecureString {quoted_pass} -AsPlainText -Force; "
                 f"$cred=New-Object System.Management.Automation.PSCredential({quoted_user}, $secpass); "
@@ -489,19 +550,30 @@ async def deployment_plan(payload: DeploymentPlanRequest, db: AsyncSession = Dep
             )
         payload_method = "winrm"
     elif payload.method == "ssh" and safe_user and safe_pass:
-        if payload.agent_type == "aegis-guard":
+        if payload.agent_type == "unified":
             deploy_command = (
-                f"sshpass -p {shlex.quote(safe_pass)} scp -o StrictHostKeyChecking=no "
+                f"sshpass -p {shlex.quote(safe_pass)} scp -o StrictHostKeyChecking=accept-new "
                 f"aegis-guard/target/aegis-guard.jar {shlex.quote(safe_user)}@{payload.ip_address}:/tmp/aegis-guard.jar && "
-                f"sshpass -p {shlex.quote(safe_pass)} ssh -o StrictHostKeyChecking=no "
+                f"sshpass -p {shlex.quote(safe_pass)} scp -r -o StrictHostKeyChecking=accept-new "
+                f"NodeTrace/agents/python/dist/nodetrace-agent {shlex.quote(safe_user)}@{payload.ip_address}:/tmp/nodetrace-agent && "
+                f"sshpass -p {shlex.quote(safe_pass)} ssh -o StrictHostKeyChecking=accept-new "
+                f"{shlex.quote(safe_user)}@{payload.ip_address} "
+                f"'nohup java -jar /tmp/aegis-guard.jar > /tmp/aegis-guard.log 2>&1 & "
+                f"chmod +x /tmp/nodetrace-agent/nodetrace-agent && nohup /tmp/nodetrace-agent/nodetrace-agent > /tmp/nodetrace.log 2>&1 &'"
+            )
+        elif payload.agent_type == "aegis-guard":
+            deploy_command = (
+                f"sshpass -p {shlex.quote(safe_pass)} scp -o StrictHostKeyChecking=accept-new "
+                f"aegis-guard/target/aegis-guard.jar {shlex.quote(safe_user)}@{payload.ip_address}:/tmp/aegis-guard.jar && "
+                f"sshpass -p {shlex.quote(safe_pass)} ssh -o StrictHostKeyChecking=accept-new "
                 f"{shlex.quote(safe_user)}@{payload.ip_address} "
                 f"'nohup java -jar /tmp/aegis-guard.jar > /tmp/aegis-guard.log 2>&1 &'"
             )
         else:
             deploy_command = (
-                f"sshpass -p {shlex.quote(safe_pass)} scp -r -o StrictHostKeyChecking=no "
+                f"sshpass -p {shlex.quote(safe_pass)} scp -r -o StrictHostKeyChecking=accept-new "
                 f"NodeTrace/agents/python/dist/nodetrace-agent {shlex.quote(safe_user)}@{payload.ip_address}:/tmp/nodetrace-agent && "
-                f"sshpass -p {shlex.quote(safe_pass)} ssh -o StrictHostKeyChecking=no "
+                f"sshpass -p {shlex.quote(safe_pass)} ssh -o StrictHostKeyChecking=accept-new "
                 f"{shlex.quote(safe_user)}@{payload.ip_address} "
                 f"'chmod +x /tmp/nodetrace-agent/nodetrace-agent && nohup /tmp/nodetrace-agent/nodetrace-agent > /tmp/nodetrace.log 2>&1 &'"
             )
@@ -510,7 +582,10 @@ async def deployment_plan(payload: DeploymentPlanRequest, db: AsyncSession = Dep
         deploy_command = None
         payload_method = "manual"
 
-    if payload.agent_type == "nodetrace":
+    if payload.agent_type == "unified":
+        local_command = "cd NodeTrace\\agents\\python\\dist\\nodetrace-agent && nodetrace-agent.exe & cd aegis-guard && java -jar target\\aegis-guard.jar"
+        remote_command = f"Copy agents to {payload.ip_address} and run them."
+    elif payload.agent_type == "nodetrace":
         local_command = "cd NodeTrace\\agents\\python\\dist\\nodetrace-agent && nodetrace-agent.exe"
         remote_command = f"Copy nodetrace-agent folder to {payload.ip_address} and run nodetrace-agent.exe"
     else:
@@ -536,6 +611,19 @@ async def deployment_plan(payload: DeploymentPlanRequest, db: AsyncSession = Dep
 
 @router.post("/deploy")
 async def auto_deploy(payload: AutoDeployRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """LEGACY manual fallback — deprecated, use POST /deploy/jobs.
+
+    VaultX password parsing is kept for backward compat but emits a
+    deprecation warning + audit event. New rollouts must use DeployJob
+    with transient credentials (never persisted).
+    """
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy credential-based deployment has been removed; use /deploy/token and signed enrollment",
+    )
+
+    from app.core.audit import log_audit as _audit
+    _used_vault = False
     _validate_ip_or_raise(payload.ip_address)
     creds = {"username": payload.username, "password": payload.password}
     if not creds["username"] or not creds["password"]:
@@ -554,6 +642,7 @@ async def auto_deploy(payload: AutoDeployRequest, db: AsyncSession = Depends(get
                 tokens = []
             if "#deploy-creds" in tokens or "deploy-creds" in tokens:
                 if payload.ip_address in note.content:
+                    _used_vault = True
                     for line in note.content.splitlines():
                         if "password:" in line.lower() or "pass:" in line.lower():
                             creds["password"] = line.split(":", 1)[1].strip()
@@ -564,6 +653,15 @@ async def auto_deploy(payload: AutoDeployRequest, db: AsyncSession = Depends(get
     safe_pass = _sanitize_cred(creds["password"] or "")
     if not safe_user or not safe_pass:
         raise HTTPException(status_code=400, detail="No credentials found. Save a VaultX note with #deploy-creds tag.")
+    if _used_vault:
+        try:
+            await _audit(db, action="deploy_legacy_vault_creds", resource="discovered_host",
+                         resource_id=payload.ip_address,
+                         details={"deprecated": True, "migrate_to": "POST /deploy/jobs"},
+                         user_id=user.id, username=user.username)
+            await db.commit()
+        except Exception:
+            pass
 
     os_type = "linux"
     try:
@@ -605,6 +703,9 @@ async def auto_deploy(payload: AutoDeployRequest, db: AsyncSession = Depends(get
             )
         return {
             "status": "deploy_initiated",
+            "deprecated": True,
+            "deprecation": "POST /discovery/deploy is legacy manual fallback. Use POST /deploy/jobs with transient credentials (nothing persisted). VaultX password parsing will be removed.",
+            "used_vault_creds": _used_vault,
             "ip_address": payload.ip_address,
             "agent_type": payload.agent_type,
             "method": "winrm",
@@ -615,22 +716,25 @@ async def auto_deploy(payload: AutoDeployRequest, db: AsyncSession = Depends(get
     else:
         if payload.agent_type == "aegis-guard":
             command = (
-                f"sshpass -p {quoted_pass} scp -o StrictHostKeyChecking=no "
+                f"sshpass -p {quoted_pass} scp -o StrictHostKeyChecking=accept-new "
                 f"aegis-guard/target/aegis-guard.jar {quoted_user}@{payload.ip_address}:/tmp/aegis-guard.jar && "
-                f"sshpass -p {quoted_pass} ssh -o StrictHostKeyChecking=no "
+                f"sshpass -p {quoted_pass} ssh -o StrictHostKeyChecking=accept-new "
                 f"{quoted_user}@{payload.ip_address} "
                 f"'nohup java -jar /tmp/aegis-guard.jar > /tmp/aegis-guard.log 2>&1 &'"
             )
         else:
             command = (
-                f"sshpass -p {quoted_pass} scp -r -o StrictHostKeyChecking=no "
+                f"sshpass -p {quoted_pass} scp -r -o StrictHostKeyChecking=accept-new "
                 f"NodeTrace/agents/python/dist/nodetrace-agent {quoted_user}@{payload.ip_address}:/tmp/nodetrace-agent && "
-                f"sshpass -p {quoted_pass} ssh -o StrictHostKeyChecking=no "
+                f"sshpass -p {quoted_pass} ssh -o StrictHostKeyChecking=accept-new "
                 f"{quoted_user}@{payload.ip_address} "
                 f"'chmod +x /tmp/nodetrace-agent/nodetrace-agent && nohup /tmp/nodetrace-agent/nodetrace-agent > /tmp/nodetrace.log 2>&1 &'"
             )
         return {
             "status": "deploy_initiated",
+            "deprecated": True,
+            "deprecation": "POST /discovery/deploy is legacy manual fallback. Use POST /deploy/jobs with transient credentials (nothing persisted). VaultX password parsing will be removed.",
+            "used_vault_creds": _used_vault,
             "ip_address": payload.ip_address,
             "agent_type": payload.agent_type,
             "method": "ssh",

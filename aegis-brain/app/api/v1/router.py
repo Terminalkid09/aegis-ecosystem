@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, vault, osint, ai, telemetry, nodetrace, enroll, history, rules, discovery, ws, playbooks, syslog, audit
+from app.api.v1 import auth, vault, osint, ai, telemetry, nodetrace, enroll, history, rules, discovery, ws, playbooks, syslog, audit, deploy, total, incidents
 
 api_router = APIRouter()
 
@@ -12,6 +12,9 @@ api_router.include_router(history.router, prefix="/telemetry")
 api_router.include_router(enroll.router, prefix="/enroll")
 api_router.include_router(rules.router, prefix="/rules")
 api_router.include_router(discovery.router, prefix="/discovery")
+api_router.include_router(deploy.router, prefix="/deploy")
+api_router.include_router(total.router, prefix="/total")
+api_router.include_router(incidents.router, prefix="/soc")
 api_router.include_router(playbooks.router, prefix="/soar")
 api_router.include_router(syslog.router, prefix="/syslog")
 api_router.include_router(audit.router, prefix="/audit")

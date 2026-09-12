@@ -59,8 +59,14 @@ class AgentResponse(BaseSchema):
     ip_address: Optional[str] = None
     os_type: Optional[str] = None
     agent_type: Optional[str] = None
+    agent_version: Optional[str] = None
+    isolated: bool = False
     is_demo: bool = False
     last_seen: Optional[datetime] = None
+    # M7 Fase 8: sito (da meta), stato e capabilities (additivi, default sicuri).
+    site: str = "default"
+    status: str = "unknown"
+    capabilities: Optional[Any] = None
 
 class EventSchema(BaseModel):
     model_config = ConfigDict(
@@ -101,6 +107,42 @@ class EventSchema(BaseModel):
     # Security signals
     network_connections: Optional[List[Dict[str, Any]]] = Field(None, alias="networkConnections")
 
+    # Fleet management (Guard sends camelCase agentVersion, NodeTrace snake_case)
+    agent_version: Optional[str] = Field(None, max_length=50, alias="agentVersion")
+    capabilities: Optional[Any] = None
+
+    # Agent-side behavioral detection (Phase 5)
+    command_line: Optional[str] = Field(None, max_length=4096, alias="commandLine")
+    behavioral_tags: Optional[List[str]] = Field(None, alias="behavioralTags")
+    anomalies: Optional[List[str]] = None
+
+    # Event identity + sequencing (schema v2, M1 Fase 2 — tutti opzionali:
+    # gli agenti legacy v1 continuano a funzionare senza questi campi).
+    event_id: Optional[str] = Field(
+        None, max_length=64, alias="eventId",
+        description="UUID per evento, chiave di idempotenza/dedup")
+    schema_version: Optional[int] = Field(None, alias="schemaVersion")
+    boot_id: Optional[str] = Field(None, max_length=64, alias="bootId")
+    seq: Optional[int] = Field(None, ge=0, description="Sequence per (agent_id, boot_id); negativo = corrotto, rifiutato")
+    ts_monotonic_ns: Optional[int] = Field(None, alias="tsMonotonicNs")
+    ts_wall_ns: Optional[int] = Field(None, alias="tsWallNs")
+    proc_start_ns: Optional[int] = Field(
+        None, alias="procStartNs",
+        description="Start monotonico processo: con pid risolve PID reuse")
+    session_id: Optional[str] = Field(None, max_length=128, alias="sessionId")
+    integrity_level: Optional[str] = Field(None, max_length=64, alias="integrityLevel")
+    signature: Optional[str] = Field(None, max_length=256)
+    publisher: Optional[str] = Field(None, max_length=256)
+    proto: Optional[str] = Field(None, max_length=16)
+    direction: Optional[str] = Field(None, max_length=16)
+    container_id: Optional[str] = Field(None, max_length=128, alias="containerId")
+    cgroup: Optional[str] = Field(None, max_length=512)
+    net_namespace: Optional[str] = Field(None, max_length=128, alias="netNamespace")
+    provenance: Optional[str] = Field(None, max_length=32)
+    quality: Optional[str] = Field(None, max_length=64)
+    sampling: Optional[str] = Field(None, max_length=32)
+    drop_reason: Optional[str] = Field(None, max_length=128, alias="dropReason")
+
 class StatsResponse(BaseModel):
     total_alerts: int
     unresolved_alerts: int
@@ -110,3 +152,11 @@ class StatsResponse(BaseModel):
     current_medium_alerts: int = 0
     current_low_alerts: int = 0
     demo_agents: int = 0
+    # Pipeline M1 Fase 2: duplicati scartati e gap di sequenza (perdite misurate).
+    events_duplicated: int = 0
+    events_seq_gaps: int = 0
+    events_seq_gap_events: int = 0
+    # Flotta M7 Fase 8: salute sensori (additivi).
+    isolated_agents: int = 0
+    stale_agents: int = 0
+    offline_agents: int = 0

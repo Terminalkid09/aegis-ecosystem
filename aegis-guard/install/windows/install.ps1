@@ -8,23 +8,23 @@ $jarPath = Join-Path $installDir "aegis-guard.jar"
 $envFile = Join-Path $scriptPath "..\..\.env"
 $pomPath = Join-Path $scriptPath "..\..\pom.xml"
 
-Write-Host "â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—" -ForegroundColor Cyan
-Write-Host "â•‘ Aegis-Guard Windows Installation       â•‘" -ForegroundColor Cyan
-Write-Host "â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•" -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "| Aegis-Guard Windows Installation       |" -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
 
 # === PREREQUISITES CHECK ===
 Write-Host "`n[1/6] Checking prerequisites..." -ForegroundColor Cyan
 
 if (-not (Test-Path $nssmPath)) {
-    Write-Error "âœ— nssm.exe not found at $nssmPath. Please copy nssm.exe here."
+    Write-Error "[X] nssm.exe not found at $nssmPath. Please copy nssm.exe here."
     exit 1
 }
-Write-Host "  âœ“ nssm.exe found" -ForegroundColor Green
+Write-Host "  [OK] nssm.exe found" -ForegroundColor Green
 
 # Automated JRE check/download
 $jrePath = Join-Path $scriptPath "jre\bin\java.exe"
 if ($null -eq (Get-Command java -ErrorAction SilentlyContinue) -and -not (Test-Path $jrePath)) {
-    Write-Host "  âš  Java not found. Downloading portable JRE..." -ForegroundColor Yellow
+    Write-Host "  *  Java not found. Downloading portable JRE..." -ForegroundColor Yellow
     $jreZip = Join-Path $scriptPath "jre.zip"
     Invoke-WebRequest -Uri "https://aka.ms/download-jdk/microsoft-jdk-21-windows-x64.zip" -OutFile $jreZip # Example URL
     Expand-Archive -Path $jreZip -DestinationPath (Join-Path $scriptPath "jre_temp")
@@ -37,25 +37,25 @@ if ($null -eq (Get-Command java -ErrorAction SilentlyContinue) -and -not (Test-P
 } else {
     $javaExe = "java"
 }
-Write-Host "  âœ“ Using Java: $javaExe" -ForegroundColor Green
+Write-Host "  [OK] Using Java: $javaExe" -ForegroundColor Green
 
 if ($null -eq (Get-Command mvn -ErrorAction SilentlyContinue)) {
-    Write-Error "âœ— Maven not found in PATH. Please install Maven 3.8+ and add to PATH."
+    Write-Error "[X] Maven not found in PATH. Please install Maven 3.8+ and add to PATH."
     exit 1
 }
-Write-Host "  âœ“ Maven found" -ForegroundColor Green
+Write-Host "  [OK] Maven found" -ForegroundColor Green
 
 if (-not (Test-Path $pomPath)) {
-    Write-Error "âœ— pom.xml not found at $pomPath"
+    Write-Error "[X] pom.xml not found at $pomPath"
     exit 1
 }
-Write-Host "  âœ“ pom.xml found" -ForegroundColor Green
+Write-Host "  [OK] pom.xml found" -ForegroundColor Green
 
 # === ENVIRONMENT LOADING ===
 Write-Host "`n[2/6] Loading environment from .env..." -ForegroundColor Cyan
 
 if (-not (Test-Path $envFile)) {
-    Write-Error "âœ— .env file not found at $envFile"
+    Write-Error "[X] .env file not found at $envFile"
     exit 1
 }
 
@@ -72,21 +72,21 @@ Get-Content $envFile | Where-Object { $_ -match '=' -and -not $_.StartsWith('#')
 
 # Validate required variables
 if (-not $envVars['AEGIS_API_KEY']) {
-    Write-Error "âœ— AEGIS_API_KEY not found in .env"
+    Write-Error "[X] AEGIS_API_KEY not found in .env"
     exit 1
 }
-Write-Host "  âœ“ AEGIS_API_KEY configured" -ForegroundColor Green
-Write-Host "  âœ“ Environment loaded" -ForegroundColor Green
+Write-Host "  [OK] AEGIS_API_KEY configured" -ForegroundColor Green
+Write-Host "  [OK] Environment loaded" -ForegroundColor Green
 
 # === BUILD / ARTIFACT CHECK ===
 Write-Host "`n[3/6] Verifying artifact..." -ForegroundColor Cyan
 
 $jarSource = Join-Path $scriptPath "..\target\aegis-guard.jar"
 if (-not (Test-Path $jarSource)) {
-    Write-Error "âœ— aegis-guard.jar not found at $jarSource`nPlease ensure the project is built or copy the pre-compiled JAR to the 'target' folder."
+    Write-Error "[X] aegis-guard.jar not found at $jarSource`nPlease ensure the project is built or copy the pre-compiled JAR to the 'target' folder."
     exit 1
 }
-Write-Host "  âœ“ Artifact found: aegis-guard.jar" -ForegroundColor Green
+Write-Host "  [OK] Artifact found: aegis-guard.jar" -ForegroundColor Green
 
 # === INSTALLATION DIRECTORY ===
 Write-Host "`n[4/6] Creating installation directory..." -ForegroundColor Cyan
@@ -102,17 +102,17 @@ $adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
 $acl.SetAccessRule($adminRule)
 Set-Acl $installDir $acl
 
-Write-Host "  âœ“ Directory created at $installDir" -ForegroundColor Green
+Write-Host "  [OK] Directory created at $installDir" -ForegroundColor Green
 
 # Copy JAR
 $jarSource = Join-Path $scriptPath "..\target\aegis-guard.jar"
 if (-not (Test-Path $jarSource)) {
-    Write-Error "âœ— JAR file not found at $jarSource"
+    Write-Error "[X] JAR file not found at $jarSource"
     exit 1
 }
 
 Copy-Item $jarSource -Destination $jarPath -Force
-Write-Host "  âœ“ JAR deployed" -ForegroundColor Green
+Write-Host "  [OK] JAR deployed" -ForegroundColor Green
 
 # === CONFIGURATION ===
 Write-Host "`n[5/6] Configuring service..." -ForegroundColor Cyan
@@ -141,11 +141,11 @@ Write-Host "  Gateway:  $gatewayUrl" -ForegroundColor Gray
 # Compute file hash
 $hash = Get-FileHash $jarPath -Algorithm SHA256
 $hash | Out-File "$installDir\aegis-guard.sha256" -Force
-Write-Host "  âœ“ File integrity: $(($hash.Hash).Substring(0, 16))..." -ForegroundColor Green
+Write-Host "  [OK] File integrity: $($hash.Hash.Substring(0, 16))..." -ForegroundColor Green
 
 # Check if service already exists
 if (Get-Service "AegisGuard" -ErrorAction SilentlyContinue) {
-    Write-Host "  â„¹ Service already exists, updating configuration..." -ForegroundColor Yellow
+    Write-Host "  [i] Service already exists, updating configuration..." -ForegroundColor Yellow
     Stop-Service AegisGuard -Force -ErrorAction SilentlyContinue
     & $nssmPath remove AegisGuard confirm
 }
@@ -153,7 +153,7 @@ if (Get-Service "AegisGuard" -ErrorAction SilentlyContinue) {
 # Install service
 & $nssmPath install AegisGuard "java" "-jar `"$jarPath`""
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "âœ— Failed to install service via NSSM"
+    Write-Error "[X] Failed to install service via NSSM"
     exit 1
 }
 
@@ -173,7 +173,7 @@ if ($envVars['AEGIS_SCAN_INTERVAL_MS']) {
 & $nssmPath set AegisGuard AppRestartDelay 5000
 & $nssmPath set AegisGuard AppStopMethodSkip 0
 
-Write-Host "  âœ“ Service configured" -ForegroundColor Green
+Write-Host "  [OK] Service configured" -ForegroundColor Green
 
 # === START SERVICE ===
 Write-Host "`n[6/6] Starting service..." -ForegroundColor Cyan
@@ -183,9 +183,9 @@ Start-Sleep -Seconds 3
 
 $svc = Get-Service AegisGuard -ErrorAction SilentlyContinue
 if ($svc.Status -eq "Running") {
-    Write-Host "  âœ“ Service is RUNNING" -ForegroundColor Green
+    Write-Host "  [OK] Service is RUNNING" -ForegroundColor Green
 } else {
-    Write-Host "  âœ— Service failed to start (Status: $($svc.Status))" -ForegroundColor Red
+    Write-Host "  [X] Service failed to start (Status: $($svc.Status))" -ForegroundColor Red
     Write-Host "`n  Troubleshooting:" -ForegroundColor Yellow
     Write-Host "    - Check Event Viewer: Applications and Services Logs > Windows > NSSM"
     Write-Host "    - Check Java version: java -version"
@@ -195,11 +195,11 @@ if ($svc.Status -eq "Running") {
 }
 
 # === SUCCESS ===
-Write-Host "`nâ•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—" -ForegroundColor Green
-Write-Host "â•‘ âœ“ Installation Successful              â•‘" -ForegroundColor Green
-Write-Host "â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•" -ForegroundColor Green
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "| [OK] Installation Successful              |" -ForegroundColor Green
+Write-Host "============================================" -ForegroundColor Cyan
 
-Write-Host @"
+$installSummary = @"
 
 Service Details:
   Name:        AegisGuard
@@ -219,4 +219,5 @@ For issues, check:
   - .env configuration
   - Firewall rules for port 8088
   - Network connectivity to gateway
-"@ -ForegroundColor Green
+"@
+Write-Host $installSummary -ForegroundColor Green

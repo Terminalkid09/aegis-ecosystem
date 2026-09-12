@@ -249,26 +249,24 @@ class TestDiscoveryDeployment:
         assert resp.status_code == 422
 
     async def test_deploy_missing_creds(self, client: AsyncClient, admin_auth_headers):
+        # Legacy credential deploy rimosso di proposito (410): rollout via
+        # /deploy/token + signed enrollment (CHANGELOG 3.0.0).
         resp = await client.post(
             "/api/v1/discovery/deploy",
             json={"ip_address": "192.168.1.100", "agent_type": "nodetrace"},
             headers=admin_auth_headers
         )
-        assert resp.status_code == 400
-        data = resp.json()
-        assert "credentials" in data["detail"].lower()
+        assert resp.status_code == 410
+        assert "deploy/token" in resp.json()["detail"]
 
     async def test_deploy_with_creds(self, client: AsyncClient, admin_auth_headers):
+        # Anche con credenziali il legacy è rimosso: niente password in chiaro.
         resp = await client.post(
             "/api/v1/discovery/deploy",
             json={"ip_address": "192.168.1.100", "agent_type": "nodetrace", "username": "admin", "password": "test123"},
             headers=admin_auth_headers
         )
-        assert resp.status_code == 200, f"Deploy failed: {resp.json()}"
-        data = resp.json()
-        assert data["status"] == "deploy_initiated"
-        assert data["ip_address"] == "192.168.1.100"
-        assert "command" in data
+        assert resp.status_code == 410, f"Legacy deploy must stay gone: {resp.json()}"
 
     async def test_deploy_requires_auth(self, client: AsyncClient):
         resp = await client.post(

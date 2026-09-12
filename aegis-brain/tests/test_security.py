@@ -30,3 +30,16 @@ def test_jwt_creation_and_decoding():
 def test_jwt_decoding_invalid():
     invalid_token = "eyJhbGciOiJIUzI1NiIsInR5cCI.invalid.signature"
     assert decode_access_token(invalid_token) is None
+
+
+def test_legacy_passlib_hash_migrates_to_pwdlib():
+    """Migrazione graduale: hash passlib vecchi verificano e chiedono rehash;
+    i nuovi hash pwdlib/argon2id non lo chiedono (P2.9)."""
+    from passlib.context import CryptContext
+    legacy = CryptContext(schemes=["argon2"], deprecated="auto").hash("pw123")
+    assert verify_password("pw123", legacy) is True
+    assert needs_rehash(legacy) is True
+    new = hash_password("pw123")
+    assert new.startswith("$argon2id$")
+    assert verify_password("pw123", new) is True
+    assert needs_rehash(new) is False

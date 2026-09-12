@@ -44,6 +44,8 @@ class IngestionControllerTest {
     @Test
     @WithMockUser
     void receiveEvent_Success() throws Exception {
+        org.mockito.Mockito.when(redisService.getAgentIdBySecret("test-secret"))
+                .thenReturn("test-agent");
         EventRequest request = EventRequest.builder()
                 .agentId("test-agent")
                 .pid(1234)
@@ -68,6 +70,8 @@ class IngestionControllerTest {
     @Test
     @WithMockUser
     void receiveEvent_AgentIdMismatch() throws Exception {
+        org.mockito.Mockito.when(redisService.getAgentIdBySecret("test-secret"))
+                .thenReturn("test-agent");
         EventRequest request = EventRequest.builder()
                 .agentId("test-agent")
                 .pid(1234)
@@ -91,6 +95,8 @@ class IngestionControllerTest {
     @Test
     @WithMockUser
     void receiveEvent_ValidationError() throws Exception {
+        org.mockito.Mockito.when(redisService.getAgentIdBySecret("test-secret"))
+                .thenReturn("test-agent");
         EventRequest request = EventRequest.builder()
                 // agentId missing
                 .pid(-1) // invalid pid
@@ -103,6 +109,7 @@ class IngestionControllerTest {
         mockMvc.perform(post("/api/v1/events")
                         .with(csrf())
                         .header("X-Api-Key", "test-secret")
+                        .header("X-Agent-Id", "test-agent")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())

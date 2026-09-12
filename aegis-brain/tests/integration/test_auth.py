@@ -50,6 +50,10 @@ class TestAuth:
 
     async def test_rate_limit_register(self, client: AsyncClient):
         for i in range(7):
+            # Cookie jar pulito a ogni tentativo: il cookie auth dei tentativi
+            # riusciti attiverebbe il CSRF-check (403) e non testeremmo il rate
+            # limit (429). I browser reali inviano Origin, httpx no.
+            client.cookies.clear()
             response = await client.post("/api/v1/auth/register", json={
                 "username": f"user{i}",
                 "email": f"user{i}@example.com",

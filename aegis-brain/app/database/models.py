@@ -67,6 +67,9 @@ class Agent(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     os_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     agent_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    agent_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    capabilities: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    isolated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     meta: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     device_token_hash: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
@@ -234,6 +237,7 @@ class AuditLog(Base):
     details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    is_test: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 class Playbook(Base):
@@ -288,3 +292,128 @@ class SyslogEvent(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     raw: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     processed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+# ─── M1: modern deploy (Falcon-style one-liner + job queue) ────────────
+# NOTE: agent_id kept as String(36) on purpose for SQLite/aio tests compat
+# (Agent.agent_id uses PG UUID which is Postgres-only).
+
+class EnrollToken(Base):
+    """Short-lived single-use enrollment tokens for one-liner install.
+
+    Replaces the static AGENT_ENROLL_KEY for interactive installs.
+    The static key stays valid as fallback for headless/IoT provisioning.
+    """
+    __tablename__ = "enroll_tokens"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    label: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    agent_type: Mapped[str] = mapped_column(String(50), default="aegis-guard", nullable=False)
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    used_by_hostname: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DeployJob(Base):
+    """Mass deploy job: N targets, server-side execution, WS-streamable logs.
+
+    Credentials are NEVER persisted: only a transient reference + username
+    (for audit) is stored. Passwords live only in the worker memory.
+    """
+    __tablename__ = "deploy_jobs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_type: Mapped[str] = mapped_column(String(50), default="nodetrace", nullable=False)
+    agent_version: Mapped[str] = mapped_column(String(50), default="latest", nullable=False)
+    targets: Mapped[List[Dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    # per-target status: {ip: {status, log, updated_at}}
+    status: Mapped[str] = mapped_column(String(30), default="queued", nullable=False)
+    results: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DeployCredential(Base):
+    """Ephemeral credential reference for a DeployJob.
+
+    Only the username + vault pointer is stored. The secret itself must be
+    supplied per-request (modal) or resolved server-side from VaultX at
+    execution time with a 60s lease, then wiped from memory.
+    """
+    __tablename__ = "deploy_credentials"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("deploy_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    method: Mapped[str] = mapped_column(String(20), default="ssh", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ─── M2: Aegis Total (internal VirusTotal + code viewer) ───────────────
+
+AEGIS_TOTAL_DISCLAIMER = (
+    "Aegis Total mostra metadati, disassemblato/decompilato approssimativo e IOC "
+    "a solo scopo difensivo (DFIR, threat-intel, audit su sistemi di cui hai "
+    "autorizzazione). Caricando dichiari di averne diritto. Vietato usare il "
+    "servizio per rimuovere protezioni, generare crack/serial o violare IP altrui. "
+    "Le analisi sono registrate. Uso improprio = ban + segnalazione."
+)
+
+
+class TotalReport(Base):
+    """Aggregated file/project analysis report (dedup by sha256)."""
+    __tablename__ = "total_reports"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sha256: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    kind: Mapped[str] = mapped_column(String(30), default="file", nullable=False)
+    score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    verdict: Mapped[str] = mapped_column(String(30), default="unknown", nullable=False)
+    engines: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    files: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSON, nullable=True)
+    sbom: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    ai_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    disclaimer_accepted_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ─── SOC incidents (commercial triage: group alerts, status, assignee) ──
+
+INCIDENT_STATUSES = ("open", "investigating", "contained", "resolved", "closed")
+SEVERITY_RANK = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+
+
+class Incident(Base):
+    __tablename__ = "incidents"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), default="MEDIUM", nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="open", nullable=False)
+    assignee_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    agent_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class IncidentAlert(Base):
+    __tablename__ = "incident_alerts"
+    incident_id: Mapped[int] = mapped_column(ForeignKey("incidents.id", ondelete="CASCADE"), primary_key=True)
+    alert_id: Mapped[int] = mapped_column(ForeignKey("alerts.id", ondelete="CASCADE"), primary_key=True)
+    attached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RevokedCert(Base):
+    """Revoca persistita in DB con audit (Fase 4). File `revoked.txt` resta fallback."""
+    __tablename__ = "revoked_certs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    serial: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    fingerprint: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    revoked_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

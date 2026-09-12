@@ -12,6 +12,10 @@ class RuleResult:
     mitre_tactic: Optional[str] = None
     mitre_technique_id: Optional[str] = None
     mitre_technique: Optional[str] = None
+    # M4 Fase 5: identità e confidenza SEPARATA dalla severity.
+    rule_id: str = "custom"
+    version: str = "1.0"
+    confidence: str = "medium"
 
 @dataclass
 class StaticRule:
@@ -23,6 +27,13 @@ class StaticRule:
     mitre_technique_id: str
     fn: callable
     mitre_tactic_id: Optional[str] = None
+    # M4 Fase 5: identificatore stabile + versione + confidenza.
+    rule_id: str = ""
+    version: str = "1.0"
+    confidence: str = "medium"
+    # Fase 5: eccezioni e allowlist documentate per ogni detection (spiegabilità SOC).
+    exceptions: tuple = ()
+    allowlist: tuple = ()
 
 # ═══════════════════════════════════════════════════════════════════
 #  EXPANDED THREAT SIGNATURES (200+ entries across categories)
@@ -187,7 +198,7 @@ SUSPICIOUS_PATHS = {
     "\\windows\\temp\\", "\\wINDOWS\\Temp\\",
     "\\system32\\tasks\\", "\\system32\\spool\\drivers\\",
     "\\system32\\spool\\servic\\",
-    "/tmp/", "/var/tmp/", "/dev/shm/",
+    "/tmp/", "/var/tmp/", "/dev/shm/",  # nosec B108 - detection indicator, not a filesystem operation
     "/var/cache/", "/var/spool/", "/var/www/",
     "/home/*/.cache/", "/home/*/.local/share/Trash/",
     "/run/user/", "/dev/pts/",
@@ -349,7 +360,8 @@ def rule_known_attack_tool(event: EventSchema) -> RuleResult:
     name = event.process_name.lower().strip()
     name_noexe = name.replace(".exe", "").replace(".com", "").replace(".dll", "")
     combined = CREDENTIAL_TOOLS | SCANNER_TOOLS | EXPLOIT_TOOLS | POST_EXPLOIT_TOOLS | RAT_TOOLS | RANSOMWARE | EVASION_TOOLS | INFO_STEALERS
-    if name in combined or name_noexe in combined:
+    # Stem: "C:\Tools\mimikatz.exe" deve matchare, "mymimikatzlog.txt" no.
+    if name in combined or name_noexe in combined or _stem(name) in {_stem(x) for x in combined}:
         return RuleResult(
             triggered=True, severity="CRITICAL",
             description=f"Known attack tool / malware detected: '{event.process_name}'.",
@@ -453,15 +465,31 @@ def rule_network_tool(event: EventSchema) -> RuleResult:
     return RuleResult(triggered=False)
 
 
+def _stem(name: str) -> str:
+    """Basename senza estensione: 'powershell.exe' == 'powershell'."""
+    b = _base(name)
+    for ext in (".exe", ".com", ".dll", ".bat", ".ps1", ".scr"):
+        if b.endswith(ext):
+            b = b[: -len(ext)]
+            break
+    return b
+
+
+def _proc_match(name: str, pattern: str) -> bool:
+    return _stem(name) == _stem(pattern)
+
+
 def rule_suspicious_parent_child(event: EventSchema) -> RuleResult:
     if not event.parent_process_name or not event.process_name:
         return RuleResult(triggered=False)
-    parent = event.parent_process_name.lower().strip()
-    child = event.process_name.lower().strip()
+    # Stem matching: "C:\...\winword.exe" matcha "winword", ma
+    # "mywordviewer" non matcha più "word" (era FP col vecchio `in`).
+    parent = event.parent_process_name
+    child = event.process_name
 
     for parents, children, sev, desc, ta_tactic, tactic, technique, tech_id in SUSPICIOUS_PARENT_CHILD:
-        if any(p in parent for p in parents):
-            if any(c in child for c in children):
+        if any(_proc_match(parent, p) for p in parents):
+            if any(_proc_match(child, c) for c in children):
                 return RuleResult(
                     triggered=True, severity=sev,
                     description=desc.format(parent=event.parent_process_name, child=event.process_name),
@@ -549,14 +577,36 @@ def rule_high_thread_count(event: EventSchema) -> RuleResult:
     return RuleResult(triggered=False)
 
 
+def _base(name: str) -> str:
+    """Basename minuscolo: evita match su path ('C:\\Tools\\x' -> 'x')."""
+    n = (name or "").lower().strip().replace("\\", "/")
+    return n.rsplit("/", 1)[-1]
+
+
 def rule_network_beacon(event: EventSchema) -> RuleResult:
     """
-    Detects processes making outbound connections to remote IPs.
-    At event-level, flags any process with active outbound connections
-    to public IPs (heuristic). Full beacon timing analysis in correlation_engine.
+    Outbound verso IP pubblici: da SOLO non basta (browser, updater = FP).
+    Scatta solo se il processo è anche ad alto rischio (attack tool, LOLBin,
+    malware family) o in path sospetto. L'analisi di periodicità vera resta
+    nel correlation_engine (variance su 5+ campioni).
     """
     if not event.network_connections:
         return RuleResult(triggered=False)
+    name = _base(event.process_name or "")
+    high_risk = (
+        name in LOLBINS
+        or name in CREDENTIAL_TOOLS
+        or name in SCANNER_TOOLS
+        or name in EXPLOIT_TOOLS
+        or name in POST_EXPLOIT_TOOLS
+        or any(k in name for k, *_ in MALWARE_FAMILIES)
+    )
+    if not high_risk:
+        if not event.process_path:
+            return RuleResult(triggered=False)
+        pl = event.process_path.lower()
+        if not any(s in pl for s in SUSPICIOUS_PATHS):
+            return RuleResult(triggered=False)
     outbound = []
     for conn in event.network_connections:
         remote = conn.get("remote", "")
@@ -570,7 +620,7 @@ def rule_network_beacon(event: EventSchema) -> RuleResult:
         remote_str = "; ".join(outbound[:3])
         return RuleResult(
             triggered=True, severity="MEDIUM",
-            description=f"Process '{event.process_name}' has {len(outbound)} outbound connections: {remote_str}.",
+            description=f"High-risk process '{event.process_name}' has {len(outbound)} outbound connections: {remote_str}.",
             mitre_tactic_id="TA0011", mitre_tactic="Command and Control", mitre_technique="Application Layer Protocol",
             mitre_technique_id="T1071"
         )
@@ -612,66 +662,228 @@ def _is_private_ip(ip: str) -> bool:
 # ═══════════════════════════════════════════════════════════════════
 
 STATIC_RULES = [
-    StaticRule(name="Known Attack Tool", severity="CRITICAL",
+    StaticRule(rule_id="AEGIS-S001", version="1.0", confidence="high",
+               name="Known Attack Tool", severity="CRITICAL",
                description="Detects 200+ known attack tools, credential dumpers, scanners, RATs, ransomware, etc.",
                mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="User Execution",
                mitre_technique_id="T1204", fn=rule_known_attack_tool),
-    StaticRule(name="Suspicious Parent-Child", severity="CRITICAL",
+    StaticRule(rule_id="AEGIS-S002", version="1.0", confidence="high",
+               name="Suspicious Parent-Child", severity="CRITICAL",
                description="Anomalous process lineage: Office, browser, PDF reader spawning script interpreters.",
                mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="User Execution",
                mitre_technique_id="T1204", fn=rule_suspicious_parent_child),
-    StaticRule(name="Malware Family", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S003", version="1.0", confidence="high",
+               name="Malware Family", severity="HIGH",
                description="Process names matching known malware family patterns (trojan, backdoor, miner, ransomware, etc.).",
                mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="User Execution",
                mitre_technique_id="T1204", fn=rule_malware_family),
-    StaticRule(name="Suspicious Execution Path", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S004", version="1.0", confidence="medium",
+               name="Suspicious Execution Path", severity="HIGH",
                description="Processes executing from temp, downloads, cache, public, or other suspicious paths.",
                mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="Command and Scripting Interpreter",
                mitre_technique_id="T1059", fn=rule_suspicious_execution_path),
-    StaticRule(name="Privilege Escalation", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S005", version="1.0", confidence="medium",
+               name="Privilege Escalation", severity="HIGH",
                description="Desktop/user apps running with SYSTEM/root privileges.",
                mitre_tactic_id="TA0004", mitre_tactic="Privilege Escalation", mitre_technique="Access Token Manipulation",
                mitre_technique_id="T1134", fn=rule_privilege_escalation),
-    StaticRule(name="Double Extension", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S006", version="1.0", confidence="high",
+               name="Double Extension", severity="HIGH",
                description="Files with double extensions indicating masquerading attacks.",
                mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Masquerading",
                mitre_technique_id="T1036", fn=rule_double_extension),
-    StaticRule(name="Encoded Command", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S007", version="1.0", confidence="high",
+               name="Encoded Command", severity="HIGH",
                description="Base64 encoded or obfuscated commands indicating payload delivery.",
                mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Obfuscated Files or Information",
                mitre_technique_id="T1027", fn=rule_encoded_command),
-    StaticRule(name="Persistence Path", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S008", version="1.0", confidence="medium",
+               name="Persistence Path", severity="HIGH",
                description="Process executing from persistence locations (startup, cron, systemd, launchd).",
                mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Boot or Logon Autostart Execution",
                mitre_technique_id="T1547", fn=rule_persistence_path),
-    StaticRule(name="Script Interpreter Abuse", severity="MEDIUM",
+    StaticRule(rule_id="AEGIS-S009", version="1.0", confidence="low",
+               name="Script Interpreter Abuse", severity="MEDIUM",
                description="Script interpreters like PowerShell, cmd, bash, Python, Perl, etc. detected.",
                mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="Command and Scripting Interpreter",
                mitre_technique_id="T1059", fn=rule_script_interpreter_abuse),
-    StaticRule(name="Network Tool in Suspicious Path", severity="MEDIUM",
+    StaticRule(rule_id="AEGIS-S010", version="1.0", confidence="low",
+               name="Network Tool in Suspicious Path", severity="MEDIUM",
                description="Network reconnaissance tools executed from suspicious directories.",
                mitre_tactic_id="TA0007", mitre_tactic="Discovery", mitre_technique="System Network Configuration Discovery",
                mitre_technique_id="T1016", fn=rule_network_tool),
-    StaticRule(name="DLL Hijacking", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S011", version="1.0", confidence="medium",
+               name="DLL Hijacking", severity="HIGH",
                description="DLL loaded from suspicious/user-writable path indicating possible DLL hijacking.",
                mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="DLL Side-Loading",
                mitre_technique_id="T1574", fn=rule_dll_hijack_path),
-    StaticRule(name="LOLBin Abuse", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S012", version="1.0", confidence="medium",
+               name="LOLBin Abuse", severity="HIGH",
                description="Living-off-the-land binary executed from non-standard path.",
                mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Signed Binary Proxy Execution",
                mitre_technique_id="T1218", fn=rule_lolbin_usage),
-    StaticRule(name="High Thread Count", severity="MEDIUM",
+    StaticRule(rule_id="AEGIS-S013", version="1.0", confidence="low",
+               name="High Thread Count", severity="MEDIUM",
                description="Process with abnormally high thread count indicating possible injection.",
                mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Process Injection",
                mitre_technique_id="T1055", fn=rule_high_thread_count),
-    StaticRule(name="Network Beacon", severity="MEDIUM",
+    StaticRule(rule_id="AEGIS-S014", version="1.0", confidence="low",
+               name="Network Beacon", severity="MEDIUM",
                description="Process with outbound connections to public IPs — possible C2 beacon.",
                mitre_tactic_id="TA0011", mitre_tactic="Command and Control", mitre_technique="Application Layer Protocol",
                mitre_technique_id="T1071", fn=rule_network_beacon),
-    StaticRule(name="Persistence Autorun", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S015", version="1.0", confidence="medium",
+               name="Persistence Autorun", severity="HIGH",
                description="Process name mimics common persistence or masquerades as legitimate software.",
                mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Boot or Logon Autostart Execution",
                mitre_technique_id="T1547", fn=rule_persistence_autorun),
 ]
 
 ALL_RULES = [s.fn for s in STATIC_RULES]
+
+RULE_BY_FN = {s.fn: s for s in STATIC_RULES}
+
+
+def stamp_result(rule_fn, result: "RuleResult") -> "RuleResult":
+    """Timbro identità/versione/confidenza dal registry (default: custom)."""
+    meta = RULE_BY_FN.get(rule_fn)
+    if meta is not None and (not result.rule_id or result.rule_id == "custom"):
+        result.rule_id = meta.rule_id
+        result.version = meta.version
+        result.confidence = meta.confidence
+    return result
+
+
+def canary_rule_ids() -> set:
+    """ID regole in canary (log-only, niente alert) da env RULE_CANARY_IDS."""
+    try:
+        from app.core.config import settings
+        raw = getattr(settings, "RULE_CANARY_IDS", "") or ""
+    except Exception:
+        raw = ""
+    return {r.strip().upper() for r in raw.split(",") if r.strip()}
+
+
+def is_canary_rule(rule_id: str) -> bool:
+    return bool(rule_id) and rule_id.strip().upper() in canary_rule_ids()
+
+
+# Fase 5 — spiegaabilità SOC: per ogni regola, eccezioni note e allowlist
+# (casi "tranquilli" che NON devono generare alert). Serve al motore come
+# supporto doc e alla UI per mostrare il razionale della detection.
+RULE_NOTES: dict[str, dict] = {
+    "AEGIS-S001": {
+        "exceptions": ("Strumenti di amministrazione/simulazione autorizzati",
+                       "Sandbox e lab di analisi (allowlist esplicita)"),
+        "allowlist": ("Strumenti IT/pentest approvati da SOC",
+                      "Renamed/repackaged legittimi con firma valida e script di build conosciuti"),
+    },
+    "AEGIS-S002": {
+        "exceptions": ("Macchine CI che eseguono build/packaging via interprete",
+                       "Automazioni Office macros già approvate"),
+        "allowlist": ("Interpreter chiamati da wrapper firmati con relazione nota",
+                      "Simulazioni red-team con regola canary"),
+    },
+    "AEGIS-S003": {
+        "exceptions": ("Nomi di file con parole 'trojan'/'miner' NON eseguibili (log, testo)",
+                       "Progetti con nomi contenenti i pattern (es. 'ProjectRansom')"),
+        "allowlist": ("Binari firmati Microsoft che contengono 'password' nel nome",
+                      "Tool IT con nomi overlap (es. 'loader' di gestori licenze)"),
+    },
+    "AEGIS-S004": {
+        "exceptions": ("Installer che usano %TEMP% come scratch prima di copiare in Program Files",
+                       "Browser che eseguono update helper da cache"),
+        "allowlist": ("Path di lavoro approvati per reparto (documentato per sito)",
+                      "Directories di staging CI/CD note"),
+    },
+    "AEGIS-S005": {
+        "exceptions": ("App desktop lanciate via RunAs da amministrazione remota",
+                       "Kiosk e VDI con policy di esecuzione"),
+        "allowlist": ("Profilo utente locale 'operator' con delega documentata",
+                      "Host con configurazione approvata 'users-as-admin' per legacy"),
+    },
+    "AEGIS-S006": {
+        "exceptions": ("File reali con doppia estensione gestiti dal reparto documentale"),
+        "allowlist": ("Tipo di file con estensione doppia validato da DLP e firmato"),
+    },
+    "AEGIS-S007": {
+        "exceptions": ("Script amministrativi encoded già valutati ed approvati",
+                       "Policy enterprise che passa parametri encoded da tool ufficiali"),
+        "allowlist": ("Hash noti di script encoded firmati e versionati dal SOC"),
+    },
+    "AEGIS-S008": {
+        "exceptions": ("Software enterprise con auto-update in Startup (Adobe, Java, Chrome)",
+                       "Task schedulati dal software gestito"),
+        "allowlist": ("Percorsi di persistenza di software approvato (inventario software)"),
+    },
+    "AEGIS-S009": {
+        "exceptions": ("Amministrazione che usa PowerShell/strumenti di scripting abitualmente"),
+        "allowlist": ("Interpreter usati da processi patch manager/gestionali noti"),
+    },
+    "AEGIS-S010": {
+        "exceptions": ("Tool di rete usati dal team networking/sysadmin con change ticket"),
+        "allowlist": ("Suite di monitoraggio approvate (nmap pianificato) con source IP note"),
+    },
+    "AEGIS-S011": {
+        "exceptions": ("Side-by-side DLL di vendor in AppData documentati",
+                       "Plug-in leggittimamente caricati da cartelle utente"),
+        "allowlist": ("Hash/DLL con firma valida di vendor approvati"),
+    },
+    "AEGIS-S012": {
+        "exceptions": ("LOLBin usati da automatismi IT documentati (certutil per verify, bitsadmin per patch)"),
+        "allowlist": ("Path standard di system32/syswow64/usr/bin (esclusi) già gestiti",
+                      "Script enterprise firmati che invocano LOLBin da path approvati"),
+    },
+    "AEGIS-S013": {
+        "exceptions": ("Processi legittimi multithread (antivirus, DB, browser ayudar)"),
+        "allowlist": ("Processi con media thread storica > soglia (baseline locale)"),
+    },
+    "AEGIS-S014": {
+        "exceptions": ("Update/telemetria di software verso IP pubblici noti",
+                       "Browser con connessioni HTTPS di routine"),
+        "allowlist": ("Domini/IP per update software approvati (da inventario)"),
+    },
+    "AEGIS-S015": {
+        "exceptions": ("Vendor che usa nomi simili (es. 'GoogleUpdate' legittimo)"),
+        "allowlist": ("Nomi di processi di software installato tramite software inventory"),
+    },
+    "custom": {
+        "exceptions": ("Nessuna eccezione standard per regole custom"),
+        "allowlist": ("Nessuna allowlist standard per regole custom"),
+    },
+}
+
+
+def rule_exceptions(rule_id: str) -> tuple:
+    """Eccezioni documentate della regola (stringhe leggibili per il SOC)."""
+    notes = RULE_NOTES.get(rule_id or "custom", RULE_NOTES["custom"])
+    return tuple(notes.get("exceptions", ()))
+
+
+def rule_allowlist(rule_id: str) -> tuple:
+    """Allowlist documentata della regola (stringhe leggibili per il SOC)."""
+    notes = RULE_NOTES.get(rule_id or "custom", RULE_NOTES["custom"])
+    return tuple(notes.get("allowlist", ()))
+
+
+def rule_catalog() -> list[dict]:
+    """Catalogo regole per la UI/differenzazione: ID, versione, confidenza,
+    MITRE, eccezioni e allowlist. Nessuna logica di esecuzione qui."""
+    out = []
+    for s in STATIC_RULES:
+        notes = RULE_NOTES.get(s.rule_id, {})
+        out.append({
+            "rule_id": s.rule_id,
+            "name": s.name,
+            "version": s.version,
+            "confidence": s.confidence,
+            "severity": s.severity,
+            "mitre_tactic_id": s.mitre_tactic_id,
+            "mitre_tactic": s.mitre_tactic,
+            "mitre_technique_id": s.mitre_technique_id,
+            "mitre_technique": s.mitre_technique,
+            "description": s.description,
+            "exceptions": list(notes.get("exceptions", [])),
+            "allowlist": list(notes.get("allowlist", [])),
+        })
+    return out

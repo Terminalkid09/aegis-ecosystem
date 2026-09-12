@@ -3,9 +3,29 @@ import urllib.request
 import urllib.parse
 import shutil
 import ssl
+import os
 
 _USE_CURL = None
 _CURL_PATH = None
+
+# mTLS device identity (gap-closing): percorsi PEM impostati dall'agent.
+# Mai trust-all: senza CA il TLS fallisce chiuso (urllib) o usa lo store
+# di sistema (curl) — il server nega comunque senza certificato valido.
+_CLIENT_CERT = None
+_CLIENT_KEY = None
+
+
+def set_client_cert(cert_path, key_path):
+    """Certificato+chiave device per TLS mutuo (None per disabilitare)."""
+    global _CLIENT_CERT, _CLIENT_KEY
+    _CLIENT_CERT = cert_path
+    _CLIENT_KEY = key_path
+
+
+def _client_cert_files():
+    if _CLIENT_CERT and _CLIENT_KEY and os.path.isfile(_CLIENT_CERT) and os.path.isfile(_CLIENT_KEY):
+        return _CLIENT_CERT, _CLIENT_KEY
+    return None, None
 
 class Response:
     def __init__(self, status_code, text):
@@ -33,9 +53,14 @@ def _urllib_request(method, url, json_data=None, headers=None, timeout=10):
             req.add_header(k, v)
     if json_data is not None:
         req.add_header('Content-Type', 'application/json')
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ca_bundle = os.getenv("AEGIS_CA_BUNDLE")
+    ctx = ssl.create_default_context(cafile=ca_bundle or None)
+    cert, key = _client_cert_files()
+    if cert and key:
+        try:
+            ctx.load_cert_chain(cert, key)
+        except (ssl.SSLError, OSError) as e:
+            raise Exception(f'Device identity illeggibile: {e}')
     try:
         resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
         body = resp.read().decode('utf-8')
@@ -49,6 +74,12 @@ def _urllib_request(method, url, json_data=None, headers=None, timeout=10):
 def _curl_request(method, url, json_data=None, headers=None, timeout=10):
     import subprocess
     cmd = [_CURL_PATH, '-s', '-w', '%{http_code}', '-o', '-', '--max-time', str(timeout), '-X', method.upper()]
+    ca_bundle = os.getenv("AEGIS_CA_BUNDLE")
+    if ca_bundle and os.path.isfile(ca_bundle):
+        cmd.extend(['--cacert', ca_bundle])
+    cert, key = _client_cert_files()
+    if cert and key:
+        cmd.extend(['--cert', cert, '--key', key])
     for k, v in (headers or {}).items():
         cmd.extend(['-H', f'{k}: {v}'])
     if json_data is not None:

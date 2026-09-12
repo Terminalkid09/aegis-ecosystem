@@ -1,22 +1,23 @@
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
+
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --legacy-peer-deps
+RUN npm ci
 COPY . .
-# For a production build:
-# RUN npm run build
 
-# Stage 2: Runtime (Using a simple node server or nginx)
-# For now, we'll keep using the node server but with a non-root user
-FROM node:20-alpine
-WORKDIR /app
-COPY --from=build /app /app
+ARG VITE_API_URL=/api/v1
+ENV VITE_API_URL=${VITE_API_URL}
+RUN npm run build
 
-# Security: Run as non-root user
-RUN addgroup -S aegis && adduser -S aegis -G aegis
-RUN chown -R aegis:aegis /app
+FROM nginx:1.27-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+
+RUN addgroup -S aegis && adduser -S aegis -G aegis \
+    && chown -R aegis:aegis /usr/share/nginx/html /var/cache/nginx /var/log/nginx /etc/nginx/conf.d \
+    && touch /var/run/nginx.pid \
+    && chown aegis:aegis /var/run/nginx.pid
+
 USER aegis
-
-ENV WATCHPACK_POLLING=true
 EXPOSE 3000
-CMD ["npm", "start"]
+CMD ["nginx", "-g", "daemon off;"]
