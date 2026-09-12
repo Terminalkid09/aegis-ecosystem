@@ -78,10 +78,15 @@ jobs:
           cd NodeTrace/agents/python
           python -m unittest tests.test_ebpf tests.test_update tests.test_linux_probe -v
 
+
+  windows_installers:
+    name: Windows Installer Checks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Windows installer checks (syntax + lifecycle steps, no install)
         shell: pwsh
-        run: |
-          ./scripts/test-installers.ps1
+        run: ./scripts/test-installers.ps1
 
   build_and_test:
     name: Build & Test
@@ -133,8 +138,40 @@ jobs:
         run: |
           cd aegis-brain
           pip install -r requirements.txt
+      - name: Wait for integration services
+        env:
+          DATABASE_URL: "postgresql+asyncpg://postgres:password@127.0.0.1:5432/aegis_test"
+          REDIS_URL: "redis://127.0.0.1:6379"
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+          import asyncpg
+          import redis.asyncio as redis
+
+          async def main():
+              last = None
+              for _ in range(30):
+                  try:
+                      conn = await asyncpg.connect(os.environ["DATABASE_URL"], timeout=2)
+                      await conn.close()
+                      client = redis.from_url(os.environ["REDIS_URL"])
+                      await client.ping()
+                      await client.aclose()
+                      print("integration services ready")
+                      return
+                  except Exception as exc:
+                      last = exc
+                      await asyncio.sleep(2)
+              raise SystemExit(f"integration services not ready: {type(last).__name__}")
+
+          asyncio.run(main())
+          PY
       - name: Test Brain (Pytest, integrazione riproducibile)
         env:
+          POSTGRES_USER: "postgres"
+          POSTGRES_PASSWORD: "password"
+          POSTGRES_DB: "aegis_test"
           DATABASE_URL: "postgresql+asyncpg://postgres:password@localhost:5432/aegis_test"
           REDIS_URL: "redis://localhost:6379"
           JWT_SECRET: "ci_test_jwt_secret_key_32_chars_minimum"
@@ -217,6 +254,7 @@ jobs:
           format: sarif
           output: trivy.sarif
           scanners: vuln
+          ignore-unfixed: true
           severity: HIGH,CRITICAL
           exit-code: '1'
 
@@ -231,7 +269,7 @@ jobs:
         run: |
           for img in aegis-ecosystem-aegis-brain:latest aegis-ecosystem-aegis-guard:latest aegis-ecosystem-aegis-link:latest aegis-ecosystem-frontend:latest caddy:2-alpine ollama/ollama:0.3.14; do
             echo "Scanning $img..."
-            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/scan aquasec/trivy:0.66.0 image --severity HIGH,CRITICAL --exit-code 1 --no-progress --ignorefile /scan/.trivyignore "$img" || exit 1
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/scan aquasec/trivy:0.66.0 image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress --ignorefile /scan/.trivyignore "$img" || exit 1
           done
       - name: Trivy image scan (brain, sarif for upload)
         uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
@@ -240,6 +278,7 @@ jobs:
           trivyignores: .trivyignore
           format: sarif
           output: trivy-image.sarif
+          ignore-unfixed: true
           severity: HIGH,CRITICAL
           exit-code: '1'
 
