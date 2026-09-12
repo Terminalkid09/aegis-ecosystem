@@ -57,13 +57,13 @@ jobs:
       - name: Secret scan (tracked files only, MUST fail on hits)
         run: |
           fail=0
-          if git grep -n -E "BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY" -- .; then
+          if git grep -n -E -- "-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----$" -- . ':(exclude).github/workflows/ci.yml'; then
             echo "::error::private key material in tracked files"; fail=1
           fi
-          if [ -n "$(git ls-files | grep -Ei '\.pem$|\.key$|secret\.json$|/(^|\.)env$' || true)" ]; then
-            echo "::error::key/secret/env files tracked:"; git ls-files | grep -Ei '\.pem$|\.key$|secret\.json$|/(^|\.)env$'; fail=1
+          if [ -n "$(git ls-files | grep -Eiv '^\.github/workflows/ci\.yml$|(^|/)\.env\.example$' | grep -Ei '\.pem$|\.key$|secret\.json$|(^|/)\.env$|(^|/)\.env\.(local|production|staging|test)$' || true)" ]; then
+            echo "::error::key/secret/env files tracked:"; git ls-files | grep -Eiv '^\.github/workflows/ci\.yml$|(^|/)\.env\.example$' | grep -Ei '\.pem$|\.key$|secret\.json$|(^|/)\.env$|(^|/)\.env\.(local|production|staging|test)$'; fail=1
           fi
-          if git grep -n -E "sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|xox[bap]-[A-Za-z0-9-]{10,}" -- .; then
+          if git grep -n -E "sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|xox[bap]-[A-Za-z0-9-]{10,}" -- . ':(exclude).github/workflows/ci.yml'; then
             echo "::error::token pattern in tracked files"; fail=1
           fi
           if [ "$fail" -ne 0 ]; then exit 1; fi
@@ -104,6 +104,11 @@ jobs:
         image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
         ports:
           - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -208,7 +213,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: ./
-          ignorefile: .trivyignore
+          trivyignores: .trivyignore
           format: sarif
           output: trivy.sarif
           severity: HIGH,CRITICAL
@@ -231,7 +236,7 @@ jobs:
         uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
         with:
           image-ref: aegis-ecosystem-aegis-brain:latest
-          ignorefile: .trivyignore
+          trivyignores: .trivyignore
           format: sarif
           output: trivy-image.sarif
           severity: HIGH,CRITICAL

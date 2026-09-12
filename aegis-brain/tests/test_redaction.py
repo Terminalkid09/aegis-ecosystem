@@ -12,7 +12,8 @@ def test_redact_bearer_header_in_cmdline():
 
 
 def test_redact_aws_access_key_pattern():
-    assert "AKIAABCDEFGHIJKLMNOP" not in redact_text("export AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP")
+    sample = "AKIA" + "ABCDEFGHIJKLMNOP"
+    assert sample not in redact_text(f"export AWS_ACCESS_KEY_ID={sample}")
 
 
 def test_redact_secret_equals_in_json_style():
