@@ -116,6 +116,44 @@ class TestAuditd(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_a0_spoof_prefers_exe(self):
+        # Audit: execve("/tmp/mal", ["bash"]) deve restare "mal", non "bash".
+        spoof = [
+            'type=SYSCALL msg=audit(1700000000.123:457): arch=c000003e syscall=59 success=yes '
+            'pid=102 ppid=100 auid=1000 uid=1000 exe="/tmp/mal"',
+            'type=EXECVE msg=audit(1700000000.123:457): argc=1 a0="bash"',
+        ]
+        ev = parse_record(spoof)
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev["comm"], "mal")
+        self.assertEqual(ev["filename"], "/tmp/mal")
+
+    def test_event_id_stable_per_serial(self):
+        a = parse_record(EXEC_RECORD)
+        b = parse_record(list(EXEC_RECORD))
+        self.assertIsNotNone(a)
+        self.assertEqual(a["event_id"], b["event_id"])
+        self.assertTrue(a["event_id"].startswith("audit-"))
+
+    def test_interleaved_records_not_mixed(self):
+        import tempfile
+        rec_b = [
+            'type=SYSCALL msg=audit(1700000000.124:458): arch=c000003e syscall=59 success=yes '
+            'pid=103 ppid=100 auid=1000 uid=0 exe="/usr/bin/evil"',
+            'type=EXECVE msg=audit(1700000000.124:458): argc=1 a0="evil"',
+        ]
+        blob = "\n".join([EXEC_RECORD[0], rec_b[0], EXEC_RECORD[1], rec_b[1]]) + "\n"
+        with tempfile.NamedTemporaryFile("w", suffix=".log", delete=False) as f:
+            f.write(blob)
+            path = f.name
+        try:
+            evs = AuditdTailer(path).poll()
+            self.assertEqual(len(evs), 2)
+            comms = sorted(e["comm"] for e in evs)
+            self.assertEqual(comms, ["bash", "evil"])
+        finally:
+            os.unlink(path)
+
 
 if __name__ == "__main__":
     unittest.main()

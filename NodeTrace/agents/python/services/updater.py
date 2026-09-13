@@ -62,8 +62,16 @@ def is_newer(current, target) -> bool:
     return _parse_version(target) > _parse_version(current)
 
 
-def stage_package(downloaded_path: str, expected_sha256: str, base_dir: str) -> str:
-    """Riverifica SHA, sposta in base_dir/update.pending/, scrive update.state."""
+def stage_package(downloaded_path: str, expected_sha256: str, base_dir: str,
+                  current_version=None, target_version=None) -> str:
+    """Riverifica SHA, rifiuta downgrade, sposta in base_dir/update.pending/,
+    scrive update.state (non sigillato: usare seal_staged_state dopo)."""
+    if target_version is not None and not is_newer(current_version, target_version):
+        try:
+            os.remove(downloaded_path)
+        except OSError:
+            pass
+        raise ValueError(f"Rollback rifiutato: current={current_version} target={target_version}")
     actual = sha256_file(downloaded_path)
     if not hmac.compare_digest(actual, expected_sha256.strip().lower()):
         try:
@@ -78,6 +86,43 @@ def stage_package(downloaded_path: str, expected_sha256: str, base_dir: str) -> 
     with open(os.path.join(base_dir, STATE_FILE), "w", encoding="utf-8") as f:
         f.write(f"staged={staged}\nsha256={actual}\nstatus=pending-restart\n")
     return staged
+
+
+def seal_staged_state(base_dir: str, secret: str) -> None:
+    """Aggiunge MAC HMAC-SHA256(device secret) a update.state (audit P6:
+    l'apply al restart riverifica prima di toccare l'agent live)."""
+    import hashlib as _hashlib
+    if not (secret or "").strip():
+        raise ValueError("seal_staged_state: secret mancante — refusing")
+    path = os.path.join(base_dir, STATE_FILE)
+    with open(path, encoding="utf-8") as f:
+        body = f.read()
+    if "mac=" in body:
+        raise ValueError("update.state gia' sigillato")
+    tag = hmac.new(str(secret).encode(), body.encode(), _hashlib.sha256).hexdigest()
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(body + f"mac={tag}\n")
+
+
+def verify_staged_state(base_dir: str, secret: str):
+    """Ritorna (staged, sha256) se il MAC e' valido, altrimenti ValueError."""
+    import hashlib as _hashlib
+    if not (secret or "").strip():
+        raise ValueError("verify_staged_state: secret mancante — refusing")
+    with open(os.path.join(base_dir, STATE_FILE), encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    vals = {}
+    for ln in lines:
+        if "=" in ln:
+            k, v = ln.split("=", 1)
+            vals[k.strip()] = v.strip()
+    if not vals.get("staged") or not vals.get("sha256") or not vals.get("mac"):
+        raise ValueError("update.state incompleto o manomesso")
+    body = f"staged={vals['staged']}\nsha256={vals['sha256']}\nstatus=pending-restart\n"
+    expected = hmac.new(str(secret).encode(), body.encode(), _hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, vals["mac"].lower()):
+        raise ValueError("update.state MAC invalido: possibile tampering")
+    return vals["staged"], vals["sha256"]
 
 
 def verify_manifest_ed25519(manifest_json: str, signature_hex: str, pubkey_b64: str):

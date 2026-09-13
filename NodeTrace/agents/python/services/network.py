@@ -42,6 +42,13 @@ class NetworkService:
             "iface": list(iface.keys())[0] if iface else None
         }
 
+    # Audit: bound fail-closed (un comando malevolo/compromesso con /8 o
+    # 65k porte causava OOM + storm di rete). Rifiuta, non tronca in silenzio.
+    SCAN_MAX_PREFIXLEN = 24  # max 256 host
+    SCAN_MAX_PORTS = 20
+    SCAN_MIN_TIMEOUT = 0.05
+    SCAN_MAX_TIMEOUT = 1.0
+
     def scan_network(self, cidr="192.168.1.0/24", ports=None, probe_timeout=0.2):
         """Perform network scan from this host using ping sweep + ARP + TCP.
 
@@ -61,9 +68,25 @@ class NetworkService:
             ports = [22, 80, 135, 139, 443, 445, 3389, 8000, 8080]
 
         try:
+            probe_timeout = float(probe_timeout)
+        except (TypeError, ValueError):
+            raise ValueError("probe_timeout non numerico")
+        if not (self.SCAN_MIN_TIMEOUT <= probe_timeout <= self.SCAN_MAX_TIMEOUT):
+            raise ValueError(
+                f"probe_timeout fuori bound [{self.SCAN_MIN_TIMEOUT},{self.SCAN_MAX_TIMEOUT}]")
+        ports = list(dict.fromkeys(int(p) for p in ports))
+        if not ports or len(ports) > self.SCAN_MAX_PORTS:
+            raise ValueError(f"ports fuori bound (1..{self.SCAN_MAX_PORTS})")
+        if any(not (1 <= p <= 65535) for p in ports):
+            raise ValueError("porta fuori range 1..65535")
+
+        try:
             target_net = ipaddress.ip_network(cidr, strict=False)
         except Exception:
             target_net = ipaddress.ip_network("192.168.1.0/24", strict=False)
+        if target_net.prefixlen < self.SCAN_MAX_PREFIXLEN:
+            raise ValueError(
+                f"cidr troppo grande (/{target_net.prefixlen}): minimo /{self.SCAN_MAX_PREFIXLEN}")
 
         all_hosts = list(target_net.hosts())
         EXCLUDE = {str(target_net.network_address), str(target_net.broadcast_address)}
@@ -93,7 +116,7 @@ class NetworkService:
         def _read_arp():
             entries = {}
             try:
-                out = subprocess.check_output("arp -a", shell=True, timeout=5).decode("utf-8", errors="ignore")
+                out = subprocess.check_output(["arp", "-a"], timeout=5).decode("utf-8", errors="ignore")
                 for line in out.splitlines():
                     parts = line.split()
                     if len(parts) >= 2 and re.match(r"\d+\.\d+\.\d+\.\d+", parts[0]):

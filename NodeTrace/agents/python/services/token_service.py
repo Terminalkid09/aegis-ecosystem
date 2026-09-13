@@ -17,7 +17,12 @@ class TokenService:
                     json.dump(data, f)
                     f.flush()
                     os.fsync(f.fileno())
+                os.chmod(tmp_path, 0o600)
                 os.replace(tmp_path, self.FILE)
+                try:
+                    os.chmod(self.FILE, 0o600)
+                except OSError:
+                    pass
                 return
             except (OSError, PermissionError) as e:
                 last_err = e
@@ -38,6 +43,15 @@ class TokenService:
     def load(self):
         if not os.path.exists(self.FILE):
             return None, None
+        # Audit: file leggibile a tutti = secret esposto (umask larga o copia).
+        try:
+            if os.stat(self.FILE).st_mode & 0o077:
+                import sys as _sys
+                print("WARNING: token.json e' leggibile da altri utenti "
+                      "(permessi larghi): ripristinare 0600",
+                      file=_sys.stderr)
+        except OSError:
+            pass
         for attempt in range(5):
             try:
                 with open(self.FILE, "r", encoding="utf-8") as f:

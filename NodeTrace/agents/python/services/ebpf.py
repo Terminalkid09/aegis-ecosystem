@@ -7,6 +7,7 @@ payload EventSchema atteso da POST /telemetry/report.
 Mappa pura in event_to_report() — testata in tests/test_ebpf.py senza
 sottoprocessi né rete.
 """
+import hashlib
 import json
 import os
 import uuid
@@ -45,6 +46,27 @@ def parse_line(line: str):
     return ev
 
 
+def _stable_event_id(ev: dict, device_id: str) -> str:
+    """event_id deterministico quando il collector non lo fornisce (audit:
+    prima uuid4() a ogni retry -> il dedup del brain non aggrediva mai e
+    ogni retry contava doppio). Stesso evento => stesso id."""
+    if ev.get("event_id"):
+        return str(ev["event_id"])
+    canon = "|".join([
+        str(device_id),
+        str(ev.get("boot_id") or ""),
+        str(ev.get("seq") if ev.get("seq") is not None else ""),
+        str(ev.get("pid") or ""),
+        str(ev.get("ppid") or ""),
+        str(ev.get("comm") or ""),
+        str(ev.get("filename") or ""),
+        str(ev.get("event_type") or ""),
+        str(ev.get("ts_ns") if ev.get("ts_ns") is not None else ""),
+        str(ev.get("proc_start_ns") if ev.get("proc_start_ns") is not None else ""),
+    ])
+    return hashlib.sha256(canon.encode("utf-8")).hexdigest()[:32]
+
+
 def event_to_report(ev: dict, device_id: str, hostname=None, ip_local=None,
                     agent_version=None, default_provenance: str | None = None) -> dict:
     """Mappa evento kernel -> payload EventSchema per /telemetry/report.
@@ -61,7 +83,7 @@ def event_to_report(ev: dict, device_id: str, hostname=None, ip_local=None,
             "agent_id": device_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "event_type": "CONNECTION_ESTABLISHED",
-            "event_id": str(ev.get("event_id") or uuid.uuid4()),
+            "event_id": _stable_event_id(ev, device_id),
             "schema_version": int(ev.get("schema_version") or 2),
             "pid": int(ev.get("pid", 0) or 0),
             "process_name": str(ev.get("comm") or "unknown"),
@@ -84,7 +106,7 @@ def event_to_report(ev: dict, device_id: str, hostname=None, ip_local=None,
         "agent_id": device_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "event_type": ev["event_type"],
-        "event_id": str(ev.get("event_id") or uuid.uuid4()),
+        "event_id": _stable_event_id(ev, device_id),
         "schema_version": int(ev.get("schema_version") or 2),
         "pid": int(ev["pid"]),
         "parent_pid": ppid if ppid > 0 else None,
@@ -206,9 +228,17 @@ class SeenCache:
         if not isinstance(ev, dict):
             return False
         try:
-            key = (int(ev.get("pid", 0)), int(ev.get("ppid", 0) or 0),
-                   str(ev.get("comm") or ev.get("process_name") or ""),
-                   str(ev.get("event_type") or ""))
+            # Audit: identita' forte quando disponibile (event_id/boot/start),
+            # altrimenti tupla legacy. Prima loop identici o PID reuse
+            # venivano scartati come duplicati.
+            ident = ev.get("event_id") or ev.get("proc_start_ns") or ev.get("ts_ns")
+            if ident is not None:
+                key = (str(ident), str(ev.get("boot_id") or ""),
+                       str(ev.get("event_type") or ""))
+            else:
+                key = (int(ev.get("pid", 0)), int(ev.get("ppid", 0) or 0),
+                       str(ev.get("comm") or ev.get("process_name") or ""),
+                       str(ev.get("event_type") or ""))
         except (TypeError, ValueError):
             return False
         # Scadenza pigra: pulizia completa solo oltre il tetto (O(1) ammortizzato).

@@ -34,6 +34,20 @@ class Response:
     def json(self):
         return json.loads(self.text)
 
+
+class HttpStatusError(Exception):
+    """Risposta non-2xx che richiede retry/gestione (audit: prima gli HTTP
+    500 tornavano come Response normale e i retry non scattavano mai)."""
+
+
+def ensure_ok(resp, what="request"):
+    """Rilancia su 5xx o status inattesi. 401 (credenziali) e 404 (endpoint
+    assente -> fallback legacy) NON rilanciano: il chiamante li gestisce."""
+    code = getattr(resp, "status_code", 0) or 0
+    if 200 <= code < 300 or code in (401, 404):
+        return resp
+    raise HttpStatusError(f"{what}: HTTP {code} {str(getattr(resp, 'text', ''))[:200]}")
+
 def _detect_curl():
     global _USE_CURL, _CURL_PATH
     path = shutil.which('curl.exe') or shutil.which('curl')

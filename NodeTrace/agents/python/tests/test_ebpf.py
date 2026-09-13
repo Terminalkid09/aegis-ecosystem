@@ -132,6 +132,27 @@ class TestEbpfForward(unittest.TestCase):
         self.assertTrue(rep["event_id"], "idempotenza di default anche senza event_id")
         self.assertEqual(rep["schema_version"], 2)
 
+    def test_event_id_deterministic_for_retry(self):
+        # Audit: stesso evento => stesso id (il retry non conta doppio).
+        ev = {"pid": 3, "ppid": 1, "comm": "x", "filename": "/bin/x",
+              "event_type": "PROCESS_CREATED", "ts_ns": 999}
+        a = event_to_report(dict(ev), device_id="d")
+        b = event_to_report(dict(ev), device_id="d")
+        self.assertEqual(a["event_id"], b["event_id"])
+        c = event_to_report(dict(ev, pid=4), device_id="d")
+        self.assertNotEqual(a["event_id"], c["event_id"])
+
+    def test_seen_cache_uses_identity(self):
+        # Audit: stesso pid ma proc_start diverso => eventi diversi.
+        s = SeenCache(window_s=5.0)
+        a = {"pid": 9, "ppid": 1, "comm": "sh", "proc_start_ns": 100,
+             "event_type": "PROCESS_CREATED"}
+        b = dict(a, proc_start_ns=200)
+        self.assertFalse(s.check(dict(a), now_s=100.0))
+        self.assertFalse(s.check(dict(b), now_s=101.0))
+        self.assertTrue(s.check(dict(b), now_s=102.0))
+        self.assertEqual(s.duplicates, 1)
+
     def test_batcher_bound_counts_drops(self):
         b = KernelEventBatcher(max_n=100000, max_age_s=3600.0, max_items=5)
         for i in range(8):

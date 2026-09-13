@@ -127,6 +127,149 @@ class TestServerPin(unittest.TestCase):
             self.assertEqual((tok, dev), ("tok", "dev-1"))
             self.assertEqual(svc.load_server(), "https://aegis.local/api/v1")
 
+    def test_token_file_is_private(self):
+        # Audit: token.json mai world-readable (solo POSIX: su Windows gli
+        # ACL non mappano sui bit unix).
+        import stat
+        import sys as _sys
+        if _sys.platform == "win32":
+            self.skipTest("permessi unix non applicabili su Windows")
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            svc = TokenService()
+            svc.FILE = os.path.join(tmp, "token.json")
+            svc.save("tok", "dev-1")
+            mode = stat.S_IMODE(os.stat(svc.FILE).st_mode)
+            self.assertEqual(mode & 0o077, 0, oct(mode))
+
+
+class TestScanBounds(unittest.TestCase):
+    def test_rejects_huge_cidr(self):
+        from services.network import NetworkService
+        svc = NetworkService()
+        with self.assertRaises(ValueError):
+            svc.scan_network(cidr="10.0.0.0/8")
+        with self.assertRaises(ValueError):
+            svc.scan_network(cidr="0.0.0.0/0")
+
+    def test_rejects_port_flood(self):
+        from services.network import NetworkService
+        svc = NetworkService()
+        with self.assertRaises(ValueError):
+            svc.scan_network(cidr="192.168.1.0/24", ports=list(range(1, 7000)))
+        with self.assertRaises(ValueError):
+            svc.scan_network(cidr="192.168.1.0/24", ports=[])
+
+    def test_rejects_bad_timeout(self):
+        from services.network import NetworkService
+        svc = NetworkService()
+        with self.assertRaises(ValueError):
+            svc.scan_network(cidr="192.168.1.0/24", probe_timeout=30)
+        with self.assertRaises(ValueError):
+            svc.scan_network(cidr="192.168.1.0/24", probe_timeout="fast")
+
+
+class TestHttpErrors(unittest.TestCase):
+    def test_ensure_ok_raises_on_5xx(self):
+        from utils.curl_http import Response, ensure_ok, HttpStatusError
+        with self.assertRaises(HttpStatusError):
+            ensure_ok(Response(500, "boom"), "telemetry")
+        # 401/404 gestiti dal chiamante, non retry cieco:
+        self.assertEqual(ensure_ok(Response(401, "x"), "h").status_code, 401)
+        self.assertEqual(ensure_ok(Response(404, "x"), "h").status_code, 404)
+        self.assertEqual(ensure_ok(Response(200, "ok"), "h").status_code, 200)
+
+
+class TestUpdateUrlAllowlist(unittest.TestCase):
+    def _agent(self, hb):
+        import types
+        import agent as _agent_mod
+        a = types.SimpleNamespace(config={"heartbeat_url": hb})
+        # Lo stub deve esporre anche il sibling usato dal gate.
+        a._brain_origin = _agent_mod.Agent._brain_origin.__get__(a)
+        return _agent_mod.Agent._update_url_allowed.__get__(a)
+
+    def test_allows_brain_artifacts(self):
+        f = self._agent("https://aegis.local/api/v1/nodetrace/heartbeat")
+        self.assertTrue(f("https://aegis.local/api/v1/deploy/artifacts/nodetrace-1.tar.gz"))
+
+    def test_rejects_off_origin_and_paths(self):
+        f = self._agent("https://aegis.local/api/v1/nodetrace/heartbeat")
+        self.assertFalse(f("https://evil.example/a.tar.gz"))
+        self.assertFalse(f("https://aegis.local/api/v1/auth/login"))
+        self.assertFalse(f("http://aegis.local/api/v1/deploy/artifacts/x"))
+        self.assertFalse(f("not-a-url"))
+
+
+class TestPidLock(unittest.TestCase):
+    def test_stale_lock_overwritten(self):
+        import tempfile
+        import agent as _agent_mod
+        with tempfile.TemporaryDirectory() as tmp:
+            pf = os.path.join(tmp, "agent.pid")
+            with open(pf, "w") as f:
+                f.write("99999999")
+            _agent_mod.PidLock(pf).acquire()
+            with open(pf) as f:
+                self.assertEqual(f.read().strip(), str(os.getpid()))
+
+    def test_alien_pid_overwritten(self):
+        # PID vivo ma NON nostro (init): prima usciva "already running".
+        import tempfile
+        import agent as _agent_mod
+        with tempfile.TemporaryDirectory() as tmp:
+            pf = os.path.join(tmp, "agent.pid")
+            with open(pf, "w") as f:
+                f.write("1")
+            if not _agent_mod._pid_alive(1):
+                self.skipTest("pid 1 assente qui")
+            _agent_mod.PidLock(pf).acquire()
+            with open(pf) as f:
+                self.assertEqual(f.read().strip(), str(os.getpid()))
+
+
+class TestStagedStateSeal(unittest.TestCase):
+    def _staged(self, tmp):
+        from services.updater import stage_package, sha256_file
+        pkg = os.path.join(tmp, "agent.pkg")
+        with open(pkg, "wb") as f:
+            f.write(b"fake-agent-bytes")
+        sha = sha256_file(pkg)
+        staged = stage_package(pkg, sha, tmp)
+        return staged, sha
+
+    def test_rollback_rejected(self):
+        import tempfile
+        from services.updater import stage_package, sha256_file
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = os.path.join(tmp, "agent.pkg")
+            with open(pkg, "wb") as f:
+                f.write(b"fake-agent-bytes")
+            sha = sha256_file(pkg)
+            with self.assertRaises(ValueError):
+                stage_package(pkg, sha, tmp, current_version="2.0.0",
+                              target_version="1.9.9")
+            self.assertFalse(os.path.exists(pkg))
+
+    def test_seal_roundtrip_and_tamper(self):
+        import tempfile
+        from services.updater import seal_staged_state, verify_staged_state, STATE_FILE
+        with tempfile.TemporaryDirectory() as tmp:
+            staged, sha = self._staged(tmp)
+            seal_staged_state(tmp, "device-secret")
+            got_staged, got_sha = verify_staged_state(tmp, "device-secret")
+            self.assertEqual(got_staged, staged)
+            self.assertEqual(got_sha, sha)
+            with self.assertRaises(ValueError):
+                verify_staged_state(tmp, "wrong-secret")
+            state = os.path.join(tmp, STATE_FILE)
+            with open(state, encoding="utf-8") as f:
+                content = f.read().replace("agent.pkg", "evil.pkg")
+            with open(state, "w", encoding="utf-8") as f:
+                f.write(content)
+            with self.assertRaises(ValueError):
+                verify_staged_state(tmp, "device-secret")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,20 +32,52 @@ class PidLock:
     def __init__(self, pid_file: str):
         self.pid_file = pid_file
 
+    def _is_our_agent(self, pid: int) -> bool:
+        """True se il pid e' davvero un'istanza di questo agent (audit: il
+        solo kill(pid,0) e' vero anche per PID riciclati da altri processi)."""
+        try:
+            if sys.platform == "win32":
+                return _pid_alive(pid) and self._cmdline_has(pid, "agent")
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                cmd = f.read().decode("utf-8", errors="ignore")
+            return "agent" in os.path.basename(cmd.split("\x00")[0]).lower() or \
+                "nodetrace" in cmd.lower()
+        except (OSError, ValueError):
+            return False
+
+    @staticmethod
+    def _cmdline_has(pid: int, needle: str) -> bool:
+        # Windows: tasklist una tantum all'avvio (niente polling).
+        try:
+            import subprocess
+            out = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV"],
+                capture_output=True, text=True, timeout=10).stdout.lower()
+            return needle in out or "python" in out
+        except Exception:
+            return True  # fail-open solo qui: meglio doppio agent che nessun agent
+
     def acquire(self):
-        if os.path.exists(self.pid_file):
-            try:
-                with open(self.pid_file, "r", encoding="utf-8") as f:
-                    old_pid = int(f.read().strip())
-                if _pid_alive(old_pid):
-                    Logger.error(f"NodeTrace agent already running (PID {old_pid})")
-                    sys.exit(1)
-            except (ValueError, OSError):
-                pass
         parent = os.path.dirname(os.path.abspath(self.pid_file))
         if parent:
             os.makedirs(parent, exist_ok=True)
-        with open(self.pid_file, "w", encoding="utf-8") as f:
+        # Audit: O_CREAT|O_EXCL atomico (niente TOCTOU exists->write).
+        try:
+            fd = os.open(self.pid_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            try:
+                with open(self.pid_file, "r", encoding="utf-8") as f:
+                    old_pid = int(f.read().strip())
+                if _pid_alive(old_pid) and self._is_our_agent(old_pid):
+                    Logger.error(f"NodeTrace agent already running (PID {old_pid})")
+                    sys.exit(1)
+                Logger.warn(f"Stale/alien pid file (PID {old_pid}): sovrascrivo.")
+            except (ValueError, OSError):
+                pass
+            with open(self.pid_file, "w", encoding="utf-8") as f:
+                f.write(str(os.getpid()))
+            return
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(str(os.getpid()))
 
     def release(self):
@@ -223,7 +255,9 @@ class Agent:
         }
 
         headers = self._agent_headers(token, device_id)
-        post(self.config["update_url"], json_data=payload, headers=headers)
+        from utils.curl_http import ensure_ok
+        r = post(self.config["update_url"], json_data=payload, headers=headers)
+        ensure_ok(r, "telemetry")
 
     @retry(5, 1)
     def send_heartbeat(self, token, device_id):
@@ -237,6 +271,8 @@ class Agent:
         r = post(self.config["heartbeat_url"], json_data=payload,
                  headers=self._agent_headers(token, device_id))
         self._note_cert_problem(getattr(r, "status_code", 0))
+        from utils.curl_http import ensure_ok
+        ensure_ok(r, "heartbeat")
 
     def _ack_url(self):
         # Telemetry ack vive sotto /telemetry (auth X-Agent-Id + Bearer).
@@ -370,6 +406,13 @@ class Agent:
             Logger.error("UPDATE_AGENT bad signature — possible tampering, refusing.")
             self._ack_command(token, device_id, cmd_name, "failed", "bad signature")
             return
+        # Audit SSRF: l'URL non e' coperto dalla firma — senza allowlist un
+        # brain compromesso/MITM dirottava il download (con Bearer+cert!)
+        # verso host arbitrari. Solo artefatti del brain pinnato.
+        if not self._update_url_allowed(url):
+            Logger.error("UPDATE_AGENT url fuori allowlist — refusing.")
+            self._ack_command(token, device_id, cmd_name, "failed", "url not allowed")
+            return
         # Manifest Ed25519 (M6 Fase 7): se il comando lo porta e la pubkey è
         # configurata, l'artefatto deve esserne coperto — altrimenti stop.
         from services.updater import verify_manifest_ed25519, manifest_covers
@@ -423,6 +466,28 @@ class Agent:
         except Exception as e:
             Logger.error(f"UPDATE_AGENT failed: {e}")
             self._ack_command(token, device_id, cmd_name, "failed", str(e)[:500])
+
+    def _brain_origin(self) -> str:
+        """Origine (scheme://host:port) del brain da heartbeat_url."""
+        import urllib.parse as _up
+        try:
+            p = _up.urlparse(self.config.get("heartbeat_url", ""))
+            return f"{p.scheme}://{p.netloc}".rstrip("/").lower()
+        except Exception:
+            return ""
+
+    def _update_url_allowed(self, url: str) -> bool:
+        import urllib.parse as _up
+        try:
+            p = _up.urlparse(url or "")
+            if p.scheme not in ("https", "http"):
+                return False
+            origin = f"{p.scheme}://{p.netloc}".rstrip("/").lower()
+            if not origin or origin != self._brain_origin():
+                return False
+            return p.path.startswith("/api/v1/deploy/artifacts/")
+        except Exception:
+            return False
 
     def _ensure_registered(self):
         token, device_id = self.token_service.load()
