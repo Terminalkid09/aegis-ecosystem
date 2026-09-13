@@ -61,3 +61,24 @@ def test_suppress_trusted_low_severity():
     # Lo script interpreter trusted non deve alzare confidence alta
     ev = _ev(process_name="powershell.exe", signature="authenticode-trusted", publisher="Microsoft Corporation")
     assert is_trusted_signed(ev) is True
+
+
+def test_untrusted_string_is_not_trusted():
+    # Audit: "untrusted"/"distrusted" contengono "trusted" ma non sono trust.
+    assert is_trusted_signed(_ev(signature="untrusted", publisher="Microsoft Corporation")) is False
+    assert is_trusted_signed(_ev(signature="distrusted", publisher="Microsoft Corporation")) is False
+    assert is_trusted_signed(_ev(signature="not-trusted", publisher="Microsoft Corporation")) is False
+
+
+def test_publisher_spoof_is_not_trusted():
+    # Audit: match esatto publisher ("evil microsoft corporation" no).
+    assert is_trusted_signed(_ev(signature="authenticode-trusted",
+                                 publisher="evil microsoft corporation trojan")) is False
+    assert is_trusted_signed(_ev(signature="authenticode-trusted",
+                                 publisher=" Microsoft Corporation ")) is True
+
+
+def test_file_hash_is_not_trust():
+    # Audit: l'hash identifica, non certifica (niente fallback).
+    assert is_trusted_signed(_ev(signature=None, file_hash="abc123",
+                                 publisher="Microsoft Corporation")) is False

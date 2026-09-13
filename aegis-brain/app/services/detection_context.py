@@ -26,16 +26,22 @@ PRIVILEGED_USERS = {
     "nt authority\\network service", "administrator", "root",
 }
 
+# Stati di firma emessi dal sensore (WindowsProcessMonitor: "authenticode-trusted"
+# oppure "unsigned:<errore>" oppure assente). Solo uguaglianza esatta conta:
+# il match per sottostringa scambiava "untrusted"/"distrusted" per trusted (audit).
+TRUSTED_SIGNATURE_STATES = frozenset({"authenticode-trusted"})
+
 def is_trusted_signed(event: Any) -> bool:
-    """True se firma Authenticode valida e publisher fidato."""
-    sig = (getattr(event, "signature", None) or getattr(event, "file_hash", None) or "")
-    # EventSchema usa `signature` per lo stato, `publisher` per il CN.
+    """True se firma valida E publisher fidato (entrambi match esatto).
+
+    Niente fallback su file_hash (un hash identifica, non certifica) e niente
+    substring ("evil microsoft corporation" non e' Microsoft).
+    """
+    sig = (getattr(event, "signature", None) or "")
     publisher = (getattr(event, "publisher", None) or "")
-    sig_s = str(sig).lower()
-    pub_s = str(publisher).lower()
-    return ("authenticode-trusted" in sig_s or "trusted" in sig_s) and any(
-        tp in pub_s for tp in TRUSTED_PUBLISHERS
-    )
+    sig_s = str(sig).lower().strip()
+    pub_s = str(publisher).lower().strip()
+    return sig_s in TRUSTED_SIGNATURE_STATES and pub_s in TRUSTED_PUBLISHERS
 
 def user_role(event: Any) -> str:
     """Ruolo inferito dal nome utente (privileged vs standard). Puro."""

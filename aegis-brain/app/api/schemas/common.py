@@ -115,6 +115,9 @@ class EventSchema(BaseModel):
     command_line: Optional[str] = Field(None, max_length=4096, alias="commandLine")
     behavioral_tags: Optional[List[str]] = Field(None, alias="behavioralTags")
     anomalies: Optional[List[str]] = None
+    # Moduli caricati (audit: la S011 DLL-hijacking non puo' vedersi dal solo
+    # process_path; i sensori futuri popolano questa lista).
+    loaded_modules: Optional[List[str]] = Field(None, max_length=256, alias="loadedModules")
 
     # Event identity + sequencing (schema v2, M1 Fase 2 — tutti opzionali:
     # gli agenti legacy v1 continuano a funzionare senza questi campi).

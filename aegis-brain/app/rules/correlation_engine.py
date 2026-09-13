@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.redis_utils import get_redis_url
+# Audit: unica implementazione (quella di correlation era IPv6, quella statica
+# IPv4-only: ora entrambe usano questa, IPv4+IPv6).
+from app.rules.rule_definitions import _is_private_ip, SUSPICIOUS_PARENT_CHILD
 
 logger = get_logger(__name__)
 
@@ -26,10 +29,16 @@ class CorrelationEngine:
             logger.warning(f"Correlation engine skipped (redis down?): {e}")
 
     async def _brute_force_detection(self, event: EventSchema, db: AsyncSession):
-        if event.event_type == "SYSLOG_NETWORK" and event.file_hash:
-            msg = event.file_hash.lower()
+        # Audit: il messaggio di autenticazione NON e' mai stato in file_hash
+        # (hash = identita' file, max 64 char) e nessun producer emette
+        # SYSLOG_NETWORK. Si legge il testo libero (command_line) e si
+        # chiave per (agent, user).
+        if event.event_type == "SYSLOG_NETWORK" or (
+                event.process_name or "").lower() in {"sshd", "sshd.exe", "winlogon.exe"}:
+            msg = (event.command_line or "").lower()
             if "failed password" in msg or "authentication failure" in msg:
-                key = f"corr:bf:{event.agent_id}"
+                user = (event.user or "unknown").lower().strip() or "unknown"
+                key = f"corr:bf:{event.agent_id}:{user}"
                 window = settings.CORR_BRUTEFORCE_WINDOW_S
                 threshold = settings.CORR_BRUTEFORCE_THRESHOLD
                 count = await self.redis.incr(key)
@@ -84,31 +93,33 @@ class CorrelationEngine:
         parent = _stem(event.parent_process_name)
         child = _stem(event.process_name)
 
-        # Office/productivity spawning network tools
-        office_parents = ["winword", "word", "excel", "powerpnt", "outlook",
-                          "acrord32", "acrord64", "foxitreader"]
-        network_tools = ["curl", "wget", "nc", "ncat",
-                         "powershell", "cmd", "bitsadmin"]
+        # Audit: stesse coppie della regola statica S002 (prima divergevano:
+        # winword->wscript veniva perso in correlazione). Derivate da
+        # SUSPICIOUS_PARENT_CHILD invece di liste parallele.
+        watched: set[tuple[str, str]] = set()
+        for parents, children, *_rest in SUSPICIOUS_PARENT_CHILD:
+            for p in parents:
+                for c in children:
+                    watched.add((_stem(p), _stem(c)))
 
-        if parent in office_parents:
-            if child in network_tools:
-                # Cooldown: stesso (agent,parent,child) una volta ogni finestra,
-                # altrimenti ogni evento del figlio rifà l'alert (FP storm).
-                cool = f"corr:lineage-sent:{event.agent_id}:{parent}:{child}"
-                if await self.redis.get(cool):
-                    return
-                await self.redis.setex(cool, settings.CORR_LINEAGE_COOLDOWN_S, "1")
-                await self._generate_alert(
-                    db,
-                    agent_id=event.agent_id,
-                    severity="CRITICAL",
-                    process_name=event.process_name or "unknown",
-                    event_type="correlation_lineage",
-                    description=f"Suspicious child process '{event.process_name}' spawned by '{event.parent_process_name}' — possible macro/document exploit."
-                )
-                # Mark parent as malicious for future child tracking
-                parent_key = f"corr:mal-parent:{event.agent_id}:{event.parent_pid or 'unknown'}"
-                await self.redis.setex(parent_key, settings.CORR_LINEAGE_PARENT_TTL_S, "1")
+        if (parent, child) in watched:
+            # Cooldown: stesso (agent,parent,child) una volta ogni finestra,
+            # altrimenti ogni evento del figlio rifà l'alert (FP storm).
+            cool = f"corr:lineage-sent:{event.agent_id}:{parent}:{child}"
+            if await self.redis.get(cool):
+                return
+            await self.redis.setex(cool, settings.CORR_LINEAGE_COOLDOWN_S, "1")
+            await self._generate_alert(
+                db,
+                agent_id=event.agent_id,
+                severity="CRITICAL",
+                process_name=event.process_name or "unknown",
+                event_type="correlation_lineage",
+                description=f"Suspicious child process '{event.process_name}' spawned by '{event.parent_process_name}' — possible macro/document exploit."
+            )
+            # Mark parent as malicious for future child tracking
+            parent_key = f"corr:mal-parent:{event.agent_id}:{event.parent_pid or 'unknown'}"
+            await self.redis.setex(parent_key, settings.CORR_LINEAGE_PARENT_TTL_S, "1")
 
     async def _beacon_detection(self, event: EventSchema, db: AsyncSession):
         """
@@ -190,13 +201,5 @@ class CorrelationEngine:
         db.add(alert)
         await db.flush()
         logger.warning(f"CORRELATION ALERT: {description}")
-
-_PRIVATE_RANGES = __import__("re").compile(r'^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|169\.254\.|0\.)')
-_IPV6_PRIVATE = __import__("re").compile(r'^(::1|fe80:|fc00:|fd00:|fec0:)', __import__("re").IGNORECASE)
-
-def _is_private_ip(ip: str) -> bool:
-    if _IPV6_PRIVATE.match(ip):
-        return True
-    return bool(_PRIVATE_RANGES.match(ip))
 
 correlation_engine = CorrelationEngine()

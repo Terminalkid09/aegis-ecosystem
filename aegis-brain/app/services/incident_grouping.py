@@ -24,8 +24,14 @@ def _to_ts(value: Any) -> float:
 
 
 def _base_name(name: Any) -> str:
-    n = (name or "").lower().strip().replace("\\", "/")
-    return n.rsplit("/", 1)[-1]
+    """Basename minuscolo senza estensione (audit: "powershell.exe" e
+    "powershell" devono finire nello stesso incidente, non frammentarlo)."""
+    n = (name or "").lower().strip().replace("\\", "/").rsplit("/", 1)[-1]
+    for ext in (".exe", ".com", ".dll", ".bat", ".ps1", ".scr"):
+        if n.endswith(ext):
+            n = n[: -len(ext)]
+            break
+    return n
 
 
 def group_key(alert: Any, window_min: int = 30) -> Tuple[str, str, str, int]:
