@@ -15,10 +15,16 @@ Simula 10/100/1000 agent generando eventi sintetici e misura:
 Uso: python scripts/benchmark.py [--agents 100 --events 1000]
 """
 import argparse
+import json
+import platform
 import time
 import statistics
+import subprocess
 import sys
 import os
+
+BENCH_SEED = 42
+BENCH_MODE = "simulated/cpu-bound"
 
 # Permette import da aegis-brain anche se lanciato da repo root
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -97,15 +103,25 @@ def bench_network(agents, events_per_agent):
     per_agent_day = events_per_agent * per_event
     return f"{total/1024:.1f} KB batch, {per_agent_day} B/agent/day ~{per_agent_day/1024:.1f} KB"
 
-def bench_ingestion_latency():
+def bench_ingestion_latency(samples=100):
     from app.api.schemas.common import EventSchema
     ev = gen_event(0, 0, False)
     ev["timestamp"] = "2026-09-12T10:00:00+00:00"
-    t0 = time.perf_counter()
-    for _ in range(100):
+    lat = []
+    for _ in range(samples):
+        t0 = time.perf_counter()
         EventSchema(**ev)
-    dt = (time.perf_counter() - t0) / 100 * 1000
-    return f"{dt:.2f} ms (validazione EventSchema)"
+        lat.append((time.perf_counter() - t0) * 1000)
+    lat.sort()
+    q = statistics.quantiles(lat, n=100, method="inclusive") if len(lat) >= 2 else [lat[0]] * 99
+    return {
+        "mean_ms": statistics.fmean(lat),
+        "p50_ms": statistics.median(lat),
+        "p95_ms": q[94],
+        "p99_ms": q[98],
+        "samples": len(lat),
+        "note": "validazione EventSchema",
+    }
 
 def bench_dedup_gap():
     d = EventDedup(capacity=10000)
@@ -121,25 +137,63 @@ def bench_dedup_gap():
     return f"{5000/dt:.1f} ops/s, gaps rilevati {gaps}"
 
 def bench_reconnect():
-    # Simula retry con jitter: 5 tentativi con backoff 0.1..1.6s
+    # Retry con jitter DETERMINISTICO (seed fisso): stesso output ovunque.
     import random
+    rng = random.Random(BENCH_SEED)
     delays = []
     base = 0.1
     for i in range(5):
-        jitter = random.uniform(0, base*0.5)
+        jitter = rng.uniform(0, base*0.5)
         delays.append(base + jitter)
         base *= 2
     total = sum(delays)
-    return f"5 retry con jitter: {', '.join(f'{d:.2f}s' for d in delays)} tot {total:.2f}s"
+    return f"5 retry con jitter: {', '.join(f'{d:.2f}s' for d in delays)} tot {total:.2f}s (seed={BENCH_SEED})"
+
+def collect_metadata():
+    """Metadati di riproducibilita' (audit F8): chi legge il report sa su
+    cosa e' stato misurato e con quale codice."""
+    meta = {
+        "mode": BENCH_MODE,
+        "seed": BENCH_SEED,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "python": platform.python_version(),
+        "os": f"{platform.system()} {platform.release()} ({platform.machine()})",
+        "cpu_count": os.cpu_count(),
+        "ram_total_mb": None,
+        "docker_resources": "unknown (host run; per limiti container vedi docker stats)",
+        "git_commit": None,
+    }
+    try:
+        import psutil
+        meta["ram_total_mb"] = round(psutil.virtual_memory().total / 1024 / 1024)
+    except Exception:
+        pass
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=REPO,
+            capture_output=True, text=True, timeout=10)
+        if out.returncode == 0:
+            meta["git_commit"] = out.stdout.strip()
+    except Exception:
+        pass
+    return meta
+
 
 def main():
     ap = argparse.ArgumentParser(description="Aegis benchmark")
     ap.add_argument("--agents", type=int, default=10)
     ap.add_argument("--events", type=int, default=100)
     ap.add_argument("--quick", action="store_true", help="solo 10/10")
+    ap.add_argument("--json", action="store_true", help="output JSON con metadati (machine)")
     args = ap.parse_args()
 
+    meta = collect_metadata()
+    results = {"replay": [], "metadata": meta}
+
     print("=== Aegis Benchmark (replay deterministico) ===")
+    print(f"mode={meta['mode']} seed={meta['seed']} python={meta['python']} "
+          f"os={meta['os']} cpu={meta['cpu_count']} ram_mb={meta['ram_total_mb']} "
+          f"commit={meta['git_commit']}")
     configs = [(10,100), (100,100), (10,1000)] if args.quick else [
         (args.agents, args.events),
         (10,100), (100,100), (100,10), (1000,10),
@@ -156,14 +210,20 @@ def main():
             r = bench_replay(agents, ev)
             per_agent = r['throughput_eps'] / max(r['agents'],1)
             print(f"agents={r['agents']:4d} events={r['events']:5d} thr={r['throughput_eps']:7.1f} ev/s ({per_agent:.1f} ev/s/agent) latency={r['latency_ms']:.2f}ms hits={r['hits']}")
+            results["replay"].append(r)
         except Exception as e:
             print(f"agents={agents} events={ev} ERROR {e}")
 
     g = benchGrouping()
     print(f"grouping 200 alerts -> {g['groups']} groups in {g['duration_ms']:.2f}ms")
+    results["grouping"] = g
     print(f"dedup+gap: {bench_dedup_gap()}")
     print(f"agent resource: {bench_agent_resource()}")
-    print(f"ingestion latency: {bench_ingestion_latency()}")
+    lat = bench_ingestion_latency()
+    print(f"ingestion latency ({lat['samples']} campioni {lat['note']}): "
+          f"mean={lat['mean_ms']:.3f}ms p50={lat['p50_ms']:.3f}ms "
+          f"p95={lat['p95_ms']:.3f}ms p99={lat['p99_ms']:.3f}ms")
+    results["ingestion_latency"] = lat
     print(f"reconnect backoff: {bench_reconnect()}")
     for agents, ev in [(10,100),(100,100),(1000,10)]:
         print(f"net {agents}x{ev}: {bench_network(agents, ev)}")
@@ -183,6 +243,8 @@ def main():
     print("Single PG/Redis ok fino a ~300 host; oltre valutare partizionamento e worker async (ARCH_REVIEW).")
     print("Hardware minimo pilot 100: 2 vCPU, 4 GB RAM, 20 GB disk; 1000: 4 vCPU, 8 GB, 50 GB + monitoraggio.")
     print("Metodo: eventi sintetici via replay (CPU-bound); ingestione reale via POST /telemetry su stack Docker con 10/100 agent curl paralleli.")
+    if args.json:
+        print(json.dumps(results, indent=2, default=str))
 
 if __name__ == "__main__":
     main()

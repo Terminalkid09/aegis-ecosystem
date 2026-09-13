@@ -46,7 +46,9 @@ export default function DashboardOverview() {
 
   const { data: healthData } = useQuery({
     queryKey: ['pipeline-health'],
-    queryFn: () => apiClient.get('/health/live').then(r => r.data).catch(() => null),
+    // Audit F4: /health/live e' solo prova di vita (niente checks);
+    // la striscia pipeline usa /health/ready che riporta tutti i check.
+    queryFn: () => apiClient.get('/health/ready').then(r => r.data).catch(() => null),
     refetchInterval: 20000,
   })
 

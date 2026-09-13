@@ -4,11 +4,12 @@ from httpx import AsyncClient
 
 class TestHealth:
     async def test_liveness(self, client: AsyncClient):
+        # Audit F4: liveness = solo prova di vita (niente checks/DB/rete).
         response = await client.get("/health/live")
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] in ["healthy", "degraded", "unhealthy"]
-        assert "checks" in data
+        assert data["status"] == "alive"
+        assert "checks" not in data
 
     async def test_readiness(self, client: AsyncClient):
         response = await client.get("/health/ready")

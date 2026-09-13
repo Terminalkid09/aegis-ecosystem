@@ -72,15 +72,14 @@ def run_maven(cwd):
     )
     out = stdout + stderr
     import re
-    m = re.search(
+    # Surefire stampa un riepilogo "Tests run" per classe + uno TOTALE alla
+    # fine (sezione Results): serve l'ULTIMO, non il primo (bug audit: 5 vs 106).
+    matches = re.findall(
         r"Tests run:\s*(\d+),\s*Failures:\s*(\d+),\s*Errors:\s*(\d+),\s*Skipped:\s*(\d+)",
         out,
     )
-    if m:
-        run_tests = int(m.group(1))
-        failures = int(m.group(2))
-        errors = int(m.group(3))
-        skipped = int(m.group(4))
+    if matches:
+        run_tests, failures, errors, skipped = (int(x) for x in matches[-1])
         return {
             "name": str(cwd.name),
             "passed": run_tests - failures - errors - skipped,
@@ -417,17 +416,32 @@ def main():
         nested = [child for child in value.values() if isinstance(child, dict)]
         return all(status_ok(child) for child in nested)
 
+    def count_flag(value, flag):
+        # Ricorsivo: le suite annidate (frontend/build+lint, scans, compose)
+        # espongono real/simulated sui figli, non sul padre.
+        if not isinstance(value, dict):
+            return 0
+        own = 1 if value.get(flag) else 0
+        if own:
+            return 1
+        return sum(count_flag(child, flag) for child in value.values())
+
     total_passed = sum(flatten_numbers(s, "passed") for s in suites.values())
     total_failed = sum(flatten_numbers(s, "failed") for s in suites.values())
     all_pass = all(status_ok(s) for s in suites.values())
+    n_real = sum(count_flag(s, "real") for s in suites.values())
+    n_sim = sum(count_flag(s, "simulated") for s in suites.values())
 
     report["summary"] = {
         "total_passed": total_passed,
         "total_failed": total_failed,
         "all_pass": all_pass,
-        "suites_real": sum(1 for s in suites.values() if isinstance(s, dict) and s.get("real")),
-        "suites_simulated": sum(1 for s in suites.values() if isinstance(s, dict) and s.get("simulated")),
-        "suites_not_run": sum(1 for s in suites.values() if isinstance(s, dict) and not s.get("real") and not s.get("simulated")),
+        "suites_real": n_real,
+        "suites_simulated": n_sim,
+        "suites_not_run": sum(
+            1 for s in suites.values()
+            if isinstance(s, dict) and not count_flag(s, "real") and not count_flag(s, "simulated")
+        ),
     }
 
     # Write machine report

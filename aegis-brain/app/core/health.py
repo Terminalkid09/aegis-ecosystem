@@ -26,9 +26,12 @@ class HealthCheckResult:
     error: Optional[str] = None
 
 class HealthChecker:
-    # Ollama è un assistente opzionale: la sua indisponibilità deve essere
-    # visibile, ma non può rendere non pronto il core EDR/XDR.
-    OPTIONAL_CHECKS = {"ollama"}
+    # Ollama e' un assistente opzionale: la sua indisponibilita' deve essere
+    # visibile, ma non puo' rendere non pronto il core EDR/XDR.
+    # Stesso principio per gli altri nomi in OPTIONAL_CHECKS (grafana,
+    # prometheus, osint): se registrati e non sani, degradano invece di
+    # rendere il servizio not-ready. Nomi non registrati sono ignorati.
+    OPTIONAL_CHECKS = {"ollama", "grafana", "prometheus", "osint"}
 
     def __init__(self):
         self._checks = {}
@@ -165,12 +168,17 @@ class HealthChecker:
 
 health_checker = HealthChecker()
 
+_START_MONO = time.monotonic()
+
+
 async def liveness_check() -> Dict[str, Any]:
-    results = await health_checker.run_all()
-    overall = health_checker.get_overall_status(results)
+    """Liveness = il processo e' vivo. SOLO questo: niente DB, niente rete,
+    niente check (audit F4). Se questo endpoint risponde, il processo e'
+    vivo per definizione; la salute funzionale e' compito di readiness."""
     return {
-        "status": overall.value,
-        "checks": {k: {"status": v.status.value, "latency_ms": v.latency_ms, "details": v.details, "error": v.error} for k, v in results.items()}
+        "status": "alive",
+        "service": "aegis-brain",
+        "uptime_s": round(time.monotonic() - _START_MONO, 1),
     }
 
 async def readiness_check() -> Dict[str, Any]:
