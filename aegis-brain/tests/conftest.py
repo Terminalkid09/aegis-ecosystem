@@ -158,6 +158,13 @@ async def client(db_session):
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_pki_dir(tmp_path, monkeypatch):
+    """PKI dir ermetica per test (audit CI: senza, enroll/revoke dipendevano
+    da /app/pki ambientale — 200 in locale, 503 in CI)."""
+    monkeypatch.setattr(settings, "PKI_DIR", str(tmp_path / "pki"))
+
+
 @pytest.fixture
 async def test_user(db_session):
     user = User(

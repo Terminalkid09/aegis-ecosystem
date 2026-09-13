@@ -52,12 +52,48 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def needs_rehash(hashed_password: str) -> bool:
     if _HAS_PWDLIB:
         try:
-            # pwdlib hashes start with $argon2 / $bcrypt — legacy passlib
-            # hashes that fail the check need rehash to modern format.
-            return _pwd.check_needs_rehash(hashed_password)
+            # pwdlib >=0.2.x non espone check_needs_rehash su PasswordHash:
+            # si confrontano i parametri argon2id dell'hash con quelli
+            # dell'hasher recommended corrente (cache del probe).
+            checker = getattr(_pwd, "check_needs_rehash", None)
+            if callable(checker):
+                return bool(checker(hashed_password))
+            return _argon2_params_drifted(hashed_password)
         except Exception:
             return True
     return _pwd_context.needs_update(hashed_password)
+
+
+def _parse_argon2_params(hashed: str) -> tuple | None:
+    """(m, t, p) da hash $argon2id$v=..$m=..,t=..,p=..$..., None se non parsabile."""
+    import re as _re
+    if not isinstance(hashed, str) or not hashed.startswith("$argon2id$"):
+        return None
+    m = _re.search(r"m=(\d+),t=(\d+),p=(\d+)", hashed)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+_recommended_params: tuple | None | bool = False
+
+
+def _argon2_params_drifted(hashed: str) -> bool:
+    """True se l'hash non e' argon2id coi parametri recommended attuali
+    (=> rehash per migrare formati legacy come i default passlib)."""
+    global _recommended_params
+    current = _parse_argon2_params(hashed)
+    if current is None:
+        return True
+    if _recommended_params is False:
+        try:
+            probe = _pwd.hash("needs-rehash-probe")
+            _recommended_params = _parse_argon2_params(probe)
+        except Exception:
+            return True
+    if not _recommended_params:
+        return True
+    return current != _recommended_params
 
 
 # JWT helpers — solo PyJWT.

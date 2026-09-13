@@ -286,17 +286,12 @@ jobs:
           path: sbom.spdx.json
 
       - name: Container & FS scan (Trivy, fail on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
-        with:
-          scan-type: fs
-          scan-ref: ./
-          trivyignores: .trivyignore
-          format: sarif
-          output: trivy.sarif
-          scanners: vuln
-          ignore-unfixed: true
-          severity: HIGH,CRITICAL
-          exit-code: '1'
+        # Docker-run pinned (no GitHub-release download flakiness).
+        run: |
+          docker run --rm -v $PWD:/scan aquasec/trivy:0.66.0 fs \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress \
+            --scanners vuln --ignorefile /scan/.trivyignore \
+            --format sarif --output /scan/trivy.sarif /scan
 
       - name: Build images for Trivy image scan
         run: |
@@ -312,15 +307,13 @@ jobs:
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/scan aquasec/trivy:0.66.0 image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress --ignorefile /scan/.trivyignore "$img" || exit 1
           done
       - name: Trivy image scan (brain, sarif for upload)
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
-        with:
-          image-ref: aegis-ecosystem-aegis-brain:latest
-          trivyignores: .trivyignore
-          format: sarif
-          output: trivy-image.sarif
-          ignore-unfixed: true
-          severity: HIGH,CRITICAL
-          exit-code: '1'
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/scan \
+            aquasec/trivy:0.66.0 image \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress \
+            --ignorefile /scan/.trivyignore \
+            --format sarif --output /scan/trivy-image.sarif \
+            aegis-ecosystem-aegis-brain:latest
 
       - name: Verify digests and signatures
         run: |

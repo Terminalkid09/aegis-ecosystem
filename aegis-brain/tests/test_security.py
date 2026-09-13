@@ -47,12 +47,17 @@ async def test_blacklist_fails_closed_when_redis_write_fails(monkeypatch):
 
 
 def test_legacy_passlib_hash_migrates_to_pwdlib():
-    """Migrazione graduale: hash passlib vecchi verificano e chiedono rehash;
-    i nuovi hash pwdlib/argon2id non lo chiedono (P2.9)."""
+    """Migrazione graduale: hash vecchi verificano e chiedono rehash SOLO se
+    i parametri differiscono da quelli recommended (pwdlib 0.2.1 non
+    distingue due argon2id con stessi parametri — e non serve migrare:
+    verify funziona in entrambi i sensi)."""
     from passlib.context import CryptContext
     legacy = CryptContext(schemes=["argon2"], deprecated="auto").hash("pw123")
     assert verify_password("pw123", legacy) is True
-    assert needs_rehash(legacy) is True
+    weak = CryptContext(schemes=["argon2"], argon2__time_cost=1,
+                        argon2__memory_cost=8192, deprecated="auto").hash("pw123")
+    assert verify_password("pw123", weak) is True
+    assert needs_rehash(weak) is True
     new = hash_password("pw123")
     assert new.startswith("$argon2id$")
     assert verify_password("pw123", new) is True
