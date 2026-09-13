@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Generatore dataset detection INDIPENDENTI (M4 audit F2).
 
 Crea gli split `validation` e `regression` sotto aegis-brain/tests/corpus/:
@@ -160,20 +160,25 @@ def _write_split(name: str, split_data: dict, seed: int) -> dict:
         "suspicious.jsonl": split_data["suspicious"],
         "malformed.jsonl": split_data["malformed"],
     }.items():
+        # Ogni riga termina con \n, ANCHE le righe grezze non-JSON:
+        # senza newline si incollerebbero alla riga successiva e l'evento
+        # andrebbe perso (bug found in audit: malformed 4->3 righe).
         payload = "".join(
-            line if isinstance(line, str) else json.dumps(line) + "\n"
+            (line if line.endswith("\n") else line + "\n") if isinstance(line, str)
+            else json.dumps(line) + "\n"
             for line in rows
         )
-        with open(os.path.join(split_dir, fname), "w", encoding="utf-8") as f:
+        with open(os.path.join(split_dir, fname), "w", encoding="utf-8", newline="\n") as f:
             f.write(payload)
         manifest["files"][fname] = {
             "sha256": _sha256(payload.encode("utf-8")),
             "bytes": len(payload.encode("utf-8")),
-            "lines": len(rows),
+            "lines": len(payload.splitlines()),
         }
     manifest_path = os.path.join(split_dir, "manifest.json")
-    with open(manifest_path, "w", encoding="utf-8") as f:
+    with open(manifest_path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
+        f.write("\n")
     return manifest
 
 
@@ -194,6 +199,38 @@ def verify_split(name: str, split_data: dict) -> dict:
             findings["fp"] += 1
             findings["broke"].append(f"benign[{i}] unexpected hits={[h['rule_id'] for h in rep['hits']]}")
     return findings
+
+
+def _write_training_manifest() -> dict:
+    """Manifest per lo split training (corpus esistente alla radice).
+
+    Il training NON viene rigenerato (è il corpus storico su cui le regole
+    sono state sviluppate); se ne certifica solo il contenuto via sha256.
+    """
+    manifest = {
+        "split": "training",
+        "dataset_version": DATASET_VERSION,
+        "seed": None,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "purpose": "Corpus storico su cui le regole sono state sviluppate/tarate. "
+                   "Non misura generalizzazione (usare validation); non modificare "
+                   "senza rivalutare tutti gli split.",
+        "host_days": HOST_DAYS,
+        "files": {},
+    }
+    for fname in ("benign.jsonl", "suspicious.jsonl", "malformed.jsonl"):
+        with open(os.path.join(CORPUS_DIR, fname), "rb") as f:
+            raw = f.read().replace(b"\r\n", b"\n")
+        manifest["files"][fname] = {
+            "sha256": _sha256(raw),
+            "bytes": len(raw),
+            "lines": len(raw.splitlines()),
+        }
+    manifest_path = os.path.join(CORPUS_DIR, "manifest.json")
+    with open(manifest_path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    return manifest
 
 
 def main() -> int:
@@ -252,6 +289,12 @@ def main() -> int:
         print(f"  {name}: tp={rep['tp']} fp={rep['fp']} fn={rep['fn']} f1={rep['f1']} "
               f"fp/host-day={rep['false_positives_per_host_day']}")
         ok = ok and rep["fp"] == 0 and rep["fn"] == 0 and rep["f1"] == 1.0
+
+    if ok:
+        man = _write_training_manifest()
+        print(f"[OK] training manifest: {os.path.join(CORPUS_DIR, 'manifest.json')}")
+        print("     files: " + ", ".join(
+            k + " (" + str(v["lines"]) + " righe)" for k, v in man["files"].items()))
 
     return 0 if ok else 1
 

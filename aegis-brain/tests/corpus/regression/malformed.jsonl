@@ -1,1 +1,2 @@
-garbage line {{{ not json{"expect": [], "event": {"agent_id": "reg-host-01", "timestamp": "2026-08-15T00:00:00+00:00", "event_type": "PROCESS_CREATED", "process_name": "legit.exe"}}
+garbage line {{{ not json
+{"expect": [], "event": {"agent_id": "reg-host-01", "timestamp": "2026-08-15T00:00:00+00:00", "event_type": "PROCESS_CREATED", "process_name": "legit.exe"}}

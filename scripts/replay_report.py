@@ -43,7 +43,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Replay detection report (deterministic)")
     parser.add_argument("--seed", type=int, default=None, help="seed riproducibile per sharding")
     parser.add_argument("--split", choices=list(DATASET_SPLITS), default="training",
-                        help="split corpus indipendente da scrorare")
+                        help="split corpus indipendente da scorare")
     parser.add_argument("--all", action="store_true", help="scorra tutti gli split indipendenti")
     parser.add_argument("--json", action="store_true", help="output JSON completo")
     args = parser.parse_args()

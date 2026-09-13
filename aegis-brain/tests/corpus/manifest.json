@@ -1,0 +1,25 @@
+{
+  "split": "training",
+  "dataset_version": "corpus-v2",
+  "seed": null,
+  "generated_at": "2026-09-13T15:58:33.660298+00:00",
+  "purpose": "Corpus storico su cui le regole sono state sviluppate/tarate. Non misura generalizzazione (usare validation); non modificare senza rivalutare tutti gli split.",
+  "host_days": 1.0,
+  "files": {
+    "benign.jsonl": {
+      "sha256": "763ed43949ae1a403f393cdd97ce9be4c1cc854a9b480a62fb8f3bb06d378cbe",
+      "bytes": 4064,
+      "lines": 12
+    },
+    "suspicious.jsonl": {
+      "sha256": "75e28f5a67d85ab28eda3f688d717417a03ef846db26d507d796bc4889aacc69",
+      "bytes": 4554,
+      "lines": 12
+    },
+    "malformed.jsonl": {
+      "sha256": "289bb095dfc217b6094719992c42689408282529872563847a489c68c784d74c",
+      "bytes": 709,
+      "lines": 6
+    }
+  }
+}

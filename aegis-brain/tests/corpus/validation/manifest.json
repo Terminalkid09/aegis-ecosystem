@@ -2,7 +2,7 @@
   "split": "validation",
   "dataset_version": "corpus-v2",
   "seed": 20261001,
-  "generated_at": "2026-09-12T14:53:38.007374+00:00",
+  "generated_at": "2026-09-13T15:58:33.646587+00:00",
   "purpose": "Eventi mai visti in training: misura la generalizzazione delle regole (anti-overfitting). Host/timestamp/procedure diversi.",
   "host_days": 1.0,
   "files": {
@@ -17,8 +17,8 @@
       "lines": 16
     },
     "malformed.jsonl": {
-      "sha256": "8c7974ba5ededf0347fdd93716f754ce37b8c87bb71de6543bf5cd71ba982d1e",
-      "bytes": 445,
+      "sha256": "66e01ac9f2af365361d63bf9ba7e16e4114eb8b342bba21862975324b180aeae",
+      "bytes": 446,
       "lines": 4
     }
   }

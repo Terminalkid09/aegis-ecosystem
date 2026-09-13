@@ -2,7 +2,7 @@
   "split": "regression",
   "dataset_version": "corpus-v2",
   "seed": 20260815,
-  "generated_at": "2026-09-12T14:53:38.011591+00:00",
+  "generated_at": "2026-09-13T15:58:33.651754+00:00",
   "purpose": "Incidenti noti del passato che devono continuare a triggerare, più casi benigni che in passato erano falsi positivi.",
   "host_days": 1.0,
   "files": {
@@ -17,8 +17,8 @@
       "lines": 7
     },
     "malformed.jsonl": {
-      "sha256": "7d98e276bec2c1d3b058f383e53ac0d0f58d1d6efbec2e08743db3d7efa14efb",
-      "bytes": 182,
+      "sha256": "db080bc1f25dc939516b402c3f189ca41871d539bb53ef72b911e9e071f6e5d7",
+      "bytes": 183,
       "lines": 2
     }
   }

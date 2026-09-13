@@ -136,9 +136,11 @@ def score_corpus(
     seed: int | None = None,
     split: str = "training",
 ) -> Dict[str, Any]:
-    """TP = riga sospetta con almeno una regola attesa tra gli hit;
-    FN = riga sospetta senza hit attesi; FP = riga benigna con hit.
+    """TP = riga sospetta con TUTTE le regole attese tra gli hit;
+    FN = riga sospetta a cui manca almeno una regola attesa; FP = riga benigna con hit.
     Hit extra su righe sospette: informativi, non penalizzati.
+    (Audit: prima bastava UNA regola attesa su N — una regola rotta restava
+    nascosta dietro le altre. Ora expect ⊆ got, fail-closed.)
     «malformed»: righe corrotte/incomplete che il pipeline deve scartare
     contandole come invalid (mai eccezioni, mai crash).
     `split` seleziona il corpus indipendente: training (default, retro-compatibile),
@@ -171,9 +173,9 @@ def score_corpus(
         expect = {str(x).upper() for x in (raw.get("expect") or [])}
         rep = run_static_replay([raw], include_canary=include_canary, seed=seed)
         got = {h["rule_id"].upper() for h in rep["hits"]}
-        if expect & got:
+        if expect and expect <= got:
             tp += 1
-            for rid in expect & got:
+            for rid in expect:
                 if rid in per_rule:
                     per_rule[rid]["tp"] += 1
         else:
