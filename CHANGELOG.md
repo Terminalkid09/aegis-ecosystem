@@ -1,5 +1,25 @@
 # Changelog — Aegis XDR
 
+## Unreleased — Audit F1–F10 (dataset indipendenti, metriche, health, supply-chain, E2E)
+
+- Detection: split `training`/`validation`/`regression` indipendenti (`corpus-v2`),
+  manifest sha256, gate `test_dataset_splits.py`; `POST /rules/replay` accetta `split`;
+  `scripts/generate_corpus_splits.py` con auto-verifica contro le regole.
+- Metriche: HELP+TYPE unici per famiglia, escaping label, `normalize_path_label`
+  (cardinalità), float non-finiti sicuri; path HTTP normalizzato in `/metrics`.
+- Health: `/health/live` solo prova di vita; `/health/ready` stato completo;
+  optional estesi (ollama, grafana, prometheus, osint); dashboard usa `/health/ready`.
+- Supply-chain: `.trivyignore` con metadati per gruppo + test di struttura/scadenza;
+  `scripts/gen_sbom.py` (CycloneDX manifest-derived, 68 componenti).
+- Update agent: protezione anti-rollback in `UpdateManager.stagePackage` + 5 test
+  (downgrade, stessa versione, upgrade/latest, download troncato, canonicalizzazione).
+- Benchmark: metadati riproducibilità, p50/p95/p99 ingestion, reconnect seedato, `--json`.
+- OS validation: `scripts/os-preflight.{ps1,sh}` + checklist in `docs/os-validation/`
+  (stato: NOT-RUN, nessuna macchina dedicata disponibile).
+- E2E: spec Playwright (`frontend/e2e/smoke.spec.ts`, 3 passati + 1 skippato senza credenziali)
+  + `scripts/api_smoke.py` (ALL PASS su stack live).
+- Fix: `scripts/test-installers.ps1` (Join-Path PS 5.1) — ora ALL PASS.
+
 ## Unreleased — F1–F10: osservabilità, qualità, detection, replay, dashboard, ops (branch dev)
 
 ### F1 Osservabilità

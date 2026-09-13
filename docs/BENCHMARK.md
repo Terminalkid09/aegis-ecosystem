@@ -79,6 +79,7 @@ oltre servono worker async + partizionamento PG (ARCH_REVIEW).
 
 ```bash
 python scripts/benchmark.py --quick
+python scripts/benchmark.py --quick --json   # + metadati (python/OS/CPU/RAM/commit/seed) e p50/p95/p99
 python scripts/benchmark.py --agents 100 --events 100
 python scripts/generate_corpus_splits.py --dry-run
 python scripts/replay_report.py --all --json

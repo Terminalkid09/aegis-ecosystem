@@ -252,8 +252,8 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 
 | Endpoint | Auth | Purpose |
 | --- | --- | --- |
-| `POST /api/v1/auth/register` | none | Create dashboard user |
-| `POST /api/v1/auth/login` | none | Get JWT |
+| `POST /api/v1/auth/register` | none (or admin if `ALLOW_OPEN_REGISTRATION=false`) | Create dashboard user (validated, rate-limited) |
+| `POST /api/v1/auth/login` | none | Get JWT (rate-limited + per-account throttle) |
 | `POST /api/v1/auth/logout` | Bearer JWT | Blacklist token, clear cookie |
 | `GET /api/v1/auth/me` | Bearer JWT | Current user profile (rate-limited 30/min) |
 | `GET /api/v1/telemetry/stats` | Bearer JWT | Dashboard counters (supports `?include_demo=true`) |
@@ -262,7 +262,7 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 | `GET /api/v1/telemetry/alerts/{id}` | Bearer JWT | Alert detail with telemetry, threat reports, remediations |
 | `POST /api/v1/telemetry/alerts/resolve-all` | Bearer JWT | Resolve all unresolved alerts |
 | `DELETE /api/v1/telemetry/alerts` | Bearer JWT | Delete all alerts |
-| `PATCH /api/v1/telemetry/alerts/{id}/resolve` | Bearer JWT | Resolve single alert with optional kill-process |
+| `PATCH /api/v1/telemetry/alerts/{id}/resolve` | Bearer JWT (`triage` to resolve, `respond` to kill) | Resolve single alert with optional kill-process |
 | `GET /api/v1/telemetry/threat-reports` | Bearer JWT | AI-generated threat analysis reports |
 | `GET /api/v1/telemetry/remediations` | Bearer JWT | Auto-remediation action history |
 | `GET /api/v1/telemetry/recent` | Bearer JWT | Recent NodeTrace telemetry |
@@ -271,7 +271,7 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 | `POST /api/v1/telemetry/heartbeat` | X-Agent-Id + Bearer | Agent heartbeat |
 | `GET /api/v1/telemetry/commands` | X-Agent-Id + Bearer | Agent command queue (Redis) |
 | `GET /api/v1/rules/` | Bearer JWT | List custom detection rules |
-| `POST /api/v1/rules/` | Bearer JWT | Create custom detection rule |
+| `POST /api/v1/rules/` | Bearer JWT (operator) | Create custom detection rule (regex safety-checked) |
 | `GET /api/v1/rules/static` | Bearer JWT | List static MITRE ATT&CK rules |
 | `GET /api/v1/discovery/status` | Bearer JWT | Current scan status |
 | `POST /api/v1/discovery/scan` | Bearer JWT | Network scan (CIDR, ports, ARP + ICMP sweep) |
@@ -310,6 +310,44 @@ This project is designed for local security labs and development. Before product
 - Keep `AEGIS_LOG_LEVEL=INFO` or stricter in production.
 
 Use this software only on systems where you have explicit permission.
+
+## Pilot & Enterprise Readiness
+
+Classification: **advanced prototype** (see `docs/os-validation/NOT-RUN.md` for what is actually validated).
+
+```cmd
+REM Preflight host (Windows) / sh scripts/os-preflight.sh (Linux)
+powershell -ExecutionPolicy Bypass -File scripts/os-preflight.ps1
+
+REM Detection replay on 3 independent splits (training/validation/regression)
+python scripts/replay_report.py --all
+
+REM Threshold calibration report (synthetic panel, not fleet baseline)
+python scripts/calibrate_thresholds.py
+
+REM API smoke against live stack
+python scripts/api_smoke.py [--base http://127.0.0.1:8000]
+
+REM Pilot soak: N synthetic agents for T seconds (dev DB only)
+python scripts/pilot_soak.py --agents 10 --duration 300
+
+REM Browser E2E (needs: npm i, playwright chromium, live stack)
+cd frontend && npm run e2e
+
+REM Full audit: machine JSON + human report
+python scripts/audit_report.py
+```
+
+| Item | Path |
+|---|---|
+| OS validation procedures + status | `docs/os-validation/` |
+| HA runbook + overlay | `docs/HA.md`, `docker-compose.ha.yml` |
+| Benchmark method + numbers | `docs/BENCHMARK.md` |
+| Operations (profiles, secrets, PKI) | `docs/OPERATIONS.md` |
+
+Production profile: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`
+(requires `BACKUP_PASSPHRASE`; Postgres/Redis not published). HA overlay adds
+resource limits and scale-readiness (`--scale aegis-brain=2`).
 
 ## Riferimenti
 
