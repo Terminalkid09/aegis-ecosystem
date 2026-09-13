@@ -96,6 +96,7 @@ logs/
 .gitlab-ci.yml.local
 AEGIS_*_REPORT.md
 audit_report.json
+sbom.cyclonedx.json
 docs/AEGIS_*_REPORT.md
 docs/TEST_REPORT.md
 docs/VALIDATION_REPORT.md
