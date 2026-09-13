@@ -168,6 +168,11 @@ public final class FileSpool {
         }
         Files.write(file, reEnc, StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        // Audit: fsync dopo il truncate (prima un kill qui svuotava lo spool
+        // con eventi mai inviati). Come save(), che gia' lo faceva.
+        try (var ch = java.nio.channels.FileChannel.open(file, StandardOpenOption.WRITE)) {
+            ch.force(true);
+        }
         return new LoadResult(consumed, corrupt, false);
     }
 
@@ -216,8 +221,32 @@ public final class FileSpool {
                         PosixFilePermission.OWNER_READ,
                         PosixFilePermission.OWNER_WRITE));
             }
+            return;
         } catch (Exception ignored) {
-            // Windows/non-POSIX: permessi gestiti dalle ACL di default.
+            // Non-POSIX (Windows): sotto con icacls.
+        }
+        lockWindowsAcl(p);
+    }
+
+    /**
+     * Lockdown ACL Windows (audit P6): rimuove l'ereditarieta' e concede
+     * accesso solo a utente corrente + SYSTEM + Administrators. Best-effort:
+     * mai eccezioni (lo spool cifrato resta la difesa primaria).
+     */
+    static void lockWindowsAcl(Path p) {
+        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) return;
+        try {
+            String user = System.getProperty("user.name", "");
+            if (user.isBlank()) return;
+            String flags = Files.isDirectory(p) ? "(OI)(CI)F" : "F";
+            String[] cmd = {"icacls", p.toString(), "/inheritance:r",
+                    "/grant:r", user + ":" + flags,
+                    "/grant:r", "SYSTEM:" + flags,
+                    "/grant:r", "Administrators:" + flags};
+            Process proc = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            boolean done = proc.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+            if (!done) proc.destroyForcibly();
+        } catch (Exception ignored) {
         }
     }
 }

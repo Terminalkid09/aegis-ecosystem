@@ -64,11 +64,15 @@ public class EventOutbox {
     private volatile String spoolSecretUsed;
     private volatile boolean spoolDisabledLogged;
 
-    /** Strategia di invio — iniettabile per i test (default: HTTP reale). */
+    /** Strategia di invio — iniettabile per i test (default: HTTP reale).
+     * Audit: sendSingle riporta l'ack (prima void: gli HTTP 4xx/5xx venivano
+     * contati come inviati). */
     interface Sender {
         void sendBatch(List<SystemEvent> batch) throws Exception;
-        void sendSingle(SystemEvent event);
+        boolean sendSingle(SystemEvent event);
     }
+
+    private final Object flushLock = new Object();
 
     public EventOutbox(AegisClient client) {
         this(client, new Sender() {
@@ -77,8 +81,8 @@ public class EventOutbox {
                 client.sendEventsBatch(batch);
             }
             @Override
-            public void sendSingle(SystemEvent event) {
-                try { client.sendEvent(event); } catch (Exception ignored) {}
+            public boolean sendSingle(SystemEvent event) {
+                try { return client.sendEventAck(event); } catch (Exception ignored) { return false; }
             }
         });
     }
@@ -153,6 +157,14 @@ public class EventOutbox {
     }
 
     public void flush() {
+        // Audit: flusher-thread e stop() concorrevano sullo spool (doppio
+        // load della stesse righe -> duplicati). Un solo flush alla volta.
+        synchronized (flushLock) {
+            flushLocked();
+        }
+    }
+
+    private void flushLocked() {
         List<SystemEvent> batch;
         synchronized (buffer) {
             if (buffer.isEmpty()) batch = new ArrayList<>();
@@ -184,8 +196,11 @@ public class EventOutbox {
                             sent.addAndGet(replayed.size());
                             spoolReplayed.addAndGet(replayed.size());
                         } catch (BatchUnsupportedException e) {
-                            sendSingles(replayed);
-                            sendSingles(batch);
+                            // Audit: i singoli non-ackati tornano in spool,
+                            // non contati come inviati.
+                            List<SystemEvent> failed = sendSingles(replayed);
+                            failed.addAll(sendSingles(batch));
+                            if (!failed.isEmpty()) requeueToSpool(sp, failed, new ArrayList<>());
                             return;
                         } catch (Exception e) {
                             requeueToSpool(sp, replayed, batch);
@@ -201,7 +216,12 @@ public class EventOutbox {
             sent.addAndGet(batch.size());
         } catch (BatchUnsupportedException e) {
             log.debug("Batch non supportato, fallback per-evento");
-            sendSingles(batch);
+            // sendSingles conta gia' ogni fallimento in sendFailed: qui si
+            // prova solo a preservare i non recapitati (niente doppio conteggio).
+            List<SystemEvent> failed = sendSingles(batch);
+            if (!failed.isEmpty() && !saveToSpool(sp, failed)) {
+                log.warn("Eventi persi senza spool: {} (server irraggiungibile)", failed.size());
+            }
         } catch (Exception e) {
             log.warn("Batch send failed: {}", e.getMessage());
             if (!saveToSpool(sp, batch)) {
@@ -241,15 +261,23 @@ public class EventOutbox {
         }
     }
 
-    private void sendSingles(List<SystemEvent> events) {
+    /** Invia uno a uno; ritorna i NON recapitati (ack mancante). */
+    private List<SystemEvent> sendSingles(List<SystemEvent> events) {
+        List<SystemEvent> failed = new ArrayList<>();
         for (SystemEvent e2 : events) {
             try {
-                sender.sendSingle(e2);
-                sent.incrementAndGet();
+                if (sender.sendSingle(e2)) {
+                    sent.incrementAndGet();
+                } else {
+                    failed.add(e2);
+                    sendFailed.incrementAndGet();
+                }
             } catch (Exception e) {
+                failed.add(e2);
                 sendFailed.incrementAndGet();
             }
         }
+        return failed;
     }
 
     /** Spool lazy: creato al primo uso quando il secret è noto. */

@@ -5,6 +5,7 @@ import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AuthenticodeVerifierTest {
@@ -67,5 +68,18 @@ class AuthenticodeVerifierTest {
         assertTrue(AuthenticodeVerifier.publisherCacheSize() <= 500);
         AuthenticodeVerifier.clearPublisherCache();
         assertEquals(0, AuthenticodeVerifier.publisherCacheSize());
+    }
+
+    @Test
+    void cacheKeyChangesWithContent(@TempDir Path tmp) throws Exception {
+        // Audit: sostituire il file deve invalidare la cache publisher.
+        Path f = tmp.resolve("tool.exe");
+        Files.writeString(f, "version-one-bytes");
+        String k1 = AuthenticodeVerifier.cacheKey(f.toString());
+        Thread.sleep(5);
+        Files.writeString(f, "version-two-longer-bytes");
+        String k2 = AuthenticodeVerifier.cacheKey(f.toString());
+        assertNotEquals(k1, k2);
+        assertEquals(k2, AuthenticodeVerifier.cacheKey(f.toString()));
     }
 }

@@ -81,8 +81,32 @@ public final class EtwPipeSource {
             available = false;
             return false;
         }
-        if (binary == null || !Files.isExecutable(binary)) {
+        if (binary == null) {
             degradedReason = "binary-missing";
+            available = false;
+            return false;
+        }
+        // Audit: niente esecuzione da path relativo (hijack via workdir/
+        // AEGIS_ETW_PATH) — prima ancora dell'existence check.
+        if (!binary.isAbsolute()) {
+            degradedReason = "relative-path";
+            available = false;
+            return false;
+        }
+        if (!Files.isExecutable(binary)) {
+            degradedReason = "binary-missing";
+            available = false;
+            return false;
+        }
+        try {
+            AuthenticodeVerifier.Result sig = AuthenticodeVerifier.verify(binary.toString());
+            if (!sig.signed()) {
+                degradedReason = "untrusted-binary";
+                available = false;
+                return false;
+            }
+        } catch (Exception e) {
+            degradedReason = "verify-error";
             available = false;
             return false;
         }

@@ -105,4 +105,26 @@ class ExternalEventIngesterTest {
         assertNotNull(e.getEventId());
         assertEquals(2, e.getSchemaVersion());
     }
+
+    @Test
+    void orphanSeqRejected() {
+        // Audit: seq senza boot_id non ancorabile -> scartata (contract).
+        String orphan = "{\"pid\":9,\"comm\":\"sh\",\"seq\":41,\"event_type\":\"PROCESS_CREATED\"}";
+        assertNull(ExternalEventIngester.fromJsonLine("a1", "Linux", "1.2.0", orphan));
+        String negative = "{\"pid\":9,\"comm\":\"sh\",\"boot_id\":\"b1\",\"seq\":-7,\"event_type\":\"PROCESS_CREATED\"}";
+        assertNull(ExternalEventIngester.fromJsonLine("a1", "Linux", "1.2.0", negative));
+    }
+
+    @Test
+    void remoteInjectionEscaped() {
+        // Audit: prima concatenazione -> DUE voci JSON (injection); ora Gson
+        // produce UNA sola voce col valore escapato.
+        String evil = "{\"pid\":9,\"comm\":\"curl\",\"remote\":\"1.2.3.4\\\",\\\"state\\\":\\\"ESTABLISHED\\\"},{\\\"remote\\\":\\\"evil\",\"event_type\":\"CONNECTION_ESTABLISHED\"}";
+        SystemEvent e = ExternalEventIngester.fromJsonLine("a1", "Linux", "1.2.0", evil);
+        assertNotNull(e);
+        com.google.gson.JsonArray arr = com.google.gson.JsonParser
+                .parseString(e.getNetworkConnections().toString()).getAsJsonArray();
+        assertEquals(1, arr.size(), e.getNetworkConnections().toString());
+        assertEquals("ESTABLISHED", arr.get(0).getAsJsonObject().get("state").getAsString());
+    }
 }

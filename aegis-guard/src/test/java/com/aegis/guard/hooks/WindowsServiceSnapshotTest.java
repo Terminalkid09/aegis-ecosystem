@@ -62,4 +62,26 @@ class WindowsServiceSnapshotTest {
             assertFalse(snap.services().isEmpty(), "Windows reale ha servizi installati");
         }
     }
+
+    @Test
+    void suspiciousImagePathPure() {
+        assertTrue(WindowsServiceSnapshot.isSuspiciousImagePath(
+                "C:\\Users\\vic\\AppData\\Local\\Temp\\svc.exe"));
+        assertTrue(WindowsServiceSnapshot.isSuspiciousImagePath(
+                "\"C:\\ProgramData\\upd.exe\" -k netsvcs"));
+        assertFalse(WindowsServiceSnapshot.isSuspiciousImagePath(
+                "C:\\Windows\\System32\\svchost.exe -k netsvcs"));
+        assertFalse(WindowsServiceSnapshot.isSuspiciousImagePath(
+                "C:\\Program Files\\Vendor\\svc.exe"));
+        assertFalse(WindowsServiceSnapshot.isSuspiciousImagePath(null));
+        assertFalse(WindowsServiceSnapshot.isSuspiciousImagePath(""));
+    }
+
+    @Test
+    void suspiciousServicesNeverThrows() {
+        // Su non-Windows: lista vuota; su Windows: bounded, mai eccezioni.
+        var found = WindowsServiceSnapshot.suspiciousServices(20);
+        assertNotNull(found);
+        assertTrue(found.size() <= 20);
+    }
 }

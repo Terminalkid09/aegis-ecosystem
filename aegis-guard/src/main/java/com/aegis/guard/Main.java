@@ -658,6 +658,11 @@ public class Main {
         if (url.isEmpty() || sha.isEmpty() || sig.isEmpty()) {
             throw new RuntimeException("UPDATE_AGENT: missing url/sha256/signature — refusing (fail-closed)");
         }
+        // 1a. Allowlist URL (audit SSRF): solo artefatti del brain pinnato.
+        if (!com.aegis.guard.utils.UpdateManager.isUpdateUrlAllowed(
+                url, com.aegis.guard.utils.Config.BRAIN_URL)) {
+            throw new SecurityException("UPDATE_AGENT: url fuori allowlist — refusing");
+        }
         // 1. HMAC con la enroll key dell'agente (niente firma valida → stop)
         if (!com.aegis.guard.utils.UpdateManager.verifySignature(sha, sig, com.aegis.guard.utils.Config.ENROLL_KEY)) {
             throw new SecurityException("UPDATE_AGENT: bad signature — possible tampering, refusing");
@@ -690,6 +695,15 @@ public class Main {
             try {
                 client.downloadFile(url, tmp);
                 Path staged = com.aegis.guard.utils.UpdateManager.stagePackage(tmp, sha);
+                // 2b. Sigillo anti-tampering a riposo (audit P6): l'apply al
+                // restart riverifica il MAC prima di toccare il jar live.
+                String secret = client.getAgentSecret();
+                if (secret != null && !secret.isBlank()) {
+                    com.aegis.guard.utils.UpdateManager.sealStagedState(
+                            java.nio.file.Paths.get(""), staged.toString(), sha, secret);
+                } else {
+                    log.warn("[MITIGATION] UPDATE_AGENT: secret assente, state non sigillato");
+                }
                 log.info("[MITIGATION] UPDATE_AGENT: v{} staged at {} — restart service to apply", version, staged);
             } finally {
                 try { Files.deleteIfExists(tmp); } catch (IOException ignored) {}

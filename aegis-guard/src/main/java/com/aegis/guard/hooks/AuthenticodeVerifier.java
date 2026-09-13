@@ -90,7 +90,9 @@ public final class AuthenticodeVerifier {
                     0x4F, (byte) 0xC2, (byte) 0x95, (byte) 0xEE});
 
     private static final int WTD_UI_NONE = 2;
-    private static final int WTD_REVOKE_NONE = 0;
+    // Audit: revoca catena INTERA (prima NONE: certificati rubati/revocati
+    // risultavano trusted). WTD_REVOKE_WHOLECHAIN = 0x1.
+    private static final int WTD_REVOKE_WHOLECHAIN = 1;
     private static final int WTD_CHOICE_FILE = 1;
     private static final int WTD_STATEACTION_IGNORE = 0;
 
@@ -132,7 +134,7 @@ public final class AuthenticodeVerifier {
             info.write();
             WinTrust.TrustData data = new WinTrust.TrustData();
             data.dwUIChoice = WTD_UI_NONE;
-            data.fdwRevocationChecks = WTD_REVOKE_NONE;
+            data.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;
             data.dwUnionChoice = WTD_CHOICE_FILE;
             data.pUnion = info.getPointer();
             data.dwStateAction = WTD_STATEACTION_IGNORE;
@@ -152,15 +154,29 @@ public final class AuthenticodeVerifier {
     private static final Map<String, String> PUBLISHER_CACHE = new ConcurrentHashMap<>();
     private static final int PUBLISHER_CACHE_MAX = 500;
 
-    /** CN del firmatario (cache boundata) o vuoto. Mai eccezioni. */
+    /** CN del firmatario (cache boundata) o vuoto. Mai eccezioni.
+     * Audit: chiave = path+size+mtime (prima solo path: sostituendo il file
+     * restava il publisher vecchio = trust avvelenato). */
     public static Optional<String> publisher(String path) {
         if (path == null || path.isBlank()) return Optional.empty();
-        String cached = PUBLISHER_CACHE.get(path);
+        String cacheKey = cacheKey(path);
+        String cached = PUBLISHER_CACHE.get(cacheKey);
         if (cached != null) return cached.isEmpty() ? Optional.empty() : Optional.of(cached);
         Optional<String> cn = queryPublisher(path);
         if (PUBLISHER_CACHE.size() >= PUBLISHER_CACHE_MAX) PUBLISHER_CACHE.clear();
-        PUBLISHER_CACHE.put(path, cn.orElse(""));
+        PUBLISHER_CACHE.put(cacheKey, cn.orElse(""));
         return cn;
+    }
+
+    static String cacheKey(String path) {
+        try {
+            java.nio.file.Path p = java.nio.file.Paths.get(path);
+            java.nio.file.attribute.BasicFileAttributes a =
+                    java.nio.file.Files.readAttributes(p, java.nio.file.attribute.BasicFileAttributes.class);
+            return path + "|" + a.size() + "|" + a.lastModifiedTime().toMillis();
+        } catch (Exception e) {
+            return path;
+        }
     }
 
     /** Status Get-AuthenticodeSignature (Valid/NotSigned/HashMismatch/...). Mai throw. */

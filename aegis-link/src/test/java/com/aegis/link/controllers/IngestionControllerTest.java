@@ -124,4 +124,29 @@ class IngestionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("aegis-link OK")));
     }
+
+    @Test
+    @WithMockUser
+    void receiveEvent_QueueFullReturns429() throws Exception {
+        org.mockito.Mockito.when(redisService.getAgentIdBySecret("test-secret"))
+                .thenReturn("test-agent");
+        org.mockito.Mockito.when(redisService.getQueueSize())
+                .thenReturn(IngestionController.MAX_QUEUE_SIZE);
+        EventRequest request = EventRequest.builder()
+                .agentId("test-agent")
+                .pid(1234)
+                .processName("test.exe")
+                .os("Windows")
+                .eventType("PROCESS_CREATED")
+                .timestamp(Instant.now())
+                .build();
+
+        mockMvc.perform(post("/api/v1/events")
+                        .with(csrf())
+                        .header("X-Api-Key", "test-secret")
+                        .header("X-Agent-Id", "test-agent")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isTooManyRequests());
+    }
 }

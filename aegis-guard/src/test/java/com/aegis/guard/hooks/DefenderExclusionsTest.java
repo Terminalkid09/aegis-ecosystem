@@ -20,6 +20,20 @@ class DefenderExclusionsTest {
     }
 
     @Test
+    void looksDisabledOnHexDword() {
+        // Audit: reg.exe emette REG_DWORD come "0x1", mai "1".
+        DefenderExclusions.Snapshot hex = new DefenderExclusions.Snapshot(
+                Map.of(), Map.of("DisableAntiSpyware", "0x1"), "");
+        assertTrue(DefenderExclusions.looksDisabled(hex));
+        DefenderExclusions.Snapshot hexOff = new DefenderExclusions.Snapshot(
+                Map.of(), Map.of("DisableAntiSpyware", "0x0"), "");
+        assertFalse(DefenderExclusions.looksDisabled(hexOff));
+        DefenderExclusions.Snapshot garbage = new DefenderExclusions.Snapshot(
+                Map.of(), Map.of("DisableAntiSpyware", "n/a"), "");
+        assertFalse(DefenderExclusions.looksDisabled(garbage));
+    }
+
+    @Test
     void collectNeverThrowsAndStructured() {
         DefenderExclusions.Snapshot snap = DefenderExclusions.collect();
         assertNotNull(snap.exclusions());

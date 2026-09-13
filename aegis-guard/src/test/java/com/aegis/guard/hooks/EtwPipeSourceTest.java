@@ -8,6 +8,7 @@ import java.util.List;
 
 import com.aegis.guard.models.SystemEvent;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 class EtwPipeSourceTest {
@@ -35,6 +36,20 @@ class EtwPipeSourceTest {
                 true, Path.of("definitely-missing-aegis-etw.exe"));
         assertFalse(src.probe());
         assertFalse(src.degradedReason().isEmpty());
+    }
+
+    @Test
+    void relativeBinaryRejectedEvenIfExecutable(@TempDir Path tmp) throws Exception {
+        // Audit: niente esecuzione da workdir (hijack) — solo path assoluti.
+        Path rel = Path.of("aegis-etw.exe");
+        EtwPipeSource src = new EtwPipeSource("a1", "1.0", true, rel);
+        if (System.getProperty("os.name", "").toLowerCase().contains("win")) {
+            assertFalse(src.probe());
+            assertEquals("relative-path", src.degradedReason());
+        } else {
+            assertFalse(src.probe());
+        }
+        assertNotNull(tmp);
     }
 
     @Test

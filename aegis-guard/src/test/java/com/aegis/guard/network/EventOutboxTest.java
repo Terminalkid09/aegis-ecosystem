@@ -17,6 +17,7 @@ class EventOutboxTest {
         final List<List<SystemEvent>> batches = new ArrayList<>();
         final List<SystemEvent> singles = new ArrayList<>();
         Exception batchFailure = null;
+        boolean singleAck = true;
 
         @Override
         public void sendBatch(List<SystemEvent> batch) throws Exception {
@@ -25,8 +26,10 @@ class EventOutboxTest {
         }
 
         @Override
-        public void sendSingle(SystemEvent event) {
+        public boolean sendSingle(SystemEvent event) {
+            if (!singleAck) return false;
             singles.add(event);
+            return true;
         }
     }
 
@@ -166,5 +169,20 @@ class EventOutboxTest {
         FakeSender s = new FakeSender();
         new EventOutbox(null, s).flush();
         assertTrue(s.batches.isEmpty() && s.singles.isEmpty());
+    }
+
+    @Test
+    void unackedSinglesAreNotCountedAsSent() {
+        // Audit: prima i singoli falliti incrementavano comunque `sent`.
+        FakeSender s = new FakeSender();
+        s.batchFailure = new BatchUnsupportedException("no batch");
+        s.singleAck = false;
+        EventOutbox box = new EventOutbox(null, s);
+        box.add(ev(1));
+        box.add(ev(2));
+        box.flush();
+        assertEquals(0, box.getSent());
+        assertEquals(2, box.getSendFailed());
+        assertTrue(s.singles.isEmpty());
     }
 }

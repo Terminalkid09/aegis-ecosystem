@@ -157,4 +157,55 @@ public final class WindowsServiceSnapshot {
         }
         return s.trim();
     }
+
+    /**
+     * Servizi con ImagePath sospetto (audit: prima details() non era mai
+     * chiamato e gli ImagePath non arrivavano da nessuna parte).
+     * Prefiltro sui nomi (niente dump completo), poi details() bounded,
+     * poi check path. Solo Windows, mai eccezioni.
+     */
+    public static List<Service> suspiciousServices(int maxDetails) {
+        List<Service> out = new ArrayList<>();
+        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) return out;
+        try {
+            Snapshot snap = collect();
+            List<String> candidates = new ArrayList<>();
+            for (Service s : snap.services()) {
+                String n = s.name().toLowerCase();
+                if (n.contains("temp") || n.contains("tmp") || n.contains("download")
+                        || n.contains("appdata") || n.contains("public")
+                        || n.contains("update") || n.contains(".exe")) {
+                    candidates.add(s.name());
+                }
+            }
+            Map<String, Map<String, String>> det = details(candidates, Math.max(1, maxDetails));
+            for (Map.Entry<String, Map<String, String>> e : det.entrySet()) {
+                String image = e.getValue().getOrDefault("ImagePath", "");
+                if (isSuspiciousImagePath(image)) {
+                    String start = e.getValue().getOrDefault("Start", "-1");
+                    int startType;
+                    try { startType = Integer.parseInt(start.trim()); }
+                    catch (NumberFormatException ex) { startType = -1; }
+                    out.add(new Service(e.getKey(), image, startType));
+                }
+            }
+        } catch (Exception ex) {
+            log.debug("Ricerca servizi sospetti fallita: {}", ex.getMessage());
+        }
+        return out;
+    }
+
+    /** Puro e testato: ImagePath fuori dalle dir di sistema = sospetto. */
+    static boolean isSuspiciousImagePath(String imagePath) {
+        if (imagePath == null || imagePath.isBlank()) return false;
+        String p = imagePath.replace("\"", "").trim().toLowerCase().replace("\\", "/");
+        // Rimuove argomenti ("...exe -k netsvcs" -> "...exe").
+        int exe = p.indexOf(".exe");
+        if (exe >= 0) p = p.substring(0, exe + 4);
+        if (!(p.endsWith(".exe") || p.endsWith(".dll") || p.endsWith(".sys"))) return false;
+        return p.contains("/temp/") || p.contains("/tmp/") || p.contains("/downloads/")
+                || p.contains("/appdata/") || p.contains("/users/public/")
+                || p.contains("/programdata/") || p.contains("/perflogs/")
+                || p.contains("/recycle.bin/");
+    }
 }

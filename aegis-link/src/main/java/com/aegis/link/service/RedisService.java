@@ -50,10 +50,25 @@ public class RedisService {
     public String getAgentIdBySecret(String secret) {
         if (secret == null || secret.isBlank()) return null;
         try {
-            return redisTemplate.opsForValue().get("auth:agent:" + secret);
+            // Audit: la chiave e' lo SHA-256 del secret (mai plaintext in Redis),
+            // stesso formato del brain (hashlib.sha256 hex). Prima il brain
+            // scriveva hash e link leggeva raw: cache mai hit per guard.
+            return redisTemplate.opsForValue().get("auth:agent:" + sha256Hex(secret.strip()));
         } catch (Exception e) {
             log.error("Failed to fetch agent auth from Redis: {}", e.getMessage());
             return null;
+        }
+    }
+
+    static String sha256Hex(String value) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] out = md.digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(out.length * 2);
+            for (byte b : out) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
         }
     }
 }

@@ -60,13 +60,26 @@ public final class ExternalEventIngester {
             if (o.has("boot_id") && !o.get("boot_id").isJsonNull())
                 e.setBootId(o.get("boot_id").getAsString());
             if (o.has("seq")) {
-                try { e.setSeq(o.get("seq").getAsLong()); } catch (Exception ignored) {}
+                // Audit: seq senza boot_id e' orfana (il brain non puo'
+                // ancorarla) e il contract la rifiuta: si scarta.
+                if (e.getBootId() == null || e.getBootId().isBlank()) return null;
+                try {
+                    long seq = o.get("seq").getAsLong();
+                    if (seq < 0) return null;
+                    e.setSeq(seq);
+                } catch (Exception ignored) {}
             }
             if (o.has("ts_ns")) {
-                try { e.setTsMonotonicNs(o.get("ts_ns").getAsLong()); } catch (Exception ignored) {}
+                try {
+                    long ts = o.get("ts_ns").getAsLong();
+                    if (ts >= 0) e.setTsMonotonicNs(ts);
+                } catch (Exception ignored) {}
             }
             if (o.has("ts_wall_ns")) {
-                try { e.setTsWallNs(o.get("ts_wall_ns").getAsLong()); } catch (Exception ignored) {}
+                try {
+                    long ts = o.get("ts_wall_ns").getAsLong();
+                    if (ts >= 0) e.setTsWallNs(ts);
+                } catch (Exception ignored) {}
             }
             if (o.has("proc_start_ns")) {
                 try { e.setProcStartNs(o.get("proc_start_ns").getAsLong()); } catch (Exception ignored) {}
@@ -90,8 +103,15 @@ public final class ExternalEventIngester {
             if (o.has("quality") && !o.get("quality").isJsonNull())
                 e.setQuality(o.get("quality").getAsString());
             if ("CONNECTION_ESTABLISHED".equals(type) && o.has("remote") && !o.get("remote").isJsonNull()) {
+                // Audit: JSON costruito con Gson (prima concatenazione con
+                // solo rimozione delle virgolette: injection di voci extra).
                 String remote = o.get("remote").getAsString();
-                e.setNetworkConnections("[{\"remote\":\"" + remote.replace("\"", "") + "\",\"state\":\"ESTABLISHED\"}]");
+                com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+                com.google.gson.JsonObject conn = new com.google.gson.JsonObject();
+                conn.addProperty("remote", remote);
+                conn.addProperty("state", "ESTABLISHED");
+                arr.add(conn);
+                e.setNetworkConnections(arr.toString());
             }
             return e;
         } catch (Exception e) {

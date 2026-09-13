@@ -141,7 +141,9 @@ public class AegisClient {
     }
 
     /** Accesso package-private: l'outbox deriva la chiave spool dal secret. */
-    String getAgentSecret() {
+    /** Audit P6: serve a Main per sigillare update.state (stesso package? no:
+     * Main e' in com.aegis.guard). Pubblico, mai loggato. */
+    public String getAgentSecret() {
         return this.agentSecret;
     }
 
@@ -238,8 +240,18 @@ public class AegisClient {
     }
 
     public void sendEvent(SystemEvent event) {
-        if (event == null) return;
+        sendEventAck(event);
+    }
+
+    /**
+     * Come {@link #sendEvent} ma riporta l'ack (audit: il vecchio sendEvent
+     * non segnalava mai gli HTTP 4xx/5xx e l'outbox contava "sent" eventi
+     * persi). True solo se il server ha risposto 2xx.
+     */
+    public boolean sendEventAck(SystemEvent event) {
+        if (event == null) return false;
         String json = gson.toJson(event);
+        final boolean[] acked = {false};
 
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
@@ -256,22 +268,24 @@ public class AegisClient {
                     int status = response.getCode();
                     if (status >= 200 && status < 300) {
                         log.debug("[OK] Event sent (HTTP {})", status);
+                        acked[0] = true;
                     } else {
                         log.warn("[WARN] Server responded with HTTP {}", status);
                         warnCertProblem(status);
                     }
                     return null;
                 });
-                return;
+                return acked[0];
             } catch (IOException e) {
                 if (attempt == MAX_RETRIES) log.error("[ERROR] Failed to send event: {}", e.getMessage());
                 // Retry con jitter: senza, N agenti ripartono in sync dopo un
                 // outage e picchiano il brain tutti insieme (thundering herd).
                 long backoff = (long) RETRY_DELAY_MS * attempt
                         + java.util.concurrent.ThreadLocalRandom.current().nextInt(250);
-                try { Thread.sleep(backoff); } catch (InterruptedException ie) { return; }
+                try { Thread.sleep(backoff); } catch (InterruptedException ie) { return false; }
             }
         }
+        return false;
     }
 
     /**

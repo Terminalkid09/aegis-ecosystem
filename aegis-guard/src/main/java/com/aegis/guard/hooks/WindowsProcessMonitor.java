@@ -33,6 +33,12 @@ public class WindowsProcessMonitor implements ProcessMonitor {
 
     // PID visti nell'ultimo ciclo — usati per rilevare nuovi processi.
     private final Set<Long> knownPids = new HashSet<>();
+    // Audit PID-reuse: la chiave di novita' e' (pid, start-time), non il solo
+    // PID (riciclato in <1s il secondo processo spariva). Cache TTL 5s sugli
+    // start time per non interrogare il kernel a ogni scan per ogni processo.
+    private final Set<String> knownKeys = new HashSet<>();
+    private final Map<Long, long[]> startCache = new HashMap<>();
+    private static final long START_CACHE_TTL_MS = 5000;
     private com.aegis.guard.network.EventOutbox outbox;
 
     // Copertura reale (M2 Fase 3): Tier 1 ETW se disponibile, altrimenti
@@ -57,22 +63,43 @@ public class WindowsProcessMonitor implements ProcessMonitor {
 
     // ProcessMonitor
 
+    /** Start time con cache TTL (audit PID-reuse senza interrogare il kernel
+     * a ogni scan). Ritorna null se illeggibile. */
+    Long cachedStartNs(long pid) {
+        long now = System.currentTimeMillis();
+        long[] cached = startCache.get(pid);
+        if (cached != null && now - cached[1] < START_CACHE_TTL_MS) return cached[0];
+        Long start = null;
+        try {
+            java.util.OptionalLong t = ProcessStartTime.creationFileTime(pid);
+            if (t.isPresent()) start = t.getAsLong();
+        } catch (Exception ignored) {
+        }
+        startCache.put(pid, new long[]{start == null ? -1L : start, now});
+        return start;
+    }
+
     @Override
     public void startMonitoring() {
         running = true;
         log.info("WindowsProcessMonitor started (interval {}ms)", Config.SCAN_INTERVAL_MS);
 
-        scanProcesses().forEach(e -> knownPids.add(e.getPid()));
+        scanProcesses().forEach(e -> {
+            knownPids.add(e.getPid());
+            knownKeys.add(WindowsSensorKit.pidReuseKey(e.getPid(), cachedStartNs(e.getPid())));
+        });
         outbox = new com.aegis.guard.network.EventOutbox(client);
         outbox.start();
 
         // Copertura reale: probe ETW (mai crash) + snapshot persistenze (read-only).
+        // Audit: probe-ok NON significa streaming (nessuno startStream esiste):
+        // la provenance resta "toolhelp" onesta, ETW e' solo capability nota.
         try {
             EtwPipeSource etw = new EtwPipeSource(agentId, Config.AGENT_VERSION);
             if (etw.probe()) {
-                coverageProvenance = "etw";
+                coverageProvenance = "toolhelp";
                 coverageQuality = "full";
-                log.info("ETW disponibile: telemetria event-driven");
+                log.info("ETW disponibile (collector presente, ingest via polling Toolhelp)");
             } else {
                 coverageProvenance = "toolhelp";
                 coverageQuality = "degraded:etw-" + etw.degradedReason();
@@ -96,6 +123,13 @@ public class WindowsProcessMonitor implements ProcessMonitor {
             log.info("Servizi installati (read-only): {}{}",
                     svc.services().size(),
                     svc.degraded().isEmpty() ? "" : " [degraded:" + svc.degraded() + "]");
+            // Audit: ImagePath prima mai letti (servizi-persistenza invisibili).
+            // Dettagli bounded sui nomi sospetti; WARN se ImagePath fuori sistema.
+            for (WindowsServiceSnapshot.Service s :
+                    WindowsServiceSnapshot.suspiciousServices(20)) {
+                log.warn("Servizio sospetto: {} -> {} (start={})",
+                        s.name(), s.imagePath(), s.startType());
+            }
         } catch (Exception e) {
             log.debug("Snapshot servizi fallito: {}", e.getMessage());
         }
@@ -124,31 +158,37 @@ public class WindowsProcessMonitor implements ProcessMonitor {
                 }
 
                 List<SystemEvent> current = scanProcesses();
+                Set<String> currentKeys = new HashSet<>();
                 for (SystemEvent event : current) {
-                    if (!knownPids.contains(event.getPid())) {
+                    Long startNs = cachedStartNs(event.getPid());
+                    String key = WindowsSensorKit.pidReuseKey(event.getPid(), startNs);
+                    currentKeys.add(key);
+                    if (!knownKeys.contains(key)) {
                         // Arricchimento costoso SOLO sui nuovi: path + hash
                         // (in scanProcesses() per non rompere il contratto)
                         enrichNewEvent(event);
                         // Chiave anti-PID-reuse (v2 procStartNs) + copertura.
-                        try {
-                            ProcessStartTime.creationFileTime(event.getPid())
-                                    .ifPresent(event::setProcStartNs);
-                        } catch (Exception ignored) {
+                        if (startNs != null && startNs > 0) {
+                            event.setProcStartNs(startNs);
+                        } else {
+                            event.setQuality(coverageQuality + ";pid-reuse-unknown");
                         }
                         event.setProvenance(coverageProvenance);
-                        event.setQuality(coverageQuality);
+                        if (event.getQuality() == null) event.setQuality(coverageQuality);
                         // Attach network connections for this PID
                         String conns = netstatCache.getOrDefault(event.getPid(), "[]");
                         event.setNetworkConnections(conns);
 
                         log.info("New process detected: {}", event);
                         outbox.add(event);
-                        knownPids.add(event.getPid());
+                        knownKeys.add(key);
                     }
                 }
                 Set<Long> currentPids = new HashSet<>();
                 current.forEach(e -> currentPids.add(e.getPid()));
                 knownPids.retainAll(currentPids);
+                knownKeys.retainAll(currentKeys);
+                startCache.keySet().retainAll(currentPids);
 
                 Thread.sleep(Config.SCAN_INTERVAL_MS);
             } catch (InterruptedException e) {

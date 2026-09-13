@@ -91,11 +91,13 @@ public final class DefenderExclusions {
         }
     }
 
-    /** True se Defender risulta disabilitato o l'agente è escluso (da verificare). */
+    /** True se Defender risulta disabilitato o l'agente è escluso (da verificare).
+     * Audit: i DWORD di reg.exe arrivano come "0x1", mai "1" — confronto
+     * numerico via parseDword invece di string-compare (prima sempre false). */
     public static boolean looksDisabled(Snapshot snap) {
         if (snap == null) return false;
         for (String v : snap.tamperFlags().values()) {
-            if ("1".equals(v.trim())) return true;
+            if (RegistryReader.parseDword(v) == 1) return true;
         }
         return false;
     }

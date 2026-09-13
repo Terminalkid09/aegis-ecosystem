@@ -44,6 +44,9 @@ public class IngestionController {
 
     private final RedisService redisService;
 
+    /** Tetto anti-OOM: oltre, 429 con retry (audit). */
+    static final long MAX_QUEUE_SIZE = 50000;
+
     /*
     Riceve un evento da aegis-guard e lo accoda su Redis.
     
@@ -60,7 +63,7 @@ public class IngestionController {
             @RequestHeader("X-Agent-Id") String agentIdHeader,
             @Valid @RequestBody EventRequest event) {
 
-        log.info("Event received: agent={} process={} pid={} os={}",
+        log.debug("Event received: agent={} process={} pid={} os={}",
                 event.getAgentId(), event.getProcessName(),
                 event.getPid(), event.getOs());
 
@@ -79,6 +82,15 @@ public class IngestionController {
             return ResponseEntity
                     .status(HttpStatus.FORBIDDEN)
                     .body(EventResponse.error("Authenticated principal does not match agent"));
+        }
+
+        // Audit: tetto coda anti-OOM Redis (consumer brain fermo -> niente
+        // accumulo infinito). 429 con retry, mai perdita silenziosa.
+        if (redisService.getQueueSize() >= MAX_QUEUE_SIZE) {
+            log.warn("Queue full ({}), rejecting event from agent={}", MAX_QUEUE_SIZE, agentIdHeader);
+            return ResponseEntity
+                    .status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(EventResponse.error("Ingestion queue full, retry later"));
         }
 
         redisService.pushEvent(event);
@@ -118,8 +130,9 @@ public class IngestionController {
         if (command == null) {
             return ResponseEntity.noContent().build();
         }
-        
-        log.info("Command dispatched to agent={}: {}", agentId, command);
+
+        // Audit: niente contenuto comandi nei log info (solo metadati).
+        log.debug("Command dispatched to agent={}", agentId);
         return ResponseEntity.ok(command);
     }
 

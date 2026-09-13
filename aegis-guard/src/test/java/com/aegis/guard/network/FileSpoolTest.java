@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FileSpoolTest {
@@ -77,5 +78,13 @@ class FileSpoolTest {
         assertEquals(32, k1.length);
         assertArrayEquals(k1, k2);
         assertFalse(Arrays.equals(k1, FileSpool.deriveKey("other")));
+    }
+
+    @Test
+    void windowsAclLockdownNeverThrows(@TempDir Path tmp) {
+        // Audit P6: su Windows restringe, altrove no-op; mai eccezioni.
+        // Su Windows verifica anche che la dir resti scrivibile dal processo.
+        FileSpool.lockWindowsAcl(tmp);
+        assertTrue(Files.isWritable(tmp));
     }
 }
