@@ -14,13 +14,15 @@ async def get_syslog_events(
     db: AsyncSession = Depends(get_db),
     _user = Depends(get_current_user),
     limit: int = Query(200, ge=1, le=1000),
-    skip: int = Query(0, ge=0),
-    hostname: Optional[str] = None,
+    skip: int = Query(0, ge=0, le=10000),
+    hostname: Optional[str] = Query(None, max_length=64),
     severity: Optional[int] = None,
 ):
     stmt = select(SyslogEvent)
     if hostname:
-        stmt = stmt.where(SyslogEvent.hostname.ilike(f"%{hostname}%"))
+        # Audit: escape LIKE (%, _, \) altrimenti full-scan/enumerazione.
+        esc = hostname.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        stmt = stmt.where(SyslogEvent.hostname.like(f"%{esc}%", escape="\\"))
     if severity is not None:
         stmt = stmt.where(SyslogEvent.severity == severity)
     stmt = stmt.order_by(desc(SyslogEvent.timestamp)).offset(skip).limit(limit)

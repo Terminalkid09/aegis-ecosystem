@@ -24,6 +24,27 @@ class TestAuth:
         assert response.status_code == 400
         assert "already registered" in response.json()["detail"]
 
+    async def test_register_validation_rejects(self, client: AsyncClient):
+        # Audit: password corta, email malformata, username fuori policy.
+        for payload in (
+            {"username": "u1", "email": "a@b.co", "password": "short"},
+            {"username": "validuser", "email": "not-an-email", "password": "password123"},
+            {"username": "bad user!", "email": "x@y.zz", "password": "password123"},
+        ):
+            response = await client.post("/api/v1/auth/register", json=payload)
+            assert response.status_code == 422, payload
+
+    async def test_register_closed_when_disabled(self, client: AsyncClient, monkeypatch):
+        # Audit: ALLOW_OPEN_REGISTRATION=false -> solo admin.
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "ALLOW_OPEN_REGISTRATION", False)
+        response = await client.post("/api/v1/auth/register", json={
+            "username": "newuser2",
+            "email": "new2@example.com",
+            "password": "securepass123"
+        })
+        assert response.status_code == 403
+
     async def test_login_success(self, client: AsyncClient, test_user):
         response = await client.post("/api/v1/auth/login", json={
             "email": test_user.email,
@@ -42,8 +63,11 @@ class TestAuth:
         assert response.status_code == 401
 
     async def test_login_nonexistent_user(self, client: AsyncClient):
+        import uuid as _uuid
+        # Email unica per run: il throttle anti-brute-force conta i fallimenti
+        # per email su Redis condiviso (niente flaky tra run consecutivi).
         response = await client.post("/api/v1/auth/login", json={
-            "email": "nonexistent@example.com",
+            "email": f"nonexistent-{_uuid.uuid4().hex[:8]}@example.com",
             "password": "anypassword"
         })
         assert response.status_code == 401

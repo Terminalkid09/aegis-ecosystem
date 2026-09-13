@@ -53,7 +53,13 @@ async def domain_lookup(domain: str, force: bool = False, db: AsyncSession = Dep
     return {"cached": False, "data": data}
 
 @router.post("/batch")
-async def batch_ip_lookup(payload: BatchLookupRequest, db: AsyncSession = Depends(get_db), user=Depends(get_optional_user)):
+async def batch_ip_lookup(payload: BatchLookupRequest, db: AsyncSession = Depends(get_db),
+                          # Audit: il batch costa (Shodan/Abuse/VT) e scrive in DB:
+                          # solo utenti autenticati, mai anonimi.
+                          user=Depends(get_current_user)):
+    if len(payload.ips) > 50:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Max 50 IPs per batch")
     results = {}
     for ip in payload.ips[:50]:
         try:

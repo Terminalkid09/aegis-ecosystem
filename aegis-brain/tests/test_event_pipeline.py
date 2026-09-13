@@ -1,5 +1,8 @@
 """M1 Fase 2: schema v2 accettato e backward-compat + dedup/seq (tutto senza DB)."""
+import json
 from datetime import datetime, timezone
+
+import pytest
 
 from app.api.schemas.common import EventSchema, StatsResponse
 from app.services.event_dedup import EventDedup, SeqTracker
@@ -97,3 +100,132 @@ def test_stats_response_has_pipeline_counters():
     assert s.events_duplicated == 0
     assert s.events_seq_gaps == 0
     assert s.events_seq_gap_events == 0
+
+
+# ── Audit: reliable queue (niente perdita su crash/errore) ────────────────
+class FakeRedis:
+    """Liste in memoria con la semantica usata dal consumer."""
+
+    def __init__(self):
+        self.lists = {"aegis:events": [], "aegis:events:processing": [],
+                      "aegis:events:dlq": []}
+
+    async def brpoplpush(self, src, dst, timeout=0):
+        if not self.lists[src]:
+            return None
+        item = self.lists[src].pop()
+        self.lists[dst].insert(0, item)
+        return item
+
+    async def rpoplpush(self, src, dst):
+        if not self.lists[src]:
+            return None
+        item = self.lists[src].pop()
+        self.lists[dst].insert(0, item)
+        return item
+
+    async def lrem(self, key, count, value):
+        lst = self.lists[key]
+        removed = 0
+        for _ in range(abs(count)):
+            if value in lst:
+                lst.remove(value)
+                removed += 1
+        return removed
+
+    async def lpush(self, key, value):
+        self.lists[key].insert(0, value)
+        return len(self.lists[key])
+
+    async def ltrim(self, key, start, stop):
+        self.lists[key] = self.lists[key][start:stop + 1]
+
+    async def llen(self, key):
+        return len(self.lists[key])
+
+
+class FakeResult:
+    def scalars(self):
+        return self
+
+    def first(self):
+        return None
+
+
+class FakeDB:
+    async def execute(self, *a, **k):
+        return FakeResult()
+
+    def add(self, *a, **k):
+        pass
+
+    async def commit(self):
+        pass
+
+    async def flush(self):
+        pass
+
+
+class FakeSession:
+    def __init__(self, db=None):
+        self._db = db or FakeDB()
+
+    async def __aenter__(self):
+        return self._db
+
+    async def __aexit__(self, *a):
+        return False
+
+
+def _benign_raw():
+    return json.dumps({
+        "agent_id": "agent-001", "timestamp": "2026-09-01T10:00:00+00:00",
+        "event_type": "PROCESS_CREATED", "pid": 101,
+        "process_name": "notepad.exe",
+        "process_path": "C:\\Windows\\System32\\notepad.exe",
+    })
+
+
+@pytest.mark.asyncio
+async def test_consumer_acks_only_on_success(monkeypatch):
+    from app.services import redis_consumer as rc
+    consumer = rc.RedisConsumer.__new__(rc.RedisConsumer)
+    fake = FakeRedis()
+    consumer._client = fake
+    from app.rules.heuristic_engine import HeuristicEngine
+    consumer._engine = HeuristicEngine()
+    monkeypatch.setattr(rc, "AsyncSessionLocal", FakeSession)
+
+    ok = await consumer._process_raw(_benign_raw())
+    assert ok is True
+    fake.lists["aegis:events:processing"].append("x")
+    await fake.lrem("aegis:events:processing", 1, "x")
+    assert await fake.llen("aegis:events:processing") == 0
+    assert await fake.llen("aegis:events:dlq") == 0
+
+
+@pytest.mark.asyncio
+async def test_consumer_failure_goes_to_dlq(monkeypatch):
+    from app.services import redis_consumer as rc
+    consumer = rc.RedisConsumer.__new__(rc.RedisConsumer)
+    fake = FakeRedis()
+    consumer._client = fake
+
+    ok = await consumer._process_raw("not-json{{{")
+    assert ok is False
+    await consumer._to_dlq("not-json{{{")
+    assert await fake.llen("aegis:events:dlq") == 1
+
+
+@pytest.mark.asyncio
+async def test_consumer_requeues_orphans_on_boot(monkeypatch):
+    from app.services import redis_consumer as rc
+    consumer = rc.RedisConsumer.__new__(rc.RedisConsumer)
+    fake = FakeRedis()
+    consumer._client = fake
+    fake.lists["aegis:events:processing"] = ["orphan-1", "orphan-2"]
+
+    moved = await consumer._requeue_processing()
+    assert moved == 2
+    assert await fake.llen("aegis:events:processing") == 0
+    assert await fake.llen("aegis:events") == 2

@@ -91,8 +91,10 @@ async def ai_chat(payload: ChatRequest, db: AsyncSession = Depends(get_db), user
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
     
     try:
-        thread = await get_or_create_thread(db, user, payload.thread_id, payload.prompt, payload.title)
-        db.add(AIMessage(thread_id=thread.id, user_id=user.id, role="user", content=payload.prompt))
+        # Audit: si persiste SOLO il prompt anonimizzato (mai PII raw in DB).
+        safe_prompt = ai_service.anonymize_prompt(payload.prompt)
+        thread = await get_or_create_thread(db, user, payload.thread_id, safe_prompt, payload.title)
+        db.add(AIMessage(thread_id=thread.id, user_id=user.id, role="user", content=safe_prompt))
         await db.commit()
 
         response = await ai_service.generate_ai_response(payload.prompt, model=payload.model)

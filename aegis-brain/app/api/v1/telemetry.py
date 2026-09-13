@@ -5,7 +5,7 @@ from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from app.database.connection import get_db
 from app.database.models import Alert, Agent, Telemetry, ThreatReport, RemediationAction
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_perm, has_perm
 from app.core.agent_deps import get_current_agent
 from app.api.schemas.common import AlertResponse, AgentResponse, StatsResponse, EventSchema
 from app.services import telemetry_service
@@ -168,17 +168,20 @@ async def delete_all_alerts(
 async def resolve_alert(
     alert_id: int, body: ResolveRequest,
     db: AsyncSession = Depends(get_db),
-    _user = Depends(get_current_user),
+    # Audit: triage per risolvere; KILL_PROCESS solo con "respond".
+    # Prima bastava un login qualsiasi (viewer compreso).
+    _user = Depends(require_perm("triage", "respond")),
     request: Request = None,
 ):
     alert = await db.get(Alert, alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
-    
+
     killed = False
     if not alert.is_resolved and body.resolved:
         safe_to_kill = alert.event_type in ("PROCESS_CREATED", "custom_rule")
-        if alert.pid and safe_to_kill:
+        can_respond = has_perm(_user.role, "respond")
+        if alert.pid and safe_to_kill and can_respond:
             try:
                 await telemetry_service.send_command_to_agent(alert.agent_id, {
                     "command": "KILL_PROCESS",
@@ -368,7 +371,7 @@ async def agent_report(request: Request, payload: EventSchema, db: AsyncSession 
     import time as _time
     _t0 = _time.perf_counter()
     inc("aegis_events_received_total", 1, f'agent="{agent.agent_id}",type="{payload.event_type}"')
-    if not ingest_rate_guard.allow(str(agent.agent_id)):
+    if not await ingest_rate_guard.allow_async(str(agent.agent_id)):
         inc("aegis_events_dropped_total", 1, f'reason="rate_limited",agent="{agent.agent_id}"')
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="rate exceeded")
     if str(agent.agent_id) != payload.agent_id:
@@ -408,7 +411,7 @@ async def agent_report_batch(
     accepted, rejected, duplicates = 0, 0, 0
     from app.core.age_validation import validate_age_header
     inc("aegis_events_received_total", len(payload), f'agent="{agent.agent_id}",type="batch"')
-    if not ingest_rate_guard.allow(str(agent.agent_id), len(payload)):
+    if not await ingest_rate_guard.allow_async(str(agent.agent_id), len(payload)):
         inc("aegis_events_dropped_total", len(payload), f'reason="rate_limited",agent="{agent.agent_id}"')
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="rate exceeded")
     for item in payload:

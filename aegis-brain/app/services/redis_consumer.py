@@ -17,6 +17,11 @@ from sqlalchemy import select
 
 logger = get_logger(__name__)
 
+PROCESSING_LIST = "aegis:events:processing"
+DLQ_LIST = "aegis:events:dlq"
+DLQ_MAX = 10000
+REQUEUE_MAX = 5000
+
 class RedisConsumer:
     def __init__(self):
         self._running = False
@@ -26,18 +31,48 @@ class RedisConsumer:
     async def start(self):
         self._running = True
         logger.info("Async RedisConsumer started on queue 'aegis:events'")
+        # Audit: al boot si ricodano gli eventi rimasti in processing da un
+        # crash precedente (altrimenti persi per sempre).
+        await self._requeue_processing()
         while self._running:
             try:
-                # BRPOP returns (key, value)
-                result = await self._client.brpop("aegis:events", timeout=2)
-                if result:
-                    _, raw_json = result
-                    await self._process_raw(raw_json)
+                # BRPOPLPUSH atomico: l'evento resta in processing finche'
+                # non e' confermato (niente piu' rimozione-prima-di-processare).
+                raw_json = await self._client.brpoplpush("aegis:events", PROCESSING_LIST, timeout=2)
+                if raw_json:
+                    ok = await self._process_raw(raw_json)
+                    if ok:
+                        await self._client.lrem(PROCESSING_LIST, 1, raw_json)
+                    else:
+                        await self._to_dlq(raw_json)
             except redis.ConnectionError as e:
                 logger.error(f"Redis connection lost: {e}")
                 await asyncio.sleep(5)
             except Exception as e:
                 logger.exception(f"Error in consumer loop: {e}")
+
+    async def _requeue_processing(self) -> int:
+        """Rimette in coda gli eventi orfani in processing (crash recovery)."""
+        moved = 0
+        try:
+            while moved < REQUEUE_MAX:
+                item = await self._client.rpoplpush(PROCESSING_LIST, "aegis:events")
+                if item is None:
+                    break
+                moved += 1
+        except Exception as e:
+            logger.error(f"Requeue processing failed: {e}")
+        if moved:
+            logger.warning(f"Requeued {moved} orphan events from {PROCESSING_LIST}")
+        return moved
+
+    async def _to_dlq(self, raw_json: str) -> None:
+        try:
+            await self._client.lpush(DLQ_LIST, raw_json)
+            await self._client.ltrim(DLQ_LIST, 0, DLQ_MAX - 1)
+            inc("aegis_events_dlq_total", 1)
+        except Exception as e:
+            logger.error(f"DLQ push failed: {e}")
 
     def stop(self):
         self._running = False
@@ -48,18 +83,18 @@ class RedisConsumer:
         try:
             data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
             event = EventSchema.model_validate(data)
-            
+
             async with AsyncSessionLocal() as db:
                 # 1. Update Agent Status
                 await self._update_agent(db, event)
-                
+
                 # 2. Process by Type
                 if event.event_type == "PROCESS_CREATED":
                     await self._process_security_event(db, event)
-                
+
                 elif event.event_type in ["METRICS_REPORT", "AGENT_HEARTBEAT"]:
                     await self._process_telemetry(db, event)
-                    
+
                 # 3. Process Correlation (for all events)
                 await correlation_engine.analyze(event, db)
 
@@ -67,9 +102,11 @@ class RedisConsumer:
             observe_hist("aegis_detection_latency_seconds", _time.perf_counter() - _t0)
             depth = await self._client.llen("aegis:events")
             set_gauge("aegis_queue_depth", depth, 'stage="redis"')
+            return True
         except Exception as e:
             inc("aegis_events_lost_total", 1, 'reason="consumer_error"')
             logger.error(f"Processing error: {e}")
+            return False
 
     def _get_agent_uuid(self, agent_id_str: str) -> uuid.UUID:
         try:

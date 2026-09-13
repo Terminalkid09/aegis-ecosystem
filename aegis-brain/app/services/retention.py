@@ -57,8 +57,14 @@ async def preview_retention(db: AsyncSession) -> Dict[str, Any]:
         counts[table] = result.scalar() or 0
     return {"cutoffs": {k: v.isoformat() for k, v in cutoffs.items()}, "counts": counts}
 
-async def run_retention_purge(db: AsyncSession, confirmed: bool = False, backup_verified: bool = False) -> Dict[str, Any]:
-    """Esegue la purge se confermata e backup verificato, altrimenti dry-run."""
+async def run_retention_purge(db: AsyncSession, confirmed: bool = False, backup_verified: bool = False,
+                              include_audit: bool = False) -> Dict[str, Any]:
+    """Esegue la purge se confermata e backup verificato, altrimenti dry-run.
+
+    Audit: lo schedulatore automatico NON purga mai gli audit log
+    (include_audit=False) e NON salta il backup check: le prove forensi e
+    l'audit trail si cancellano solo con run manuale esplicito.
+    """
     preview = await preview_retention(db)
     total = sum(preview["counts"].values())
     if not confirmed:
@@ -96,6 +102,8 @@ async def run_retention_purge(db: AsyncSession, confirmed: bool = False, backup_
     )
     purged = {}
     for table, stmt in purge_statements(cutoffs):
+        if table == "audit" and not include_audit:
+            continue
         result = await db.execute(stmt)
         purged[table] = result.rowcount or 0
     # Audit della purge (mai cancellare audit reali qui — solo log)
@@ -131,7 +139,9 @@ async def retention_scheduler():
                 continue
             from app.database.connection import async_session_factory
             async with async_session_factory() as db:
-                await run_retention_purge(db, confirmed=True, backup_verified=True)
+                # Audit: backup check REALE + audit log mai toccati in automatico.
+                await run_retention_purge(db, confirmed=True, backup_verified=False,
+                                          include_audit=False)
                 logger.info("Retention purge schedulata completata")
         except asyncio.CancelledError:
             break

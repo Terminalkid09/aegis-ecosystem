@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.database.connection import get_db
 from app.database.models import CustomRule
 from app.core.deps import get_current_user
@@ -36,7 +36,7 @@ class RuleCreate(BaseModel):
     name: str
     description: str = ""
     target_field: str = "process_name"
-    pattern: str = ""
+    pattern: str = Field(default="", max_length=200)
     severity: str = "MEDIUM"
     is_active: bool = True
     mitre_tactic_id: Optional[str] = None
@@ -186,6 +186,7 @@ async def test_rule(payload: RuleTestRequest, db: AsyncSession = Depends(get_db)
 
 class ReplayRequest(BaseModel):
     include_canary: bool = False
+    split: str = "training"
 
 @router.post("/replay")
 async def replay_corpus(payload: ReplayRequest, current_user = Depends(get_current_user)):
@@ -194,15 +195,24 @@ async def replay_corpus(payload: ReplayRequest, current_user = Depends(get_curre
     Read-only: niente DB, niente rete. Report automatico pre-release con
     precision/recall/F1 e falsi-positivi per host/giorno (assunzione
     documentata nel report). MTTD solo live (pilot).
+    `split`: training (default) | validation | regression (corpora indipendenti).
     """
-    from app.services.replay import score_corpus
-    return score_corpus(include_canary=payload.include_canary)
+    from app.services.replay import score_corpus, DATASET_SPLITS
+    if payload.split not in DATASET_SPLITS:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail=f"unknown split; expected one of {list(DATASET_SPLITS)}")
+    return score_corpus(include_canary=payload.include_canary, split=payload.split)
 
 @router.post("/", response_model=RuleOut)
 async def create_rule(rule: RuleCreate, request: Request, db: AsyncSession = Depends(get_db), current_user = Depends(get_current_user)):
     _require_rule_operator(current_user)
     if rule.severity not in ["LOW", "MEDIUM", "HIGH", "CRITICAL"]:
         raise HTTPException(status_code=400, detail="Invalid severity level")
+    # Audit ReDoS: il pattern gira nel request-path di ingestione.
+    from app.rules.heuristic_engine import is_regex_safe
+    unsafe = is_regex_safe(rule.pattern)
+    if unsafe:
+        raise HTTPException(status_code=400, detail=f"Unsafe regex pattern: {unsafe}")
     db_rule = CustomRule(**rule.model_dump())
     db.add(db_rule)
     await db.flush()
@@ -233,6 +243,11 @@ async def update_rule(rule_id: int, updates: Dict[str, Any] = Body(...), request
         if hasattr(rule, key):
             old = getattr(rule, key)
             if old != value:
+                if key == "pattern":
+                    from app.rules.heuristic_engine import is_regex_safe
+                    unsafe = is_regex_safe(value)
+                    if unsafe:
+                        raise HTTPException(status_code=400, detail=f"Unsafe regex pattern: {unsafe}")
                 changed[key] = {"old": old, "new": value}
             setattr(rule, key, value)
     await log_audit(db, action="rule_update", resource="custom_rule",

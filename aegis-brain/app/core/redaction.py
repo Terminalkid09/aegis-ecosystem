@@ -46,15 +46,33 @@ def redact_value(key: str, value):
     return redact_text(value)
 
 def sanitize_event(payload: dict) -> dict:
-    """Rende sicuro un payload evento prima della persistenza:
-    redige command_line e campi stringa candidati; Non tocca agent_id/timestamp."""
-    out = dict(payload)
-    for field in ("command_line", "commandLine"):
-        if isinstance(out.get(field), str):
-            out[field] = redact_text(out[field])
-    for key, val in out.items():
-        if key in ("hostname", "ip_address", "os", "process_name", "user"):
-            continue
-        if isinstance(val, str) and len(val) > 2048:
-            out[key] = redact_text(val)
-    return out
+    """Rende sicuro un payload evento prima della persistenza (audit: ricorsivo).
+
+    Redige command_line e TUTTE le stringhe annidate (processes/users/
+    network_flows/details/capabilities compresi). Non tocca gli identificatori
+    operativi necessari al SOC (agent_id/timestamp/event_type/hostname/
+    ip_address/os/process_name/user/pid).
+    """
+    return _sanitize_value("", payload)
+
+
+_PASSTHROUGH_KEYS = frozenset({
+    "agent_id", "agentId", "timestamp", "event_type", "eventType",
+    "hostname", "ip_address", "ipAddress", "os", "process_name",
+    "processName", "user", "pid", "parent_pid", "parentPid",
+    "parent_process_name", "parentProcessName",
+})
+
+
+def _sanitize_value(key: str, value):
+    if isinstance(value, dict):
+        return {k: _sanitize_value(k, v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_value(key, v) for v in value]
+    if not isinstance(value, str):
+        return value
+    if key in _PASSTHROUGH_KEYS:
+        return value
+    if key.lower() in ("command_line", "commandline"):
+        return redact_text(value)
+    return redact_value(key, value)

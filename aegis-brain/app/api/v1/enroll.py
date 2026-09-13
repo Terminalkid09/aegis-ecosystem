@@ -17,6 +17,7 @@ from app.core.agent_deps import get_bootstrap_agent
 from app.core.audit import log_audit
 from app.core.config import settings
 from app.core.deps import get_current_user
+from app.core.rate_limit import limiter
 from app.core.security import hash_password
 from app.core.logging import get_logger
 from app.core.redis_utils import get_redis_url
@@ -35,8 +36,10 @@ class EnrollResponse(BaseModel):
     status: str
 
 @router.post("/enroll", response_model=EnrollResponse)
-async def enroll_agent(payload: EnrollRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def enroll_agent(request: Request, payload: EnrollRequest, db: AsyncSession = Depends(get_db)):
     # Static key (headless/IoT) OR single-use EnrollToken (one-liner install).
+    # Rate-limit anti brute-force sulla enroll key (audit).
     # Use constant-time comparison to prevent timing attacks on the static key
     valid_static = (
         bool(settings.AGENT_ENROLL_KEY)

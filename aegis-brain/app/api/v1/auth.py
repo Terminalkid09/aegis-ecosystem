@@ -8,18 +8,24 @@ from app.api.schemas.common import TokenResponse, UserOut
 from app.core.rate_limit import limiter
 from app.core.deps import get_current_user
 from app.core.config import settings
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Optional
 
 router = APIRouter(tags=["Authentication"])
 
+USERNAME_RE = r"^[A-Za-z0-9._-]{3,150}$"
+
+
 class UserCreate(BaseModel):
-    username: str
-    email: str
-    password: str
+    # Audit: validazione identità (niente stringhe vuote/giganti/XSS-stored).
+    username: str = Field(..., min_length=3, max_length=150, pattern=USERNAME_RE)
+    email: str = Field(..., min_length=5, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    password: str = Field(..., min_length=8, max_length=128)
+
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: str = Field(..., min_length=5, max_length=255)
+    password: str = Field(..., min_length=1, max_length=128)
 
 def _set_auth_cookie(response: Response, token: str):
     """Set JWT as httpOnly, Secure (in production), SameSite=Strict cookie."""
@@ -36,6 +42,14 @@ def _set_auth_cookie(response: Response, token: str):
 @router.post("/register", response_model=TokenResponse)
 @limiter.limit("5/minute")
 async def register(request: Request, payload: UserCreate, response: Response, db: AsyncSession = Depends(get_db)):
+    # Audit: in enterprise (ALLOW_OPEN_REGISTRATION=false) solo admin crea utenti.
+    if not settings.ALLOW_OPEN_REGISTRATION:
+        from app.core.deps import get_optional_user
+        admin = await get_optional_user(
+            authorization=request.headers.get("Authorization"),
+            request=request, db=db)
+        if not admin or (admin.role or "").lower() != "admin":
+            raise HTTPException(status_code=403, detail="Open registration disabled")
     result = await db.execute(select(User).where(User.email == payload.email))
     if result.scalars().first():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -56,11 +70,17 @@ async def register(request: Request, payload: UserCreate, response: Response, db
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("10/minute")
 async def login(request: Request, payload: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
+    from app.core.security import login_throttled, record_login_failure, clear_login_failures
+    if await login_throttled(payload.email):
+        raise HTTPException(status_code=429, detail="Too many failed attempts, try later")
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalars().first()
-    
+
     if not user or not verify_password(payload.password, user.password_hash):
+        await record_login_failure(payload.email)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    await clear_login_failures(payload.email)
     
     if needs_rehash(user.password_hash):
         user.password_hash = hash_password(payload.password)

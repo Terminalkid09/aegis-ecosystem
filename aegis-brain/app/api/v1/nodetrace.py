@@ -10,6 +10,8 @@ from app.services import telemetry_service
 from app.api.schemas.common import EventSchema
 from pydantic import BaseModel, Field
 import json
+import secrets
+import uuid
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
@@ -76,7 +78,11 @@ async def verify_nodetrace_agent(
 @router.post("/register")
 async def register_agent(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
     # Static key (headless) OR single-use EnrollToken (one-liner) — same as /enroll.
-    valid_static = bool(settings.AGENT_ENROLL_KEY) and payload.enroll_key == settings.AGENT_ENROLL_KEY
+    # Audit: compare_digest anti-timing (prima `==`).
+    import hmac as _hmac
+    _key = (payload.enroll_key or "").strip()
+    _expected = (settings.AGENT_ENROLL_KEY or "").strip()
+    valid_static = bool(_expected) and _hmac.compare_digest(_key, _expected)
     if not valid_static:
         import hashlib
         from datetime import datetime, timezone
@@ -109,17 +115,21 @@ async def register_agent(payload: RegisterRequest, db: AsyncSession = Depends(ge
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                                 detail=f"PKI unavailable: {e}")
-        # Re-enroll: issue a fresh token so agent can authenticate again
-        new_token = f"nt-{uuid.uuid4().hex[:16]}"
+        # Re-enroll: issue a fresh token so agent can authenticate again.
+        # Audit: 192 bit (prima 64: nt-uuid16). Lunghezza opaca agli agenti.
+        new_token = f"nt-{secrets.token_hex(24)}"
         existing.device_token_hash = hash_password(new_token)
         existing.last_seen = datetime.now(timezone.utc)
         await db.commit()
 
-        # Update redis cache (best-effort)
+        # Update redis cache (best-effort; chiave = hash, mai secret in chiaro;
+        # TTL anti-crescita: la cache ricade sul DB).
         try:
+            import hashlib as _hashlib
             import redis.asyncio as aioredis
             rc = aioredis.from_url(settings.REDIS_URL)
-            await rc.set(f"auth:agent:{new_token}", str(existing.agent_id))
+            await rc.set(f"auth:agent:{_hashlib.sha256(new_token.encode()).hexdigest()}",
+                         str(existing.agent_id), ex=86400)
         except Exception:
             pass
 
@@ -130,7 +140,7 @@ async def register_agent(payload: RegisterRequest, db: AsyncSession = Depends(ge
         }
 
     agent_id = uuid.uuid4()
-    token = f"nt-{uuid.uuid4().hex[:16]}"
+    token = f"nt-{secrets.token_hex(24)}"
 
     agent = Agent(
         agent_id=agent_id,
@@ -142,11 +152,13 @@ async def register_agent(payload: RegisterRequest, db: AsyncSession = Depends(ge
     db.add(agent)
     await db.commit()
 
-    # Also cache for link-style auth if needed (best-effort)
+    # Also cache for link-style auth if needed (best-effort; hash + TTL).
     try:
+        import hashlib as _hashlib2
         import redis.asyncio as redis
         rc = redis.from_url(settings.REDIS_URL)
-        await rc.set(f"auth:agent:{token}", str(agent_id))
+        await rc.set(f"auth:agent:{_hashlib2.sha256(token.encode()).hexdigest()}",
+                     str(agent_id), ex=86400)
     except Exception:
         pass
 

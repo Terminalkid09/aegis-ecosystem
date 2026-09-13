@@ -11,8 +11,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$install = Join-Path $root ".." "aegis-guard" "install" "windows" "install.ps1"
-$uninstall = Join-Path $root ".." "aegis-guard" "install" "windows" "uninstall.ps1"
+# Join-Path a un solo child per compatibilita' PowerShell 5.1.
+$winDir = Join-Path $root "../aegis-guard/install/windows"
+$install = Join-Path $winDir "install.ps1"
+$uninstall = Join-Path $winDir "uninstall.ps1"
 $failures = 0
 
 function Assert-True([bool]$cond, [string]$msg) {
@@ -35,7 +37,7 @@ function Test-Contains([string]$path, [string]$pattern, [string]$msg) {
 
 Assert-True (Test-Path -LiteralPath $install) "install.ps1 esiste"
 Assert-True (Test-Path -LiteralPath $uninstall) "uninstall.ps1 esiste"
-$nssm = Test-Path -LiteralPath (Join-Path $root ".." "aegis-guard" "install" "windows" "nssm.exe")
+$nssm = Test-Path -LiteralPath (Join-Path $winDir "nssm.exe")
 if ($nssm) {
     Write-Host "PASS nssm.exe presente"
 } else {

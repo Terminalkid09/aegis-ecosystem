@@ -14,7 +14,7 @@ from app.database.connection import init_db
 from app.api.v1.router import api_router
 from app.core.health import readiness_check, startup_check, liveness_check
 from app.core.circuit_breaker import get_breaker_status
-from app.core.metrics import inc, observe_hist, render_prometheus
+from app.core.metrics import inc, observe_hist, render_prometheus, fmt_labels, normalize_path_label
 from fastapi import Response as FastAPIResponse
 
 from app.services.redis_consumer import RedisConsumer
@@ -139,7 +139,13 @@ async def request_id_middleware(request: Request, call_next):
     start = _time.perf_counter()
     response = await call_next(request)
     observe_hist("aegis_http_request_seconds", _time.perf_counter() - start)
-    inc("aegis_http_requests_total", 1, f'method="{request.method}",path="{request.url.path}",status="{response.status_code}"')
+    # Audit F3: path normalizzato (niente cardinalita' esplosa da UUID/ID),
+    # valori escapati via fmt_labels.
+    inc("aegis_http_requests_total", 1, fmt_labels(
+        method=request.method,
+        path=normalize_path_label(request.url.path),
+        status=response.status_code,
+    ))
     response.headers["X-Request-ID"] = request_id
     return response
 
@@ -156,6 +162,7 @@ DEFAULT_BODY_LIMIT = 10 * 1024 * 1024
 async def body_size_middleware(request: Request, call_next):
     limit = BODY_LIMITS.get(request.url.path, DEFAULT_BODY_LIMIT)
     cl = request.headers.get("content-length")
+    too_large = False
     if cl:
         try:
             if int(cl) > limit:
@@ -163,13 +170,34 @@ async def body_size_middleware(request: Request, call_next):
                 return JSONResponse(status_code=413, content={"detail": "Payload too large"})
         except ValueError:
             return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
-    return await call_next(request)
+    else:
+        # Audit: senza content-length (chunked) il vecchio check non vedeva
+        # nulla. Si contano i byte reali durante la lettura.
+        received = 0
+        too_large = False
+
+        async def counting_receive():
+            nonlocal received, too_large
+            message = await request._receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body", b""))
+                if received > limit:
+                    too_large = True
+            return message
+
+        request._receive = counting_receive  # type: ignore[attr-defined]
+    response = await call_next(request)
+    if cl is None and too_large:
+        inc("aegis_events_dropped_total", 1, 'reason="payload_too_large"')
+        return JSONResponse(status_code=413, content={"detail": "Payload too large"})
+    return response
 
 # Health check endpoints
 @app.get("/health/live")
 async def liveness():
-    # Contratto: {status: healthy|degraded|unhealthy, checks} — il processo
-    # è vivo per definizione se risponde; i check dicono se è anche sano.
+    # Contratto (audit F4): {status: "alive", service, uptime_s}.
+    # Solo prova di vita del processo: niente DB/rete/check.
+    # Per lo stato funzionale usare /health/ready.
     return await liveness_check()
 
 @app.get("/health/ready")

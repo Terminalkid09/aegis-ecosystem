@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import json
 import re
 from datetime import datetime, timezone
@@ -21,6 +22,16 @@ def _extract_ips(text: str) -> List[str]:
     return list(set(IP_PATTERN.findall(text)))
 
 
+def is_public_ip(ip: str) -> bool:
+    """True solo per IP pubblici validi (audit: prima 172.17-31, loopback,
+    link-local, CGNAT e IPv6 passavano all'OSINT esterno)."""
+    try:
+        addr = ipaddress.ip_address(ip.strip())
+    except ValueError:
+        return False
+    return addr.is_global
+
+
 def _extract_domains(text: str) -> List[str]:
     return list(set(DOMAIN_PATTERN.findall(text)))
 
@@ -37,7 +48,7 @@ async def enrich_alert(alert_id: int):
 
         osint_data = {}
         for ip in ips:
-            if ip.startswith("10.") or ip.startswith("192.168.") or ip.startswith("172.16."):
+            if not is_public_ip(ip):
                 continue
             try:
                 report_data = await fetch_ip_info(ip)

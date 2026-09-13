@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # AI Config
     OLLAMA_URL: Optional[str] = None
     OLLAMA_DEFAULT_MODEL: str = "aegis-default"
+    # Audit: allowlist modelli caricabili via API (niente pull arbitrari).
+    # Vuoto = solo default + tinyllama (uso interno report).
+    OLLAMA_ALLOWED_MODELS: str = ""
     AI_RATE_LIMIT_PER_MIN: int = 20
     # Enterprise default: NO silent stub. In DEBUG lab it may fallback for DX,
     # in prod it must return an explicit degraded error instead of fake AI text.
@@ -52,6 +55,9 @@ class Settings(BaseSettings):
     # Security Keys
     AEGIS_API_KEY: Optional[str] = None
     AGENT_ENROLL_KEY: Optional[str] = None
+    # Audit: registrazione aperta (lab) vs solo-admin (enterprise).
+    # False = POST /auth/register richiede JWT admin (niente self-service).
+    ALLOW_OPEN_REGISTRATION: bool = True
 
     # Detection canary (M4 Fase 5): rule_id separati da virgola in log-only.
     RULE_CANARY_IDS: str = ""

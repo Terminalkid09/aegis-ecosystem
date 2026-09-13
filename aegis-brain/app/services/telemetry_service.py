@@ -34,8 +34,40 @@ async def _suppressed(agent_id: Any, key: str) -> bool:
         return False
 
 
+# Bound anti DB-bloat sulle strutture annidate (audit): lo schema limita i
+# conteggi, qui si limita la dimensione serializzata.
+_TELEMETRY_LIST_FIELDS = ("processes", "users", "network_flows")
+_TELEMETRY_LIST_MAX_ITEMS = 500
+_TELEMETRY_JSON_MAX_BYTES = 65536
+_CAPABILITIES_MAX_BYTES = 8192
+
+
+def _bound_telemetry_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Tronca liste giganti e capabilities enormi (difesa anti DB-bloat)."""
+    import json as _json
+    data = dict(data)
+    for field in _TELEMETRY_LIST_FIELDS:
+        val = data.get(field)
+        if isinstance(val, list) and len(val) > _TELEMETRY_LIST_MAX_ITEMS:
+            data[field] = val[:_TELEMETRY_LIST_MAX_ITEMS]
+    for field in _TELEMETRY_LIST_FIELDS + ("capabilities", "details"):
+        val = data.get(field)
+        if isinstance(val, (dict, list)):
+            try:
+                raw = _json.dumps(val, default=str)
+            except Exception:
+                data[field] = None
+                continue
+            limit = _CAPABILITIES_MAX_BYTES if field in ("capabilities", "details") \
+                else _TELEMETRY_JSON_MAX_BYTES
+            if len(raw.encode("utf-8")) > limit:
+                data[field] = {"truncated": True, "note": f"oversize>{limit}B"}
+    return data
+
+
 async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any]):
-    # 1. Store raw telemetry
+    # 1. Store raw telemetry (bounded: vedi _bound_telemetry_data)
+    data = _bound_telemetry_data(data)
     telemetry = Telemetry(
         device_id=agent_id,
         cpu_usage=data.get("cpu_usage"),

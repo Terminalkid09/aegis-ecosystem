@@ -81,12 +81,29 @@ async def check_rate_limit(user_id: int | str, limit: Optional[int] = None) -> b
         new = await redis_client.eval(RATE_LIMIT_LUA, 1, key, 60)
         return int(new) <= int(limit)
     except Exception:
+        # Audit: fail-CLOSED (prima True = LLM illimitato con Redis giu').
         logger.exception("Rate limiter redis exception")
-        return True
+        return False
+
+
+def allowed_model(model: Optional[str]) -> str:
+    """Modello effettivo: default se assente; solo allowlist (audit)."""
+    default = settings.OLLAMA_DEFAULT_MODEL or "llama3"
+    if not model:
+        return default
+    allowed = {default, "tinyllama"}
+    extra = {m.strip() for m in (settings.OLLAMA_ALLOWED_MODELS or "").split(",") if m.strip()}
+    allowed |= extra
+    if model not in allowed:
+        raise ValueError(f"model not allowed: {model}")
+    return model
 
 async def call_llm(prompt: str, model: Optional[str] = None) -> Dict[str, Any]:
     dev_fallback = settings.AI_DEV_FALLBACK
-    model = model or settings.OLLAMA_DEFAULT_MODEL or "llama3"
+    try:
+        model = allowed_model(model)
+    except ValueError as exc:
+        return {"error": "model_not_allowed", "message": str(exc)}
 
     if not settings.OLLAMA_URL:
         if dev_fallback:
