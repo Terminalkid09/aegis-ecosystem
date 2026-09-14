@@ -123,6 +123,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
+          cache: maven
       - name: Guard unit tests (OS-gated, never crash off-Windows)
         run: |
           cd aegis-guard
@@ -226,6 +227,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
+          cache: maven
       - name: Test Aegis Guard (unit, incl. interop Ed25519)
         run: |
           cd aegis-guard
@@ -296,6 +298,15 @@ jobs:
             --format sarif --output /scan/trivy.sarif /scan
 
       - name: Build images for Trivy image scan
+        # Dummy env: compose interpolates required vars at config time, but
+        # build needs no real secrets (no container is started here).
+        env:
+          POSTGRES_PASSWORD: ci-dummy
+          REDIS_PASSWORD: ci-dummy
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          AEGIS_API_KEY: ci-dummy-api-key
+          AGENT_ENROLL_KEY: ci-dummy-enroll-key
+          JWT_SECRET: ci-dummy-jwt-secret-32-chars-min
         run: |
           docker compose build aegis-brain aegis-guard aegis-link
           docker compose build aegis-frontend
@@ -349,6 +360,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
+          cache: maven
 
       - name: Build Release
         run: |
