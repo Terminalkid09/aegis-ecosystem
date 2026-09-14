@@ -27,9 +27,11 @@ public final class AuthenticodeVerifier {
 
     private AuthenticodeVerifier() {}
 
-    /** Binding minimo a wintrust.dll (solo verifica file). */
+    /** Binding minimo a wintrust.dll (solo verifica file). Audit: NESSUN
+     * caricamento eager — Native.load avviene solo dentro verifyNative() su
+     * Windows (prima il class-init caricava wintrust e avvelenava l'intera
+     * classe su Linux: NoClassDefFoundError su ogni test). */
     public interface WinTrust extends StdCallLibrary {
-        WinTrust INSTANCE = Native.load("wintrust", WinTrust.class);
 
         @Structure.FieldOrder({"Data1", "Data2", "Data3", "Data4"})
         class Guid extends Structure {
@@ -84,11 +86,6 @@ public final class AuthenticodeVerifier {
         int WinVerifyTrust(Pointer hwnd, Guid pgActionID, TrustData pWVTData);
     }
 
-    private static final WinTrust.Guid VERIFY_V2 = new WinTrust.Guid(
-            0x00AAC56B, (short) 0xCD44, (short) 0x11d0,
-            new byte[]{(byte) 0x8C, (byte) 0xC2, 0x00, (byte) 0xC0,
-                    0x4F, (byte) 0xC2, (byte) 0x95, (byte) 0xEE});
-
     private static final int WTD_UI_NONE = 2;
     // Audit: revoca catena INTERA (prima NONE: certificati rubati/revocati
     // risultavano trusted). WTD_REVOKE_WHOLECHAIN = 0x1.
@@ -127,8 +124,18 @@ public final class AuthenticodeVerifier {
     }
 
     static Result verifyNative(String path) {
+        // Audit: niente JNA fuori Windows (il load lazy sotto solleverebbe
+        // comunque UnsatisfiedLinkError, ma l'early-return e' esplicito).
+        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) {
+            return new Result(false, -1, "not-windows", "");
+        }
         java.io.File f = new java.io.File(path);
         try {
+            WinTrust lib = Native.load("wintrust", WinTrust.class);
+            WinTrust.Guid verifyV2 = new WinTrust.Guid(
+                    0x00AAC56B, (short) 0xCD44, (short) 0x11d0,
+                    new byte[]{(byte) 0x8C, (byte) 0xC2, 0x00, (byte) 0xC0,
+                            0x4F, (byte) 0xC2, (byte) 0x95, (byte) 0xEE});
             WinTrust.FileInfo info = new WinTrust.FileInfo();
             info.pcwszFilePath = new WString(f.getAbsolutePath());
             info.write();
@@ -139,7 +146,7 @@ public final class AuthenticodeVerifier {
             data.pUnion = info.getPointer();
             data.dwStateAction = WTD_STATEACTION_IGNORE;
             data.write();
-            int rc = WinTrust.INSTANCE.WinVerifyTrust(Pointer.NULL, VERIFY_V2, data);
+            int rc = lib.WinVerifyTrust(Pointer.NULL, verifyV2, data);
             long code = rc & 0xFFFFFFFFL;
             if (code == 0) return new Result(true, 0, "");
             return new Result(false, code, "HRESULT 0x" + Long.toHexString(code));
