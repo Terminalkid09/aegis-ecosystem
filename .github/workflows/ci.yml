@@ -1,4 +1,4 @@
-name: Aegis CI/CD Pipeline
+﻿name: Aegis CI/CD Pipeline
 
 on:
   push:
@@ -119,7 +119,7 @@ jobs:
         run: python scripts/replay_report.py --all
 
       - name: Setup Java
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06c3 # v4
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: 'temurin'
           java-version: '21'
@@ -223,7 +223,7 @@ jobs:
 
       # Build Java Guard
       - name: Setup Java
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: 'temurin'
           java-version: '21'
@@ -232,6 +232,13 @@ jobs:
         run: |
           cd aegis-guard
           mvn -B test
+      - name: Upload Guard surefire reports on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: guard-surefire
+          path: aegis-guard/target/surefire-reports/
+          if-no-files-found: warn
       - name: Audit Guard (Maven, fail on high)
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
@@ -307,10 +314,11 @@ jobs:
           AEGIS_API_KEY: ci-dummy-api-key
           AGENT_ENROLL_KEY: ci-dummy-enroll-key
           JWT_SECRET: ci-dummy-jwt-secret-32-chars-min
+          MASTER_KEY_B64: Q/wCZ5reU82bQpZppUc6Qq80sybBPz4Q276NbMBF97Q=
         run: |
           docker compose build aegis-brain aegis-guard aegis-link
           docker compose build aegis-frontend
-          # Caddy e Ollama sono immagini esterne pinnate per digest; le scansioniamo via fs già, ma per completezza
+          # Caddy e Ollama sono immagini esterne pinnate per digest; le scansioniamo via fs giÃ , ma per completezza
           docker pull caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 || true
           docker pull ollama/ollama:0.3.14@sha256:e1ce9edb7ccd60ef8b4d99fffe7afdc67edfd1f4d7c6028a4253e6efa82f7e60 || true
       - name: Trivy image scan (all images, fail on HIGH/CRITICAL)
@@ -356,7 +364,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Java
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: 'temurin'
           java-version: '21'
