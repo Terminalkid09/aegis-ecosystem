@@ -240,7 +240,9 @@ jobs:
               echo "::error::NVD_API_KEY is required for release dependency scanning"
               exit 1
             fi
-            echo "::warning::NVD_API_KEY not configured; Maven dependency-check skipped on branch builds"
+            # Audit F-06: skip esplicito e visibile (non silenzioso). Le dipendenze
+            # Java restano coperte dal Trivy FS scan (pom.xml, senza chiave).
+            echo "::notice::NVD_API_KEY not configured; OWASP Dependency-Check skipped on branch builds (Trivy covers pom.xml)"
             echo "Configure the protected NVD_API_KEY secret to enable the fail-on-high dependency scan."
             exit 0
           fi
