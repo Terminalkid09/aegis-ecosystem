@@ -303,6 +303,11 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 This project is designed for local security labs and development. Before production use:
 
 - Replace every default secret in `.env`.
+- Set `DEBUG=false` and `ALLOW_OPEN_REGISTRATION=false` (the brain refuses to
+  start otherwise); for enterprise also `ENTERPRISE_STRICT=true` with
+  `MTLS_MODE=required` (refused at startup if missing).
+- Keep playbook `script` actions disabled (`PLAYBOOK_SCRIPT_ENABLED=false`,
+  default) unless enterprise-approved: they execute shell on the server.
 - For production, use `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` to avoid exposing Postgres/Redis ports.
 - Replace Caddy `tls internal` with proper TLS certificates (Let's Encrypt).
 - Store JWTs in a safer browser session model than long-lived `localStorage` tokens.
@@ -318,6 +323,9 @@ Classification: **advanced prototype** (see `docs/os-validation/NOT-RUN.md` for 
 ```cmd
 REM Preflight host (Windows) / sh scripts/os-preflight.sh (Linux)
 powershell -ExecutionPolicy Bypass -File scripts/os-preflight.ps1
+
+REM Preflight tool di sviluppo (python/node/java/docker/porte)
+python scripts/dev_preflight.py
 
 REM Detection replay on 3 independent splits (training/validation/regression)
 python scripts/replay_report.py --all
