@@ -361,10 +361,9 @@ resource limits and scale-readiness (`--scale aegis-brain=2`).
 
 | Documento | Path |
 |-----------|------|
-| Guida moduli e test manuali | `docs/AEGIS_MODULE_GUIDE.md` |
-| Report completamento | `docs/AEGIS_BRAIN_COMPLETION_REPORT.md` |
-| Modifiche al codice | `docs/AEGIS_MODIFICHE_REPORT.md` |
-| Feature report | `docs/AEGIS_FEATURE_REPORT.md` |
-| Test report | `docs/AEGIS_TEST_REPORT.md` |
+| Operazioni (profili, segreti, PKI) | `docs/OPERATIONS.md` |
+| Runbook pilot e HA | `docs/PILOT_RUNBOOK.md`, `docs/HA.md` |
+| Validazione OS | `docs/os-validation/` |
+| Benchmark e modello minacce | `docs/BENCHMARK.md`, `docs/THREAT_MODEL.md` |
 | Setup aegis-brain | `aegis-brain/SETUP.md` |
 | Setup frontend | `frontend/README.md` |

@@ -97,6 +97,9 @@ logs/
 AEGIS_*_REPORT.md
 audit_report.json
 sbom.cyclonedx.json
+# Archivi di review/sessione (storia di lavoro, non documentazione):
+# restano in locale, mai nel repo.
+docs-private/
 docs/AEGIS_*_REPORT.md
 docs/TEST_REPORT.md
 docs/VALIDATION_REPORT.md
