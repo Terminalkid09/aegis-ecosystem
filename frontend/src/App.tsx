@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect } from 'react'
+import { Suspense, lazy, useEffect, Component, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAppStore } from '@/store/appStore'
 import { useLiveStats } from '@/hooks/useLiveStats'
@@ -36,7 +36,7 @@ function PageLoader() {
   return (
     <div className="flex items-center justify-center h-64 text-[hsl(var(--muted-foreground))]">
       <div className="flex items-center gap-2">
-        <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
         </svg>
@@ -44,6 +44,36 @@ function PageLoader() {
       </div>
     </div>
   )
+}
+
+// Audit schermo-nero: un widget che solleva non deve mai bucare l'intera
+// app. Fallback con retry invece di pagina nera.
+class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null }
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+  componentDidCatch(error: Error) {
+    console.error('[Aegis] page crashed, showing fallback:', error)
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center space-y-3">
+            <p className="text-red-400 text-sm">Questa vista ha riscontrato un errore.</p>
+            <button
+              className="btn btn-primary px-4 py-2 text-sm"
+              onClick={() => this.setState({ error: null })}
+            >
+              Riprova
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 function AppShell() {
@@ -85,7 +115,9 @@ function AppShell() {
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <Suspense fallback={<PageLoader />}>
-            {PAGE_MAP[currentPage] ?? <DashboardOverview />}
+            <PageErrorBoundary key={currentPage}>
+              {PAGE_MAP[currentPage] ?? <DashboardOverview />}
+            </PageErrorBoundary>
           </Suspense>
         </div>
       </main>

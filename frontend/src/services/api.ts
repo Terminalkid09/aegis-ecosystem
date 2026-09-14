@@ -29,6 +29,15 @@ export const statsAPI = {
 
 export const agentsAPI = statsAPI
 
+// ─── Health radice (audit: NON sotto /api/v1 — il brain espone /health/*
+// al root; prima si chiamava /api/v1/health/* = 404 silenzioso con strip
+// sempre "unknown"). Deriva l'origin togliendo il suffisso /api/v1.
+const API_ORIGIN = API_BASE_URL.replace(/\/api\/v1\/?$/, '') || window.location.origin
+export const healthAPI = {
+  live: () => axios.get(`${API_ORIGIN}/health/live`, { timeout: 10000 }),
+  ready: () => axios.get(`${API_ORIGIN}/health/ready`, { timeout: 10000 }),
+}
+
 // ─── Fleet M7: siti e stato ──────────────────────────────────────────────
 export const fleetAPI = {
   assignSite: (agentId: string, site: string) =>

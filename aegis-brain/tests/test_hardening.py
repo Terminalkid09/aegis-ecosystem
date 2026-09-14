@@ -141,3 +141,20 @@ async def test_rate_guard_redis_first_then_local():
         assert rg2.allow("a2") is False
     finally:
         rgmod._redis_client = orig
+
+
+def test_origin_loopback_equivalence(monkeypatch):
+    # Audit schermo-nero: 127.0.0.1 vs localhost a pari scheme/porta = ok;
+    # origini esterne e porte diverse restano 403.
+    import app.main as main_mod
+    monkeypatch.setattr(main_mod, "allowed_origins",
+                        ["https://aegis.local", "http://localhost:3000"])
+    ok = main_mod._origin_allowed
+    assert ok("http://localhost:3000") is True
+    assert ok("http://127.0.0.1:3000") is True
+    assert ok("http://[::1]:3000") is True
+    assert ok("https://aegis.local") is True
+    assert ok("http://evil.example") is False
+    assert ok("http://localhost:8000") is False
+    assert ok("https://localhost:3000") is False
+    assert ok("") is False

@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Monitor, Shield, Search, RefreshCw, Ban, CheckCircle2, AlertTriangle, Server } from 'lucide-react'
 import { statsAPI, fleetAPI, pkiAPI } from '@/services/api'
-import { cn, timeAgo } from '@/lib/utils'
+import { cn, timeAgo, asArray } from '@/lib/utils'
 
 const STATUS_STYLE: Record<string, string> = {
   online: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
@@ -19,7 +19,7 @@ export default function AgentsList() {
 
   const { data: agents = [], isLoading, refetch } = useQuery({
     queryKey: ['agents', siteFilter],
-    queryFn: () => statsAPI.getAgents(siteFilter ? { site: siteFilter } : {}).then(r => r.data || []),
+    queryFn: () => statsAPI.getAgents(siteFilter ? { site: siteFilter } : {}).then(r => asArray(r.data)),
     refetchInterval: 15000,
   })
 

@@ -36,7 +36,9 @@ test('pipeline strip shows five checks after self-service register+login', async
   await page.getByPlaceholder('admin@aegis.local').fill(email);
   await page.getByPlaceholder('••••••••').fill(password);
   await page.locator('form').getByRole('button', { name: 'Create Account' }).click();
-  // La striscia pipeline (da /health/ready) elenca i 5 check core.
+  // La striscia pipeline (da /health/ready) elenca i 5 check core CON stato
+  // reale (audit: i soli nomi compaiono anche a backend irraggiungibile).
+  await expect(page.getByText('database:healthy', { exact: false })).toBeVisible({ timeout: 20000 });
   for (const name of ['database', 'redis', 'pipeline', 'pki', 'mtls']) {
     await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 20000 });
   }

@@ -237,11 +237,42 @@ if "*" in allowed_origins and not settings.DEBUG:
 
 # Cookie-authenticated mutating requests must come from an explicitly allowed
 # browser origin. Bearer-authenticated agents are not subject to this check.
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _origin_allowed(origin: str) -> bool:
+    """Confronto origin tolerant ma sicuro (audit: localhost vs 127.0.0.1
+    sono lo stesso host ma stringhe diverse -> 403 spuri in locale).
+    Match esatto, oppure stesso (scheme, porta) con entrambi gli host loopback.
+    """
+    o = (origin or "").rstrip("/")
+    if o in allowed_origins:
+        return True
+    try:
+        from urllib.parse import urlparse
+        po = urlparse(o if "://" in o else "http://" + o)
+        for allowed in allowed_origins:
+            pa = urlparse(allowed)
+            if not pa.hostname:
+                continue
+            if (po.scheme or "http") != (pa.scheme or "http"):
+                continue
+            if (po.port or 80) != (pa.port or 80):
+                continue
+            if po.hostname == pa.hostname:
+                return True
+            if po.hostname in _LOOPBACK_HOSTS and pa.hostname in _LOOPBACK_HOSTS:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 @app.middleware("http")
 async def csrf_origin_middleware(request: Request, call_next):
     if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.cookies.get("aegis_token"):
         origin = request.headers.get("origin", "").rstrip("/")
-        if origin not in allowed_origins:
+        if not _origin_allowed(origin):
             return JSONResponse(status_code=403, content={"detail": "Invalid request origin"})
     return await call_next(request)
 

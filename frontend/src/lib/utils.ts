@@ -5,6 +5,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** Audit schermo-nero: normalizza risposte API a array. Accetta array,
+ *  {items: []}, null/undefined; qualsiasi altra forma -> []. */
+export function asArray<T = any>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[]
+  if (value && typeof value === 'object' && Array.isArray((value as any).items)) {
+    return (value as any).items as T[]
+  }
+  return []
+}
+
 export function formatBytes(bytes: number): string {
   if (!bytes) return 'n/a'
   if (bytes > 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`

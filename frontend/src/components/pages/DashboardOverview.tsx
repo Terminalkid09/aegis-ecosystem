@@ -7,9 +7,9 @@ import {
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
-import { statsAPI, incidentsAPI, apiClient } from '@/services/api'
+import { statsAPI, incidentsAPI, healthAPI } from '@/services/api'
 import { useAppStore } from '@/store/appStore'
-import { cn, formatDisk, timeAgo } from '@/lib/utils'
+import { cn, formatDisk, timeAgo, asArray } from '@/lib/utils'
 
 export default function DashboardOverview() {
   const { liveStats } = useAppStore()
@@ -22,19 +22,21 @@ export default function DashboardOverview() {
 
   const { data: telemetry = [] } = useQuery({
     queryKey: ['telemetry-recent'],
-    queryFn: () => statsAPI.getRecentTelemetry({ limit: 60 }).then(r => r.data || []),
+    // Audit schermo-nero: asArray, mai `|| []` (un oggetto truthy non-array
+    // crashava i .filter a valle).
+    queryFn: () => statsAPI.getRecentTelemetry({ limit: 60 }).then(r => asArray(r.data)),
     refetchInterval: 15000,
   })
 
   const { data: activity = [] } = useQuery({
     queryKey: ['activity'],
-    queryFn: () => statsAPI.getActivity({ limit: 15 }).then(r => r.data || []),
+    queryFn: () => statsAPI.getActivity({ limit: 15 }).then(r => asArray(r.data)),
     refetchInterval: 15000,
   })
 
   const { data: agents = [] } = useQuery({
     queryKey: ['agents-overview'],
-    queryFn: () => statsAPI.getAgents({ limit: 200 }).then(r => r.data || []),
+    queryFn: () => statsAPI.getAgents({ limit: 200 }).then(r => asArray(r.data)),
     refetchInterval: 30000,
   })
 
@@ -46,9 +48,9 @@ export default function DashboardOverview() {
 
   const { data: healthData } = useQuery({
     queryKey: ['pipeline-health'],
-    // Audit F4: /health/live e' solo prova di vita (niente checks);
-    // la striscia pipeline usa /health/ready che riporta tutti i check.
-    queryFn: () => apiClient.get('/health/ready').then(r => r.data).catch(() => null),
+    // Audit F4+E2E: /health/ready al root via healthAPI (l'URL /api/v1/...
+    // non esiste sul brain e dava 404 -> strip sempre "unknown").
+    queryFn: () => healthAPI.ready().then(r => r.data).catch(() => null),
     refetchInterval: 20000,
   })
 
