@@ -1,4 +1,4 @@
-﻿name: Aegis CI/CD Pipeline
+name: Aegis CI/CD Pipeline
 
 on:
   push:
@@ -316,14 +316,17 @@ jobs:
           JWT_SECRET: ci-dummy-jwt-secret-32-chars-min
           MASTER_KEY_B64: Q/wCZ5reU82bQpZppUc6Qq80sybBPz4Q276NbMBF97Q=
         run: |
-          docker compose build aegis-brain aegis-guard aegis-link
+          # Niente aegis-guard qui: e' un agente Windows, non un servizio
+          # compose (il suo Dockerfile non e' referenziato; le sue dipendenze
+          # sono coperte da Trivy FS su pom.xml + NVD sui tag).
+          docker compose build aegis-brain aegis-link
           docker compose build aegis-frontend
-          # Caddy e Ollama sono immagini esterne pinnate per digest; le scansioniamo via fs giÃ , ma per completezza
+          # Caddy e Ollama sono immagini esterne pinnate per digest; le scansioniamo via fs già, ma per completezza
           docker pull caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 || true
           docker pull ollama/ollama:0.3.14@sha256:e1ce9edb7ccd60ef8b4d99fffe7afdc67edfd1f4d7c6028a4253e6efa82f7e60 || true
       - name: Trivy image scan (all images, fail on HIGH/CRITICAL)
         run: |
-          for img in aegis-ecosystem-aegis-brain:latest aegis-ecosystem-aegis-guard:latest aegis-ecosystem-aegis-link:latest aegis-ecosystem-frontend:latest caddy:2-alpine ollama/ollama:0.3.14; do
+          for img in aegis-ecosystem-aegis-brain:latest aegis-ecosystem-aegis-link:latest aegis-ecosystem-frontend:latest caddy:2-alpine ollama/ollama:0.3.14; do
             echo "Scanning $img..."
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/scan aquasec/trivy:0.66.0 image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress --ignorefile /scan/.trivyignore "$img" || exit 1
           done
