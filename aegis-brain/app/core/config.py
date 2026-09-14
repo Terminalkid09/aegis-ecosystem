@@ -61,6 +61,9 @@ class Settings(BaseSettings):
 
     # Detection canary (M4 Fase 5): rule_id separati da virgola in log-only.
     RULE_CANARY_IDS: str = ""
+    # Audit F-02: azioni playbook "script" = shell sul server Brain.
+    # Default OFF: abilitarle solo in enterprise con approvazione documentata.
+    PLAYBOOK_SCRIPT_ENABLED: bool = False
 
     # Correlation windows (M5 Fase 6): finestre configurabili, mai hardcodate.
     CORR_BRUTEFORCE_THRESHOLD: int = 5
@@ -102,7 +105,9 @@ class Settings(BaseSettings):
     RETENTION_ALERTS_DAYS: int = 90
     RETENTION_AUDIT_DAYS: int = 365
     RETENTION_SYSLOG_DAYS: int = 30
-    RETENTION_ENABLED: bool = False
+    # Audit F-05: retention attiva di default (con guardie: backup verificato
+    # e audit mai auto-purgati in run_retention_purge). Disattivare solo in lab.
+    RETENTION_ENABLED: bool = True
 
     # Dedup event_id (Fase 4): TTL in Redis, fallback in memoria 20k.
     DEDUP_TTL_SECONDS: int = 86400
@@ -147,6 +152,15 @@ class Settings(BaseSettings):
                 value = getattr(self, name, None)
                 if value and any(marker in value.lower() for marker in insecure_markers):
                     raise ValueError(f"{name} contains an insecure placeholder")
+            # Audit F-01: registrazione self-service vietata fuori dal lab.
+            if self.ALLOW_OPEN_REGISTRATION:
+                raise ValueError("ALLOW_OPEN_REGISTRATION must be false in production")
+        # Audit F-01: vale anche col flag enterprise esplicito in lab.
+        if self.ENTERPRISE_STRICT and self.ALLOW_OPEN_REGISTRATION:
+            raise ValueError("ALLOW_OPEN_REGISTRATION must be false when ENTERPRISE_STRICT is true")
+        # Audit F-03: profili enterprise senza mTLS required non partono.
+        if self.ENTERPRISE_STRICT and (self.MTLS_MODE or "").lower() != "required":
+            raise ValueError("ENTERPRISE_STRICT requires MTLS_MODE=required")
         return self
 
 settings = Settings()

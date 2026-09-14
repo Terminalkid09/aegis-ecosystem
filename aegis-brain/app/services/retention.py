@@ -106,6 +106,17 @@ async def run_retention_purge(db: AsyncSession, confirmed: bool = False, backup_
             continue
         result = await db.execute(stmt)
         purged[table] = result.rowcount or 0
+    # Audit F-05: metriche volumi per allarmi capacita' (SOC).
+    try:
+        import time as _time
+        from app.core.metrics import inc, set_gauge, fmt_labels
+        set_gauge("aegis_retention_last_run_ts", _time.time())
+        for table, count in purged.items():
+            inc("aegis_retention_purged_total", count, fmt_labels(table=table))
+        for table, count in preview["counts"].items():
+            set_gauge("aegis_retention_pending_total", count, fmt_labels(table=table))
+    except Exception:
+        pass
     # Audit della purge (mai cancellare audit reali qui — solo log)
     try:
         await log_audit(db, action="retention_purge", resource="system", details={"cutoffs": {k: v.isoformat() for k, v in cutoffs.items()}, "purged": purged}, username="system")

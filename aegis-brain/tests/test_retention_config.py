@@ -19,3 +19,8 @@ def test_retention_values_are_positive():
         "RETENTION_SYSLOG_DAYS",
     ):
         assert Settings.model_fields[name].default > 0
+
+
+def test_retention_enabled_by_default():
+    # Audit F-05: purge attiva con guardie (backup verificato, audit esclusi).
+    assert Settings.model_fields["RETENTION_ENABLED"].default is True

@@ -252,7 +252,12 @@ async def _execute_action(
 
     elif action_type == "script":
         # DANGER: arbitrary shell on the BRAIN server. Gated at API layer
-        # (admin-only, see playbooks.py) + audit. Never allow for analyst/viewer.
+        # (admin-only + feature flag, see playbooks.py) AND here at execution
+        # (defense in depth: righe scritte prima del flag o a mano nel DB).
+        from app.core.config import settings as _settings
+        if not _settings.PLAYBOOK_SCRIPT_ENABLED:
+            logger.warning("Playbook 'script' blocked: PLAYBOOK_SCRIPT_ENABLED=false")
+            return {"status": "blocked", "output": "script actions disabled"}
         import subprocess
         try:
             result = subprocess.run(

@@ -71,8 +71,12 @@ async def create_playbook(data: PlaybookCreate, db: AsyncSession = Depends(get_d
     existing = await db.execute(select(Playbook).where(Playbook.name == data.name))
     if existing.scalars().first():
         raise HTTPException(status_code=400, detail="Playbook with this name already exists")
-    # `script` runs shell ON THE SERVER — admin only (analyst/viewer blocked).
+    # `script` runs shell ON THE SERVER — admin only (analyst/viewer blocked)
+    # + feature flag (audit F-02): default off, enterprise opt-in.
     if any((a.action_type or "").lower() == "script" for a in data.actions):
+        from app.core.config import settings as _settings
+        if not _settings.PLAYBOOK_SCRIPT_ENABLED:
+            raise HTTPException(status_code=403, detail="Playbook 'script' actions are disabled (PLAYBOOK_SCRIPT_ENABLED=false)")
         if (_user.role or "user").lower() != "admin":
             raise HTTPException(status_code=403, detail="Playbook 'script' actions require admin role")
     
