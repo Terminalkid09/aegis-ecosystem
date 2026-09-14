@@ -20,7 +20,10 @@ services:
     logging: *prod-logging
     environment:
       DEBUG: "false"
-      # Guard production P2.7: in prod MTLS_MODE=off è vietato — il brain
+      # Audit F-01: profilo prod chiude la registrazione (il brain rifiuta
+      # l'avvio altrimenti) e richiede mTLS via overlay dedicato.
+      ALLOW_OPEN_REGISTRATION: "false"
+      # Guard production P2.7: in prod MTLS_MODE=off è vietato - il brain
       # non parte (usare l'overlay mTLS per MTLS_MODE=required).
       ENTERPRISE_STRICT: "true"
 

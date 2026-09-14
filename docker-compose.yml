@@ -55,6 +55,9 @@ services:
     ports:
       - "127.0.0.1:${BRAIN_PORT_EXTERNAL:-8000}:8000"
     environment:
+      # Profilo lab: DEBUG=true (registrazione aperta permessa). La prod
+      # usa l'overlay prod (DEBUG=false + registrazione chiusa, fail-closed).
+      DEBUG: "true"
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@aegis-redis:6379
       REDIS_HOST: aegis-redis
