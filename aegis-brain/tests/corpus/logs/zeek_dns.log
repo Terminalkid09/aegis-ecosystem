@@ -1,0 +1,12 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	dns
+#open	2026-09-15-12-00-00
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	trans_id	query	qtype_name	rcode_name	answers
+#types	time	string	addr	port	addr	port	enum	count	string	enum	string	vector[string]
+1789473601.123456	D1a2b3c4d5e6f7	10.10.0.20	51234	8.8.8.8	53	udp	33001	secure-update.top	A	NOERROR	185.199.108.153
+1789473605.223456	D2b3c4d5e6f7a8	10.10.0.20	51235	8.8.8.8	53	udp	33002	cdn.example.com	A	NOERROR	93.184.216.34
+1789473609.323456	D3c4d5e6f7a8b9	10.10.0.31	51236	8.8.8.8	53	udp	33003	aaaabbbbccccddddeeeeffffgggghhhhiiiijjjjkkkkllll.attacker.net	A	NOERROR	-
+1789473615.423456	D4d5e6f7a8b9c0	10.10.0.20	51237	8.8.8.8	53	udp	33004	login.microsoftonline.com	A	NOERROR	20.190.160.14

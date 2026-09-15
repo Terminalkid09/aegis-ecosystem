@@ -117,6 +117,13 @@ aegis-brain/app/data/oui_cache.json
 *.db
 aegis-guard/install/windows/install_log.txt
 
+# Eccezione: i log di esempio dei parser SIEM sono fixture di test versionate
+# (sample di formato reale come li producono Zeek/Suricata/Windows, non output
+# di esecuzione). Vanno prima riammessi come directory, poi come contenuto:
+# senza la prima riga git non scende nella cartella esclusa da `logs/`.
+!aegis-brain/tests/corpus/logs/
+!aegis-brain/tests/corpus/logs/**
+
 # Docker / PID
 *.pid
 

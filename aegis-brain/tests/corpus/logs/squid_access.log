@@ -1,0 +1,4 @@
+1789473601.123    150 10.10.0.20 TCP_MISS/200 18432 GET http://cdn.example.com/app/vendor.js - HIER_DIRECT/93.184.216.34 application/javascript
+1789473603.223    220 10.10.0.31 TCP_DENIED/403 153 GET http://evil.example.com/payload.ps1 - HIER_NONE/- text/html
+1789473605.323     95 10.10.0.20 TCP_MISS/200 5120 GET https://login.microsoftonline.com/common/oauth2 - HIER_DIRECT/20.190.160.14 text/html
+1789473610.423   4500 10.10.0.20 TCP_MISS/200 9123456 GET http://api.example.com/v1/export - HIER_DIRECT/93.184.216.34 application/octet-stream
