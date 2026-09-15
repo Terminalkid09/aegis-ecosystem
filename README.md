@@ -93,7 +93,7 @@ build.bat
 
 ## Authentication Model
 
-- **Dashboard**: Bearer JWT after `POST /api/v1/auth/login` or register. Telemetry, rules, VaultX, OSINT (live), and AI require JWT.
+- **Dashboard**: Bearer JWT after `POST /api/v1/auth/login` or register. Telemetry, rules, VaultX, OSINT, AI, OCSF export and Aegis Total all require JWT.
 - **Agents**: enrollment key at registration, then per-agent Bearer token (NodeTrace) or gateway API key (Aegis-Link).
 - **Aegis-Link**: `X-Api-Key` for event ingestion — server-side only, not exposed to the React app.
 
@@ -149,7 +149,7 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 - **Network scan**: ARP + ICMP sweep + TCP connect scan — finds ALL devices on subnet, not just those with open ports
 - **MAC vendor lookup**: OUI database identifies device manufacturers (Samsung, Apple, Cisco, etc.)
 - **Agent status per IP**: `guard_status` and `nodetrace_status` columns show which agents are deployed/active on each host
-- **Auto-deploy**: One-click agent deployment via WinRM (Windows) or SSH (Linux) using credentials stored in VaultX with `#deploy-creds` tag
+- **Signed one-line enrollment**: `POST /api/v1/deploy/token` issues a short-lived token; the generated `install.ps1` / `install.sh` executes a signed one-liner on the target. Credential-based WinRM/SSH deployment was **removed**, not disabled (see `docs/OPERATIONS.md`).
 - **Synchronize agent status**: Button to sync DiscoveredHost agent states with live Agent table
 
 ### Detection Rules Engine
@@ -163,8 +163,8 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 - **Auto IP reputation**: OSINT results update the IP reputation database automatically
 
 ### Real-time Updates
-- **WebSocket push**: Dashboard receives live updates every 500ms via `/api/v1/ws/overview`
-- **Sub-second telemetry**: Guard agent pushes events as they happen via persistent WebSocket connection
+- **WebSocket overview**: `/api/v1/ws/overview` pushes a counters snapshot every **30s**. It authenticates with the `aegis_token` HttpOnly cookie — bearer tokens are never placed in the URL, since proxies log URLs.
+- **Telemetry transport**: agents push events over **HTTPS** (`POST /api/v1/telemetry/report` and `/report/batch`) with an encrypted local spool and bounded retry — **not** over a persistent WebSocket.
 - **Smooth charts**: Recharts AreaChart with Brush zoom, disabled animations for real-time data
 
 ### Demo Agent Tag
@@ -174,8 +174,8 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 - `?include_demo=true` query parameter to include them in API responses
 
 ### VaultX (Encrypted Notes)
-- Tag-based credential lookup: notes with `#deploy-creds` tag and target IP are auto-discovered by Deployment Center
-- Used for WinRM/SSH auto-deploy credentials
+- AES-256-GCM encrypted notes, decrypted only for authorized roles and audited
+- Generic secret storage (runbooks, tokens, recovery codes). Aegis never requests or stores remote-deploy credentials: deployment uses signed one-line enrollment.
 
 ### Agent Architecture
 - **NodeTrace (Python)**: Telemetry sensor — collects CPU/RAM/disk/network/processes/users/flows and reports to Aegis-Brain. Does NOT perform remediation. Polls commands for `GET_TELEMETRY` and `NETWORK_SCAN` only.
@@ -220,6 +220,18 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 - **Rule propagation**: MITRE fields from matched `CustomRule` are propagated to the resulting alert
 - **Dashboard badges**: Alerts display clickable technique IDs linking to MITRE ATT&CK reference pages
 
+### Aegis Total (Static Analyzer)
+- **No extension is rejected**: PE/.NET, ELF, Mach-O (incl. fat), Office OLE + OOXML (macro VBA, DDE, Excel 4.0, embedded MZ), PDF (/JavaScript, /OpenAction, /Launch, XFA, data after `%%EOF`), ZIP/tar/gzip/bzip2/xz (bounded recursion, zip-bomb caps), APK/JAR/Java class/WASM, RTF, LNK, SQLite/pcap and plain scripts.
+- **Every upload gets a real analysis**: files without a dedicated parser still get magic identification, entropy, string extraction and IOC/secret scanning — never a bare “binary, score 10”.
+- **Bounded by design**: per-entry size cap, total-uncompressed cap, nesting depth, member count and text-scan windows, so an adversarial archive cannot stall the worker.
+- **Retention**: binaries are never stored — only the sha256, findings and IOCs; reports are deletable (GDPR).
+- **Discovery**: `GET /api/v1/total/formats` returns the accepted-format catalog used by the UI.
+
+### OCSF Export (SIEM Interoperability)
+- **Standard schema**: alerts are exported as OCSF 1.4.0 **Detection Finding** (class 2004) and process telemetry as **Process Activity** (class 1007), with severity, MITRE ATT&CK `attacks[]`, device/process objects and `unmapped.aegis` for Aegis-specific fields.
+- **Ingestion-ready**: `GET /api/v1/ocsf/alerts` returns JSON or **NDJSON** (`?download=true`) for batch pipelines (Splunk, Elastic, Sentinel, AWS Security Lake).
+- **No custom parser needed**: `POST /api/v1/ocsf/convert` lets an external producer convert an Aegis event to OCSF without database access.
+
 ### Syslog Event Viewer
 - **Centralized storage**: Syslog events from Aegis-Link or external parsers stored in `SyslogEvent` table
 - **Rich query API**: Filter by severity, facility, hostname, app name with pagination
@@ -236,11 +248,12 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 - **Audit logging**: Bulk operations are recorded in the audit log
 
 ### Rate Limiting
-- **Per-endpoint limits**: `/auth/me` limited to 30 requests/minute per user via SlowAPI-compatible Redis limiter
-- **AI chat**: Per-user rate limit for AI chat endpoint (configurable via `AI_RATE_LIMIT_PER_MIN`)
+- **Global limiter**: SlowAPI limiter backed by Redis (`RATE_LIMIT_STORAGE_URI`). The client key is derived from `X-Forwarded-For` only when the request comes from a trusted proxy, otherwise it falls back to the socket peer address — a spoofed header cannot reset the budget.
+- **Per-endpoint limits**: `/auth/me` at 30 requests/minute; `/auth/login` and `/auth/register` are additionally throttled per account.
+- **AI chat**: Per-user rate limit (configurable via `AI_RATE_LIMIT_PER_MIN`).
 
 ### CI/CD Pipeline
-- **GitLab CI**: Automated lint (flake8 + ESLint), security audit (bandit), and test stages
+- **GitHub Actions**: lint (flake8 + ESLint), security audit (bandit + pip-audit), dependency/image scanning (Trivy), SBOM generation, secret scanning, and test stages.
 - **Test isolation**: Dedicated `aegis_test` PostgreSQL database for test runs — never touches production data
 
 ### Database Backup
@@ -276,10 +289,17 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 | `GET /api/v1/discovery/status` | Bearer JWT | Current scan status |
 | `POST /api/v1/discovery/scan` | Bearer JWT | Network scan (CIDR, ports, ARP + ICMP sweep) |
 | `GET /api/v1/discovery/hosts` | Bearer JWT | List discovered hosts (vendor, MAC, agent status) |
-| `POST /api/v1/discovery/deploy` | Bearer JWT | Auto-deploy agent via WinRM/SSH |
+| `POST /api/v1/discovery/deploy` | Bearer JWT (`deploy`) | Removed (HTTP 410): credential-based deploy. Use `POST /api/v1/deploy/token` |
+| `POST /api/v1/deploy/token` | Bearer JWT (`deploy`) | Issue a short-lived enrollment token for signed one-line install |
+| `GET /api/v1/total/formats` | Bearer JWT | Accepted file-format catalog for Aegis Total |
+| `POST /api/v1/rules/replay/import` | Bearer JWT | Score an external JSONL corpus (benign/suspicious/malformed) with the real engine |
+| `GET /api/v1/ocsf/alerts` | Bearer JWT | Alerts as OCSF 1.4.0 Detection Findings (JSON or NDJSON) |
+| `POST /api/v1/ocsf/convert` | Bearer JWT | Convert a single Aegis event to OCSF |
+| `GET /api/v1/ocsf/schema` | Bearer JWT | OCSF mapping description for integrators |
 | `POST /api/v1/discovery/sync-agent-status` | Bearer JWT | Sync agent deployment states |
 | `GET /api/v1/osint/ip/{ip}` | Bearer JWT | IP reputation lookup (VT, Shodan, AbuseIPDB) with cache |
-| `GET /api/v1/ws/overview` | Bearer JWT (query param) | WebSocket live dashboard updates |
+| `GET /api/v1/osint/domain/{domain}` | Bearer JWT | Domain reputation lookup with cache |
+| `GET /api/v1/ws/overview` | `aegis_token` HttpOnly cookie | WebSocket counters snapshot every 30s (no token in the URL) |
 | `POST /api/v1/ai/chat` | Bearer JWT | AI chat with prompt injection detection |
 | `GET /api/v1/ai/threads` | Bearer JWT | List AI conversation threads |
 | `DELETE /api/v1/ai/threads/{id}` | Bearer JWT | Delete AI thread |

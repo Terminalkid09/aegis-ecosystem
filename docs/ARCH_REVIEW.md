@@ -7,7 +7,7 @@ lo giustifichi per pilot ≤100 agent (vedi `docs/BENCHMARK.md`).
 ## Misure attuali (pilot 100 host)
 
 - Ingestione: **<10 ev/s** picco, 0.01 ev/s medio → single worker `uvicorn --workers 1` ok.
-- DB: **~150 MB** a 90gg (90k telemetry + 4.5k alert) → singolo PG 16-alpine ok.
+- DB: **~185 MB** a 90gg per 100 host (90k telemetry + alert, con indici e overhead PG; metodo in `docs/BENCHMARK.md`) → singolo PG 16-alpine ok.
 - Redis: code comandi + dedup + alert suppression (TTL 1h) → singolo Redis 7 ok.
 - Detection: replay **5–6k ev/s**, latenza **<0.1 ms** → in-process, no worker separato.
 - Correlazione: grouping e beacon in Redis, <1 ms per batch.

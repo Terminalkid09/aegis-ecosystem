@@ -1,5 +1,54 @@
 # Changelog — Aegis XDR
 
+## Unreleased — Hardening & feature (audit post-v3, pre-pilot)
+
+### Bug corretti
+- **SOAR runaway (P0)**: i playbook si rieseguivano ogni 60s su alert vecchi
+  (top-5 dell'agente), ripetendo `isolate_host`/`kill`/`eradicate` all'infinito.
+  Ora: esecuzione solo su alert **nuovi** + idempotency key `(playbook_id,
+  alert_id)` in Redis, fail-closed se lo store è giù. Cooldown per-agente
+  mantenuto come anti-burst esplicito.
+- **Batch ingestion**: una riga in errore lasciava la sessione in
+  pending-rollback e faceva fallire l'intero batch dell'agente. Aggiunto
+  `rollback()` per-evento + validazione età per evento.
+- **Aegis Total (formati)**: la UI prometteva formati che il backend rifiutava
+  o ignorava (`.pe`, Office, PDF, Mach-O, archivi). Ora ogni famiglia ha un
+  parser dedicato e nessuna estensione viene rifiutata.
+- **Elenchi di accettazione**: nuovi formati + endpoint `/total/formats`
+  (fonte unica di verità per la UI).
+
+### Sicurezza
+- **Rate limiter**: storage Redis (`RATE_LIMIT_STORAGE_URI`) e `key_func`
+  basata su `X-Forwarded-For` solo dietro proxy fidato (header spoofabile non
+  azzera più il budget).
+- **OSINT**: lookup live ora richiede JWT (era anonimo e innescava traffico
+  verso API esterne).
+- **Discovery**: RBAC `deploy` su scan/reputation/host-manual/sync/scan-via-agent;
+  scan di rete non più disponibile a un semplice viewer.
+- **Deploy**: rimossi fisicamente i percorsi con credenziali VaultX `#deploy-creds`
+  (WinRM/SSH); `/discovery/deploy` risponde 410, unico percorso = token firmato.
+- **Rules**: allowlist dei campi PATCH (mass-assignment) e cache di dizionari
+  serializzati (niente istanze ORM detached).
+- **CSP**: Content-Security-Policy aggiunta in Caddy sulla dashboard.
+- **Guard/Link**: validazione IP/dominio comandi agent, ack dei comandi e
+  logging del thread comandi; coda Redis FIFO.
+
+### Feature
+- **OCSF 1.4.0 export** (`/api/v1/ocsf/*`): alert → Detection Finding (2004),
+  telemetria → Process Activity (1007), JSON o NDJSON, con severità, ATT&CK
+  `attacks[]` e `unmapped.aegis`. Aggancio SIEM senza parser custom
+  (`app/services/ocsf.py`, `schema_description`, `/ocsf/convert`).
+- **Import corpus esterno** (`POST /rules/replay/import`): carica fino a 3
+  JSONL (benign/suspicious/malformed) e li scora col motore reale; `expect`
+  per riga alimenta il recall. Cap 32 MB / 50k righe.
+- **`docs/VALIDATION.md`**: stato di validazione riproducibile (cosa gira,
+  cosa è NOT-RUN, cosa manca per production-ready).
+
+### Test
+- Nuovi: `test_playbook_idempotency` (5), `test_ocsf` (8),
+  `test_total_formats` (9), `test_corpus_import` (6),
+  `MainCommandValidationTest` (5, Java). Tutte le suite verdi.
+
 ## Unreleased — Audit F1–F10 (dataset indipendenti, metriche, health, supply-chain, E2E)
 
 - Detection: split `training`/`validation`/`regression` indipendenti (`corpus-v2`),
