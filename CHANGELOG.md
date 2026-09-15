@@ -3,6 +3,25 @@
 ## Unreleased — Hardening & feature (audit post-v3, pre-pilot)
 
 ### Bug corretti
+- **Purge giornaliera mai eseguita (P0)**: `retention_scheduler` e la
+  riconciliazione revoche all'avvio importavano `async_session_factory`, che
+  **non esiste** (il nome reale è `AsyncSessionLocal`). L'errore finiva in un
+  `except` generico: nessun crash, nessun log, e la purge di telemetria,
+  alert, syslog e audit **non è mai partita**. Correggere l'import è una
+  riga; il costo era un database che cresce senza limite.
+- **Listener syslog non funzionante (P0)**: stesso import errato nel consumer,
+  quindi il listener si apriva sulla porta ma non ingeriva nulla. Ora è
+  verificato end-to-end (3 datagrammi UDP → 3 eventi normalizzati → 3 alert
+  Sigma con MITRE T1110.001).
+- **Retention SIEM non collegata**: `siem_store.purge_expired` era
+  implementato e mai chiamato; ora è nel job di retention (DROP delle
+  partizioni scadute, DELETE bounded se la tabella è piatta) e il preview
+  dichiara anche `siem_events`, che prima riportava 0.
+- **Task in background che muoiono in silenzio**: il consumer del listener
+  ora ha un done-callback che logga a livello error e marca il listener non
+  attivo, invece di lasciare "nessun evento arrivato, nessun log".
+- **`.gitignore` escludeva le fixture dei test** (`logs/`, `*.log`): i sample
+  dei parser non erano versionati, quindi i test passavano solo in locale.
 - **SOAR runaway (P0)**: i playbook si rieseguivano ogni 60s su alert vecchi
   (top-5 dell'agente), ripetendo `isolate_host`/`kill`/`eradicate` all'infinito.
   Ora: esecuzione solo su alert **nuovi** + idempotency key `(playbook_id,
@@ -78,9 +97,12 @@ invece di eseguirla a metà. Bundle di 14 regole reali (Windows Event, Linux
   `test_total_formats` (9), `test_corpus_import` (6),
   `test_ingest_parsers` (20), `test_sigma_engine` (34),
   `test_correlation_engine` (15), `test_siem_store` (11),
-  `test_siem_pipeline` (11), `tests/integration/test_siem_ingest` (25),
+  `test_siem_pipeline` (11), `test_syslog_listener` (8),
+  `tests/integration/test_siem_ingest` (25),
+  `tests/integration/test_syslog_listener` (3),
+  `tests/integration/test_retention_siem` (3),
   `MainCommandValidationTest` (5, Java).
-  Suite completa: brain **519 passed / 0 failed** (con PG+Redis reali),
+  Suite completa: brain **533 passed / 0 failed** (con PG+Redis reali),
   guard 123, link 17, NodeTrace 70, contratto eBPF ALL PASS.
 
 ## Unreleased — Audit F1–F10 (dataset indipendenti, metriche, health, supply-chain, E2E)

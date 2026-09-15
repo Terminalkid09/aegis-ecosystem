@@ -29,7 +29,7 @@ Tutte eseguite su host di sviluppo (Windows 11, Python 3.10, JDK 25),
 
 | Componente | Comando | Risultato |
 |---|---|---|
-| aegis-brain (con PG+Redis reali) | `pytest tests/` (con `REQUIRE_INTEGRATION=1`) | **519 passed, 0 failed** — gli skipped in questo profilo sono solo i test OS-specifici (non-Windows) |
+| aegis-brain (con PG+Redis reali) | `pytest tests/` (con `REQUIRE_INTEGRATION=1`) | **533 passed, 0 failed** — gli skipped in questo profilo sono solo i test OS-specifici (non-Windows) |
 | aegis-brain (senza integrazione) | `pytest tests/ --ignore=tests/integration` | **390 passed, 16 skipped** (skipped = richiedono PG/Redis reali) |
 | aegis-brain — SIEM v4 | `pytest tests/test_ingest_parsers.py tests/test_sigma_engine.py tests/test_correlation_engine.py tests/test_siem_store.py tests/test_siem_pipeline.py` | **VERDE** |
 | aegis-brain — API SIEM | `pytest tests/integration/test_siem_ingest.py` | **VERDE** |
@@ -64,7 +64,9 @@ nginx/Squid, Windows Firewall/pfSense/iptables); il **motore Sigma** su
 modificatori, condizioni (`and/or/not`, `1 of them`), mapping di campo ed
 esclusione esplicita delle feature non supportate; la **correlazione** su
 threshold e sequenza; lo **store** su filtro/testo/dedup/ordinamento; la
-**pipeline** su evento → detection → alert.
+**pipeline** su evento → detection → alert; il **listener syslog** su
+datagrammi UDP e righe TCP reali, dalla porta allo store; la **retention**
+SIEM su eventi scaduti e recenti.
 
 **Non** coperto dalle unit test: comportamento reale su kernel senza BTF,
 firewall Windows/Linux sotto carico, outbound bloccato da proxy aziendali,
@@ -114,7 +116,9 @@ log convertiti da EVTX/Auditd, dataset di ricerca con licenza compatibile.
 | Correlazione threshold + sequence | **VERDE** | `tests/test_correlation_engine.py` |
 | Store eventi + query/stats + dedup | **VERDE** | `tests/test_siem_store.py` |
 | Pipeline ingest → detection → alert | **VERDE** | `tests/test_siem_pipeline.py` |
-| API ingest/search end-to-end | **VERDE** | `tests/integration/test_siem_ingest.py` |
+| API ingest/search end-to-end | **VERDE** | `tests/integration/test_siem_ingest.py` (25 test) |
+| **Listener syslog** (UDP + TCP) | **VERDE** | `test_syslog_listener.py` (8) + `tests/integration/test_syslog_listener.py` (3): datagrammi reali sullo store, non chiamate interne |
+| Retention degli eventi SIEM | **VERDE** | `tests/integration/test_retention_siem.py` (3) |
 | **Log reali dal tuo host** | **NOT-RUN** | collector `scripts/winevent-collector.ps1` pronto: l'output misura la qualità sui *tuoi* Event Log |
 | Log reali da Zeek/Suricata/syslog esterni | **NON DISPONIBILE in lab** | i parser sono validati su sample di formato reale; la sorgente non esiste in questo lab |
 
@@ -161,6 +165,23 @@ regola Sigma e tecnica MITRE valorizzata (es. `T1543.003`, `T1070.001`,
 
 Questa è l'unica parte della validazione eseguita **end-to-end su servizi
 reali**; i sample sono sintetici (dichiarato), l'infrastruttura no.
+
+### Listener syslog — prova su datagrammi reali
+
+Eseguita il 2026-09-15 con il brain avviato con `SYSLOG_ENABLED=true`
+(`SYSLOG_BIND=127.0.0.1`, porta 5599) e tre datagrammi UDP inviati da socket:
+
+```
+Syslog listener attivo su 127.0.0.1:5599 (udp+tcp)
+  → 3 eventi normalizzati (RFC 5424: hostname=fw-test, user=admin, src_ip, event_type=auth_failure)
+  → 3 alert [SIGMA 4a8e2c31-…] SSH Authentication Failure, MITRE T1110.001
+GET /ingest/sources → syslog: eventi=3, non_riconosciuti=0, ultimo_evento valorizzato
+```
+
+Questa prova ha valore aggiunto: è il test che ha smascherato un import errato
+che rendeva il listener **non funzionante** pur risultando "in ascolto" (vedi
+CHANGELOG). Un listener che apre la porta e non ingerisce è esattamente il
+tipo di guasto che una demo senza verifica non rileva.
 
 ## 5. Cosa manca per "production-ready"
 

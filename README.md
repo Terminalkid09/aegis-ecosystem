@@ -236,7 +236,7 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 - **One pipeline for every source**: pushes land on `POST /api/v1/ingest/{source}` and are parsed, normalized and pushed through the *same* detection → alert → SOAR chain used by agents. An alert raised by a log source can trigger a playbook — it is one product, not two.
 - **Parser registry with auto-detection**: `syslog` (RFC 3164 + RFC 5424), generic JSON/NDJSON, **Windows Event Log** (`4624/4625/4688/4697/4720/7045/1102`…), **Zeek** (`conn/dns/http/ssl`), **Suricata** `eve.json`, web proxy (nginx/Squid/Apache), firewall (Windows Firewall, pfSense `filterlog`, iptables). `parser: auto` picks one from the payload shape; `GET /api/v1/ingest/catalog` is the single source of truth for the UI.
 - **Unified event model**: every source maps to one OCSF-aligned schema (time, severity, host/user, network 5-tuple, process, file, DNS/HTTP) — no per-source consumer.
-- **Real syslog listener**: optional UDP **and** TCP listener (`SYSLOG_ENABLED`, default off, bound to `127.0.0.1` unless `SYSLOG_BIND` is explicitly widened) so an rsyslog/firewall can point straight at the brain.
+- **Real syslog listener**: optional UDP **and** TCP listener (`SYSLOG_ENABLED`, default off, bound to `127.0.0.1` unless `SYSLOG_BIND` is explicitly widened) so an rsyslog/firewall can point straight at the brain. Verified end-to-end on real datagrams, with a bounded queue so a syslog storm is counted and dropped rather than accumulated.
 - **Sub-second visibility**: `GET /api/v1/ingest/sources` exposes each source's health (last event, unparsed count, last error) — a silent source is visible, not invisible.
 
 ### SIEM — Sigma Rule Engine
