@@ -87,6 +87,12 @@ def _proc_str(entry: Any, *keys: str, default: str = "unknown") -> str:
 
 
 async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any]):
+    # Audit L1: solo gli alert creati DA QUESTO evento alimentano i playbook.
+    # Prima si ripescavano i 5 alert più recenti dell'agente a ogni telemetria:
+    # un alert non risolto ri-attivava il playbook ogni 60s (cooldown scaduto),
+    # rieseguendo contenimento (kill/isolate) su un incidente già gestito.
+    created_alerts: List[Alert] = []
+
     # 1. Store raw telemetry (bounded: vedi _bound_telemetry_data)
     data = _bound_telemetry_data(data)
     telemetry = Telemetry(
@@ -207,6 +213,7 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
             logger.debug(f"Anomaly alert suppressed (cooldown): {anomaly['metric']} on {top_proc}")
         else:
             db.add(alert)
+            created_alerts.append(alert)
 
     # 3. Custom Rule Matching
     try:
@@ -255,6 +262,7 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                             mitre_technique_name=rule.mitre_technique,
                         )
                         db.add(alert)
+                        created_alerts.append(alert)
                         logger.info(f"Custom rule '{rule.name}' triggered for agent {agent_id} on process '{proc_name}'")
                         break  # one alert per rule per telemetry batch
 
@@ -375,6 +383,7 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                             mitre_technique_name=best_res.mitre_technique,
                         )
                         db.add(alert)
+                        created_alerts.append(alert)
                         logger.warning(f"THREAT DETECTED on {agent_id}: {alert.description} | evidence={evidence}")
         except Exception as e:
             logger.error("Failed to process static rules for event: %s", str(e))
@@ -415,6 +424,7 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                 mitre_technique_name=technique_name,
             )
             db.add(alert)
+            created_alerts.append(alert)
             logger.warning("BEHAVIORAL_TAG alert: %s | agent=%s | tag=%s", data.get('process_name'), agent_id, tag)
 
     for anomaly_str in agent_anomalies:
@@ -437,20 +447,22 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                 mitre_technique_name=technique_name,
             )
             db.add(alert)
+            created_alerts.append(alert)
             logger.warning("NODETRACE_ANOMALY alert: agent=%s | %s", agent_id, anomaly_str)
 
     await db.commit()
 
-    # Trigger SOAR playbooks on newly created alerts (best-effort)
-    try:
-        from app.services.playbook_engine import check_and_execute_playbooks
-        alert_result = await db.execute(
-            select(Alert).where(Alert.agent_id == agent_id).order_by(Alert.timestamp.desc()).limit(5)
-        )
-        for alert in alert_result.scalars().all():
-            await check_and_execute_playbooks(db, alert)
-    except Exception:
-        logger.exception("SOAR playbook execution failed")
+    # Trigger SOAR playbooks SOLO sugli alert creati da questo evento
+    # (best-effort). L'idempotenza per alert è nel motore playbook: anche se
+    # lo stesso alert tornasse qui, non ri-esegue le azioni.
+    if created_alerts:
+        try:
+            from app.services.playbook_engine import check_and_execute_playbooks
+            await db.flush()  # PK disponibili per l'idempotency key
+            for alert in created_alerts:
+                await check_and_execute_playbooks(db, alert)
+        except Exception:
+            logger.exception("SOAR playbook execution failed")
 
     # Arricchimento (OSINT + AI) FUORI dal request path: qui siamo nel mezzo
     # di un POST /telemetry/report e ogni enrich fa HTTP esterne + LLM

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
-from app.core.deps import get_optional_user, get_current_user
+from app.core.deps import get_current_user
 from app.services import osint_service
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -18,14 +18,15 @@ class BatchLookupRequest(BaseModel):
     ips: List[str]
 
 @router.get("/ip/{ip_address}")
-async def ip_lookup(ip_address: str, force: bool = False, db: AsyncSession = Depends(get_db), user=Depends(get_optional_user)):
+async def ip_lookup(ip_address: str, force: bool = False, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    # Audit S2: l'endpoint era anonimo e, con IP non in cache, eseguiva la
+    # chiamata REALE ai provider (VT/Shodan/AbuseIPDB): quota consumabile da
+    # chiunque e uso della piattaforma come probe gratuito. Ora serve un
+    # utente autenticato (il risultato in cache era già pubblico).
     try:
         ipaddress.ip_address(ip_address)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid IP address format")
-
-    if force and not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required for live OSINT scans")
 
     if not force:
         cached = await osint_service.get_cached_result(db, "ip", ip_address)
@@ -36,13 +37,11 @@ async def ip_lookup(ip_address: str, force: bool = False, db: AsyncSession = Dep
     return {"cached": False, "data": data}
 
 @router.get("/domain/{domain}")
-async def domain_lookup(domain: str, force: bool = False, db: AsyncSession = Depends(get_db), user=Depends(get_optional_user)):
+async def domain_lookup(domain: str, force: bool = False, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    # Audit S2: come /ip — nessuna enrichment live per anonimi.
     domain_regex = re.compile(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
     if not domain_regex.match(domain):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid domain format")
-
-    if force and not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required for live OSINT scans")
 
     if not force:
         cached = await osint_service.get_cached_result(db, "domain", domain)

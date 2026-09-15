@@ -27,7 +27,14 @@ aegis.local {
 		reverse_proxy aegis-brain:8000
 	}
 
+	# Audit S5: la dashboard era servita SENZA Content-Security-Policy (i CSP
+	# settati in aegis-brain/main.py coprono solo /api/*). Con azioni SOC a un
+	# click una XSS nella UI e' la superficie che conta: qui si blinda il
+	# frontend. `connect-src` include ws/wss per il feed live /api/v1/ws/*.
 	handle {
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+		}
 		reverse_proxy aegis-frontend:3000
 	}
 }

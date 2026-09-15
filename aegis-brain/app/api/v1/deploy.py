@@ -43,6 +43,20 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+# Audit S4: PIN/token di approvazione legati a una chiave server e al contesto.
+# Un PIN di 6 cifre hashato con sha256 nudo si brute-forza offline in
+# millisecondi leggendo il DB; con HMAC keyed serve la chiave server, e il
+# binding su (tipo, job, IP) impedisce il riuso su un altro target.
+_APPROVAL_HMAC_KEY = hashlib.sha256(
+    (settings.JWT_SECRET or "aegis-approval-dev-only").encode()
+).digest()
+
+
+def _approval_mac(kind: str, job_id: int, ip_address: str, value: str) -> str:
+    message = f"{kind}:{job_id}:{ip_address}:{value}".encode()
+    return hmac.new(_APPROVAL_HMAC_KEY, message, hashlib.sha256).hexdigest()
+
+
 def _validate_targets(targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     clean: List[Dict[str, Any]] = []
     for t in targets[:100]:  # mass-deploy cap like CrowdStrike static groups
@@ -608,8 +622,8 @@ async def request_interactive_approval(
     approval_token = secrets.token_urlsafe(32)
     entry.update({
         "status": "waiting_approval",
-        "approval_pin_hash": hashlib.sha256(payload.pin.encode()).hexdigest(),
-        "approval_token_hash": hashlib.sha256(approval_token.encode()).hexdigest(),
+        "approval_pin_hash": _approval_mac("pin", job.id, payload.ip_address, payload.pin),
+        "approval_token_hash": _approval_mac("token", job.id, payload.ip_address, approval_token),
         "approval_attempts": 0,
         "log": "Waiting for the remote user to enter the approval PIN on the target device."
     })
@@ -642,7 +656,7 @@ async def approve_job_remotely(
         raise HTTPException(status_code=400, detail="Job not waiting for approval")
     
     token_ok = bool(x_approval_token) and hmac.compare_digest(
-        hashlib.sha256(x_approval_token.encode()).hexdigest(),
+        _approval_mac("token", job.id, payload.ip_address, x_approval_token),
         entry.get("approval_token_hash", ""),
     )
     user_ok = bool(user and (user.role or "user").lower() in {"admin", "analyst"})
@@ -650,7 +664,7 @@ async def approve_job_remotely(
         raise HTTPException(status_code=401, detail="Approval authentication required")
 
     pin_ok = hmac.compare_digest(
-        hashlib.sha256(payload.pin.encode()).hexdigest(),
+        _approval_mac("pin", job.id, payload.ip_address, payload.pin),
         entry.get("approval_pin_hash", ""),
     )
     if not pin_ok:

@@ -105,14 +105,37 @@ async def check_and_execute_playbooks(
             execution.completed_at = datetime.now(timezone.utc)
             continue
 
-        # Rate limiting: cooldown per playbook per agent (60 seconds)
-        cooldown_key = f"playbook:cooldown:{playbook.id}:{alert.agent_id}"
-        is_cooling_down = await rc.get(cooldown_key)
-        if is_cooling_down:
-            logger.info(f"Playbook {playbook.id} for agent {alert.agent_id} is in cooldown. Skipping.")
+        # Idempotenza per (playbook, alert) — Audit L1.
+        # Prima c'era solo un cooldown per-agente di 60s: lo stesso alert non
+        # risolto ri-attivava il playbook a ogni ciclo di telemetria una volta
+        # scaduto il cooldown, rieseguendo contenimento (kill/isolate/eradicate)
+        # su un incidente già gestito. Ora le azioni si eseguono UNA volta per
+        # alert, entro una finestra configurabile.
+        idem_key = f"playbook:exec:{playbook.id}:{alert.id}"
+        try:
+            claimed = await rc.set(idem_key, "1", ex=settings.PLAYBOOK_IDEMPOTENCY_TTL_S, nx=True)
+        except Exception as exc:
+            # Fail-closed sull'automazione: meglio zero esecuzioni che
+            # contenimento ripetuto su un host di produzione.
+            logger.error("Playbook %s: idempotency store unavailable (%s), skip", playbook.id, exc)
+            continue
+        if not claimed:
+            logger.info("Playbook %s già eseguito per alert %s — skip (idempotente)",
+                        playbook.id, alert.id)
             continue
 
-        await rc.setex(cooldown_key, 60, "1")
+        # Cooldown per-agente: anti-burst quando arrivano più alert NUOVI
+        # insieme (non è più la difesa contro le riesecuzioni).
+        cooldown_key = f"playbook:cooldown:{playbook.id}:{alert.agent_id}"
+        try:
+            if await rc.get(cooldown_key):
+                logger.info(f"Playbook {playbook.id} for agent {alert.agent_id} is in cooldown. Skipping.")
+                continue
+            await rc.setex(cooldown_key, 60, "1")
+        except Exception:
+            # Cooldown non disponibile: l'idempotenza sopra resta la garanzia
+            # forte, quindi si procede (fail-open qui, fail-closed là).
+            pass
 
         execution = PlaybookExecution(
             playbook_id=playbook.id,

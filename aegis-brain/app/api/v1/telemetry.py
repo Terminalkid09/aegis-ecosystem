@@ -11,12 +11,14 @@ from app.api.schemas.common import AlertResponse, AgentResponse, StatsResponse, 
 from app.services import telemetry_service
 from app.services import event_dedup
 from app.core.audit import log_audit
+from app.core.logging import get_logger
 from app.core.metrics import inc, observe_hist, set_gauge
 from app.core.rate_guard import ingest_rate_guard
 from app.core.redaction import sanitize_event
 from pydantic import BaseModel, Field
 
 router = APIRouter(tags=["Telemetry"])
+logger = get_logger(__name__)
 
 class ResolveRequest(BaseModel):
     resolved: bool = True
@@ -418,7 +420,14 @@ async def agent_report_batch(
         if str(agent.agent_id) != item.agent_id:
             rejected += 1
             continue
-        validate_age_header(request, item.timestamp)
+        # Audit L7: la validazione di `Age` è per-evento e non può abortire
+        # l'intero batch (prima un solo evento stale scartava i 99 sani dopo).
+        try:
+            validate_age_header(request, item.timestamp)
+        except HTTPException:
+            rejected += 1
+            inc("aegis_events_dropped_total", 1, f'reason="stale_event",agent="{agent.agent_id}"')
+            continue
         event_dedup.SEQ.observe(item.agent_id, item.boot_id, item.seq)
         if await event_dedup.is_duplicate(item.agent_id, item.event_id):
             duplicates += 1
@@ -427,9 +436,17 @@ async def agent_report_batch(
         try:
             await telemetry_service.process_telemetry(db, agent.agent_id, sanitize_event(item.model_dump()))
             accepted += 1
-        except Exception as e:
+        except Exception as exc:
             rejected += 1
             inc("aegis_agent_errors_total", 1, f'agent="{agent.agent_id}",error="process_telemetry"')
+            # Audit L2: senza rollback la sessione resta pending-rollback e
+            # TUTTI gli eventi successivi del batch fallivano: un solo evento
+            # rotto ne scartava fino a 99 sani.
+            try:
+                await db.rollback()
+            except Exception:
+                logger.exception("Rollback fallito durante l'ingestion batch")
+            logger.warning("Evento scartato nel batch (agent=%s): %s", agent.agent_id, exc)
     set_gauge("aegis_queue_depth", accepted, f'agent="{agent.agent_id}",stage="ingest"')
     return {"status": "ok", "accepted": accepted, "rejected": rejected, "duplicates": duplicates}
 

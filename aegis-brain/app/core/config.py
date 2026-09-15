@@ -59,6 +59,19 @@ class Settings(BaseSettings):
     # False = POST /auth/register richiede JWT admin (niente self-service).
     ALLOW_OPEN_REGISTRATION: bool = True
 
+    # Automazione SOAR idempotente (audit L1): un playbook esegue le sue azioni
+    # una sola volta per (playbook, alert) entro questa finestra. Evita che un
+    # alert non risolto ri-attivi contenimento (kill/isolate) ogni minuto.
+    PLAYBOOK_IDEMPOTENCY_TTL_S: int = 86400
+
+    # Rate limiting (audit S1). Lo storage in memoria vale solo per il singolo
+    # processo uvicorn: in pilot/HA va puntato a Redis (es. redis://...).
+    RATE_LIMIT_STORAGE_URI: Optional[str] = None
+    # Dietro reverse proxy (Caddy) request.client.host è SEMPRE l'IP del proxy:
+    # senza questo flag tutti i limiti per-IP collassano in un bucket unico
+    # condiviso da tutti gli utenti. Attivare solo se l'ingress è il nostro proxy.
+    RATE_LIMIT_TRUST_FORWARDED_FOR: bool = False
+
     # Detection canary (M4 Fase 5): rule_id separati da virgola in log-only.
     RULE_CANARY_IDS: str = ""
     # Audit F-02: azioni playbook "script" = shell sul server Brain.

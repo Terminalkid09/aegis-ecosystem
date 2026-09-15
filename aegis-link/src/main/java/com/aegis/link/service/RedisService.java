@@ -40,7 +40,10 @@ public class RedisService {
     public String popCommand(String agentId) {
         String queueKey = "aegis:commands:" + agentId;
         try {
-            return redisTemplate.opsForList().rightPop(queueKey);
+            // Audit L6: FIFO coerente col brain (RPUSH + LPOP). Prima era
+            // rightPop -> LIFO: gli agenti serviti da link avrebbero eseguito
+            // i comandi in ordine inverso (kill dopo quarantine, ecc.).
+            return redisTemplate.opsForList().leftPop(queueKey);
         } catch (Exception e) {
             log.error("Failed to pop command from Redis for agent={}: {}", agentId, e.getMessage());
             return null;

@@ -131,7 +131,13 @@ public class Main {
                 try {
                     boolean more = pollCommandsOnce(client, finalAgentId);
                     Thread.sleep(more ? 200 : COMMAND_POLL_INTERVAL_SEC * 1000);
-                } catch (Exception e) {}
+                } catch (Exception e) {
+                    // Audit L8: il catch vuoto rendeva invisibile un brain
+                    // irraggiungibile e faceva girare il loop a vuoto
+                    // (busy-loop, CPU + log flood altrove).
+                    log.warn("Command poll loop error: {}", e.getMessage());
+                    try { Thread.sleep(2000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                }
             }
         }, "commands").start();
 
@@ -259,9 +265,35 @@ public class Main {
     //  KILL_PROCESS
     // ----------------------------------------------------------------
 
+    /**
+     * IP letterale valido (v4/v6). Audit L8: senza questo controllo qualunque
+     * stringa finiva in `netsh`/`iptables` — compreso `any`, che blocca tutto,
+     * o un valore iniettato che altera la regola di firewall.
+     */
+    static boolean isIpLiteral(String value) {
+        if (value == null) return false;
+        String candidate = value.trim();
+        if (candidate.isEmpty() || candidate.length() > 45) return false;
+        if (candidate.contains(":")) {
+            return candidate.matches("[0-9a-fA-F:]{2,45}");
+        }
+        String[] octets = candidate.split("\\.", -1);
+        if (octets.length != 4) return false;
+        for (String octet : octets) {
+            if (octet.isEmpty() || octet.length() > 3) return false;
+            for (int i = 0; i < octet.length(); i++) {
+                if (!Character.isDigit(octet.charAt(i))) return false;
+            }
+            if (Integer.parseInt(octet) > 255) return false;
+        }
+        return true;
+    }
+
     private static void handleKillProcess(JsonObject cmd) {
         long pid = getPid(cmd);
-        if (pid == 0) { log.warn("[MITIGATION] KILL_PROCESS: no PID provided"); return; }
+        // Audit L8: prima un no-op usciva silenziosamente e il comando veniva
+        // ack-ato "ok" al SOC (falso positivo di azione applicata).
+        if (pid == 0) { throw new IllegalArgumentException("KILL_PROCESS: no PID provided"); }
         Optional<ProcessHandle> ph = ProcessHandle.of(pid);
         ph.ifPresent(ProcessHandle::destroyForcibly);
         log.info("[MITIGATION] KILL_PROCESS: PID {} terminated", pid);
@@ -273,7 +305,7 @@ public class Main {
 
     private static void handleKillProcessTree(JsonObject cmd) {
         long pid = getPid(cmd);
-        if (pid == 0) { log.warn("[MITIGATION] KILL_PROCESS_TREE: no PID provided"); return; }
+        if (pid == 0) { throw new IllegalArgumentException("KILL_PROCESS_TREE: no PID provided"); }
 
         if (isWindows()) {
             exec("taskkill", "/F", "/T", "/PID", String.valueOf(pid));
@@ -296,8 +328,19 @@ public class Main {
     // ----------------------------------------------------------------
 
     private static void handleBlockIp(JsonObject cmd, boolean temporal, int durationSeconds) {
-        String ip = cmd.has("ip") ? cmd.get("ip").getAsString() : null;
-        if (ip == null) { log.warn("[MITIGATION] BLOCK_IP: no IP provided"); return; }
+        String ipRaw = cmd.has("ip") ? cmd.get("ip").getAsString() : null;
+        if (ipRaw == null) { throw new IllegalArgumentException("BLOCK_IP: no IP provided"); }
+        final String ip = ipRaw.trim();
+        if (!isIpLiteral(ip)) {
+            throw new IllegalArgumentException("BLOCK_IP: invalid IP literal '" + ip + "'");
+        }
+        // Non ci si taglia il ramo su cui si e' seduti: il brain deve restare
+        // raggiungibile, altrimenti l'endpoint esce dal SOC.
+        String brainHost = com.aegis.guard.utils.IsolationManager.extractBrainHost(
+                com.aegis.guard.utils.Config.BRAIN_URL);
+        if (!brainHost.isEmpty() && brainHost.equals(ip)) {
+            throw new SecurityException("BLOCK_IP refused: target is the Aegis server (" + brainHost + ")");
+        }
 
         if (isWindows()) {
             String ruleName = "Aegis_Block_" + ip.replace('.', '_');
@@ -331,18 +374,16 @@ public class Main {
 
     private static void handleQuarantineBinary(JsonObject cmd) {
         long pid = getPid(cmd);
-        if (pid == 0) { log.warn("[MITIGATION] QUARANTINE_BINARY: no PID provided"); return; }
+        if (pid == 0) { throw new IllegalArgumentException("QUARANTINE_BINARY: no PID provided"); }
 
         String exePath = getProcessPath(pid);
         if (exePath == null) {
-            log.warn("[MITIGATION] QUARANTINE_BINARY: could not locate binary for PID {}", pid);
-            return;
+            throw new IllegalArgumentException("QUARANTINE_BINARY: could not locate binary for PID " + pid);
         }
 
         Path src = Paths.get(exePath);
         if (!Files.exists(src)) {
-            log.warn("[MITIGATION] QUARANTINE_BINARY: binary not found at {}", exePath);
-            return;
+            throw new IllegalArgumentException("QUARANTINE_BINARY: binary not found at " + exePath);
         }
 
         try {
@@ -401,8 +442,7 @@ public class Main {
     private static void handleRemovePersistence(JsonObject cmd) {
         String processName = getProcessName(cmd);
         if (processName.isEmpty() || "unknown".equals(processName)) {
-            log.warn("[MITIGATION] REMOVE_PERSISTENCE: no process_name provided");
-            return;
+            throw new IllegalArgumentException("REMOVE_PERSISTENCE: no process_name provided");
         }
 
         List<String> removed = new ArrayList<>();
@@ -524,9 +564,25 @@ public class Main {
     //  DNS_SINKHOLE
     // ----------------------------------------------------------------
 
+    /**
+     * Dominio DNS valido, senza spazi/newline. Audit L8: senza questo controllo
+     * un valore come `evil.com\n0.0.0.0 mybank.com` iniettava righe arbitrarie
+     * nel file hosts del'endpoint.
+     */
+    private static final java.util.regex.Pattern DOMAIN_RE = java.util.regex.Pattern.compile(
+            "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$");
+
+    static boolean isDomainName(String value) {
+        return value != null && value.length() <= 253 && DOMAIN_RE.matcher(value.trim()).matches();
+    }
+
     private static void handleDnsSinkhole(JsonObject cmd) {
         String domain = cmd.has("domain") ? cmd.get("domain").getAsString() : null;
-        if (domain == null) { log.warn("[MITIGATION] DNS_SINKHOLE: no domain provided"); return; }
+        if (domain == null) { throw new IllegalArgumentException("DNS_SINKHOLE: no domain provided"); }
+        domain = domain.trim().toLowerCase();
+        if (!isDomainName(domain)) {
+            throw new IllegalArgumentException("DNS_SINKHOLE: invalid domain '" + domain + "'");
+        }
 
         String hostsPath = isWindows()
             ? System.getenv("SystemRoot") + "\\System32\\drivers\\etc\\hosts"
@@ -721,7 +777,7 @@ public class Main {
 
     private static void handleVerify(JsonObject cmd) {
         long pid = getPid(cmd);
-        if (pid == 0) { log.warn("[MITIGATION] VERIFY: no PID provided"); return; }
+        if (pid == 0) { throw new IllegalArgumentException("VERIFY: no PID provided"); }
         boolean alive = ProcessHandle.of(pid).isPresent();
         log.info("[MITIGATION] VERIFY: PID {} {}", pid, alive ? "ALIVE" : "DEAD");
     }
