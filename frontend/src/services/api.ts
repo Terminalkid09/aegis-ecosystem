@@ -109,6 +109,9 @@ export const osintAPI = {
 // ─── Aegis Total ─────────────────────────────────────────────────────────────
 export const totalAPI = {
   getDisclaimer: () => apiClient.get('/total/disclaimer'),
+  // Audit 2026-09: la UI prometteva formati non supportati e rifiutava .pe /
+  // archivi. Ora la lista accettata è letta dal backend (unica fonte di verità).
+  getFormats: () => apiClient.get('/total/formats'),
   listReports: () => apiClient.get('/total/reports'),
   getReport: (sha256: string) => apiClient.get(`/total/reports/${sha256}`),
   deleteReport: (sha256: string) => apiClient.delete(`/total/reports/${sha256}`),

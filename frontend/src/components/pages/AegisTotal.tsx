@@ -30,6 +30,15 @@ export default function AegisTotal() {
     queryFn: () => totalAPI.listReports().then(r => r.data.items || []),
   })
 
+  // Lista formati accettati letta dal backend: nessun formato è rifiutato,
+  // ma la UI deve dire la verità su cosa viene analizzato e come.
+  const { data: formatInfo } = useQuery({
+    queryKey: ['aegis-total-formats'],
+    queryFn: () => totalAPI.getFormats().then(r => r.data).catch(() => null),
+    staleTime: 5 * 60 * 1000,
+  })
+  const [showFormats, setShowFormats] = useState(false)
+
   const uploadMut = useMutation({
     mutationFn: () => totalAPI.upload(file as File, true),
     onSuccess: async (r) => {
@@ -79,7 +88,7 @@ export default function AegisTotal() {
           <FileSearch className="text-purple-400" /> Aegis Total
         </h1>
         <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">
-          Internal static analysis sandbox. Upload single files or <span className="text-white font-medium">.zip archives</span>.
+          Internal static analysis sandbox. Upload single files or archives (<span className="text-white font-medium">.zip .tar .gz .7z .rar .apk .jar .docx .pdf</span>…).
         </p>
       </div>
 
@@ -117,7 +126,9 @@ export default function AegisTotal() {
             ) : (
               <div>
                 <p className="text-sm font-bold text-white">Click or drag file here</p>
-                <p className="text-xs text-[hsl(var(--muted-foreground))] mt-1">Supports PE, ELF, Mach-O, scripts, and .zip</p>
+                <p className="text-xs text-[hsl(var(--muted-foreground))] mt-1">
+                  Any file is accepted — PE/.NET, ELF, Mach-O, Office, PDF, archives, scripts, firmware…
+                </p>
               </div>
             )}
           </div>
@@ -125,8 +136,30 @@ export default function AegisTotal() {
           <button onClick={handleUpload} disabled={uploadMut.isPending || !accepted || !file} className="btn btn-primary w-full bg-purple-600 hover:bg-purple-500 border-purple-500 shadow-purple-500/20">
             {uploadMut.isPending ? 'Analyzing...' : 'Analyze File'}
           </button>
-          
-          <p className="text-[10px] text-[hsl(var(--muted-foreground))] text-center">Limits: 100MB file, 200MB zip, max 2000 files.</p>
+
+          <button onClick={() => setShowFormats(v => !v)} className="text-[11px] underline text-[hsl(var(--muted-foreground))] hover:text-white w-full text-center">
+            {showFormats ? 'Hide supported formats' : `What can I upload? (${formatInfo?.formats?.length ?? 0}+ families)`}
+          </button>
+
+          {showFormats && formatInfo && (
+            <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+              {(formatInfo.formats || []).map((f: any) => (
+                <div key={f.id} className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] p-2.5">
+                  <div className="text-xs font-bold text-white">{f.label}</div>
+                  <div className="text-[10px] font-mono text-cyan-400/80 break-all mt-0.5">
+                    {(f.extensions || []).filter((e: string) => e && e !== '*').slice(0, 12).join(' ')}
+                    {(f.extensions || []).length > 12 ? ' …' : ''}
+                  </div>
+                  <div className="text-[10px] text-[hsl(var(--muted-foreground))] mt-1">{f.analysis}</div>
+                </div>
+              ))}
+              <p className="text-[10px] text-[hsl(var(--muted-foreground))] italic">{formatInfo.note}</p>
+            </div>
+          )}
+
+          <p className="text-[10px] text-[hsl(var(--muted-foreground))] text-center">
+            Limits: {formatInfo?.limits?.max_file_mb ?? 100}MB file · {formatInfo?.limits?.max_zip_mb ?? 200}MB archive · max {formatInfo?.limits?.max_files_per_zip ?? 2000} files.
+          </p>
         </div>
 
         {/* Reports List */}
@@ -341,6 +374,10 @@ export default function AegisTotal() {
               <span className="uppercase font-bold tracking-widest mr-2">Engines:</span>
               <span className={cn(selectedReport.engines.pe_parser?.enabled ? 'text-cyan-400' : '')}>[PE: {selectedReport.engines.pe_parser?.enabled ? 'ON' : 'OFF'}]</span>
               <span className={cn(selectedReport.engines.elf_parser?.enabled ? 'text-cyan-400' : '')}>[ELF: {selectedReport.engines.elf_parser?.enabled ? 'ON' : 'OFF'}]</span>
+              <span className={cn(selectedReport.engines.macho_parser?.enabled ? 'text-cyan-400' : '')}>[MACH-O: {selectedReport.engines.macho_parser?.enabled ? 'ON' : 'OFF'}]</span>
+              <span className={cn(selectedReport.engines.office_parser?.enabled ? 'text-cyan-400' : '')}>[OFFICE: {selectedReport.engines.office_parser?.enabled ? 'ON' : 'OFF'}]</span>
+              <span className={cn(selectedReport.engines.pdf_parser?.enabled ? 'text-cyan-400' : '')}>[PDF: {selectedReport.engines.pdf_parser?.enabled ? 'ON' : 'OFF'}]</span>
+              <span className={cn(selectedReport.engines.archive_parser?.enabled ? 'text-cyan-400' : '')}>[ARCH: {selectedReport.engines.archive_parser?.enabled ? 'ON' : 'OFF'}]</span>
               <span className={cn(selectedReport.engines.strings_scan?.enabled ? 'text-cyan-400' : '')}>[STR: ON]</span>
               <span className={cn(selectedReport.engines.secret_scan?.enabled ? 'text-cyan-400' : '')}>[SECRETS: {selectedReport.engines.secret_scan?.patterns || 0}]</span>
               {selectedReport.engines.iocs_found && Object.keys(selectedReport.engines.iocs_found).length > 0 && (
