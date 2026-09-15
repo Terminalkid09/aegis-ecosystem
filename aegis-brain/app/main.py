@@ -158,9 +158,22 @@ BODY_LIMITS: dict[str, int] = {
 }
 DEFAULT_BODY_LIMIT = 10 * 1024 * 1024
 
+
+def _body_limit_for(path: str) -> int:
+    """Limite byte per path. L'upload Total segue TOTAL_MAX_* (audit: prima
+    il default 10MB uccideva file legittimi fino a 100MB)."""
+    if path == "/api/v1/total/upload":
+        try:
+            from app.core.config import settings as _s
+            return max(int(_s.TOTAL_MAX_FILE_MB), int(_s.TOTAL_MAX_ZIP_MB)) * 1024 * 1024
+        except Exception:
+            return DEFAULT_BODY_LIMIT
+    return BODY_LIMITS.get(path, DEFAULT_BODY_LIMIT)
+
+
 @app.middleware("http")
 async def body_size_middleware(request: Request, call_next):
-    limit = BODY_LIMITS.get(request.url.path, DEFAULT_BODY_LIMIT)
+    limit = _body_limit_for(request.url.path)
     cl = request.headers.get("content-length")
     too_large = False
     if cl:
