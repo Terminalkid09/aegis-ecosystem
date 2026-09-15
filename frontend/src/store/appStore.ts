@@ -16,6 +16,8 @@ export type Page =
   | 'incidents'
   | 'audit'
   | 'syslog'
+  | 'logsources'
+  | 'search'
   | 'settings'
 
 interface User {

@@ -20,6 +20,8 @@ import {
   LogOut,
   User,
   Zap,
+  Database,
+  SearchCode,
 } from 'lucide-react'
 import { type Page, useAppStore } from '@/store/appStore'
 import { cn } from '@/lib/utils'
@@ -34,6 +36,8 @@ const NAV_ITEMS: { id: Page; label: string; icon: React.ElementType; section?: s
   { id: 'sentinel',   label: 'SentinelX',       icon: Search },
   { id: 'total',      label: 'Aegis Total',     icon: FileSearch },
   { id: 'ai',         label: 'AI Chat',         icon: Bot },
+  { id: 'search',     label: 'Log Search',      icon: SearchCode,      section: 'SIEM' },
+  { id: 'logsources', label: 'Log Sources',     icon: Database },
   { id: 'deploy',     label: 'Deploy',          icon: Rocket,          section: 'MANAGE' },
   { id: 'playbooks',  label: 'Playbooks',       icon: BookOpen },
   { id: 'rules',      label: 'Rules',           icon: BookMarked },

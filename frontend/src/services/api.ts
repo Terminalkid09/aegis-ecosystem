@@ -167,6 +167,25 @@ export const syslogAPI = {
   getEvents: (params = {}) => apiClient.get('/syslog/events', { params }),
 }
 
+// ─── SIEM: sorgenti di log, ingestione, ricerca sugli eventi normalizzati ────
+export const siemAPI = {
+  // Sorgenti configurate + salute (ultimo evento, eventi non riconosciuti)
+  getSources: () => apiClient.get('/ingest/sources'),
+  createSource: (data: { name: string; parser?: string; source_type?: string; description?: string }) =>
+    apiClient.post('/ingest/sources', data),
+  // Catalogo dei parser: unica fonte di verità per la UI
+  getCatalog: () => apiClient.get('/ingest/catalog'),
+  getStats: (hours = 24) => apiClient.get('/ingest/stats', { params: { hours } }),
+  getDetectionCoverage: () => apiClient.get('/ingest/detection-coverage'),
+  // Prova un parser senza salvare nulla (integrazione di una sorgente nuova)
+  testParser: (data: { parser: string; payload: unknown }) => apiClient.post('/ingest/test', data),
+  // Ricerca: POST strutturata (filtri) e GET semplice (link condivisibili)
+  search: (body: object) => apiClient.post('/search/events', body),
+  searchSimple: (params = {}) => apiClient.get('/search/events', { params }),
+  getFields: () => apiClient.get('/search/fields'),
+  getEventStats: (hours = 24) => apiClient.get('/search/stats', { params: { hours } }),
+}
+
 // ─── Rules ───────────────────────────────────────────────────────────────────
 export const rulesAPI = {
   getCoverage: () => apiClient.get('/rules/coverage'),
