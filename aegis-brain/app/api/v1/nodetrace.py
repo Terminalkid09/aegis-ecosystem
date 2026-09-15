@@ -85,7 +85,6 @@ async def register_agent(payload: RegisterRequest, db: AsyncSession = Depends(ge
     valid_static = bool(_expected) and _hmac.compare_digest(_key, _expected)
     if not valid_static:
         import hashlib
-        from datetime import datetime, timezone
         from app.database.models import EnrollToken
         digest = hashlib.sha256(payload.enroll_key.strip().encode()).hexdigest()
         r = await db.execute(select(EnrollToken).where(EnrollToken.token_hash == digest))

@@ -102,6 +102,77 @@ def test_stats_response_has_pipeline_counters():
     assert s.events_seq_gap_events == 0
 
 
+# ── Audit: payload agent annidati/non-stringa mai 500 ─────────────────────
+def test_proc_str_shapes():
+    from app.services.telemetry_service import _proc_str
+    assert _proc_str({"name": "svchost.exe"}) == "svchost.exe"
+    assert _proc_str({"name": {"name": "System Idle Process", "pid": 0}}) == "System Idle Process"
+    assert _proc_str({"process_name": "cmd.exe"}) == "cmd.exe"
+    assert _proc_str("notepad.exe") == "notepad.exe"
+    assert _proc_str({}) == "unknown"
+    assert _proc_str(None) == "unknown"
+    assert _proc_str(123) == "unknown"
+    assert _proc_str({"name": 123}) == "unknown"
+
+
+class FakeResult2:
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+    def first(self):
+        return None
+
+
+class FakeDB2:
+    def __init__(self):
+        self.added = []
+
+    async def execute(self, *a, **k):
+        return FakeResult2()
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def commit(self):
+        pass
+
+    async def flush(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_process_telemetry_nested_processes_no_500(monkeypatch):
+    from app.services import telemetry_service as ts
+    from app.database.models import Alert
+
+    async def fake_analyze(agent_id, metrics):
+        return [{"metric": "cpu_usage", "value": 15.8, "z_score": 3.2,
+                 "threshold": 3.0, "severity": "MEDIUM"}]
+
+    async def no_suppress(agent_id, key):
+        return False
+
+    import app.services.anomaly_engine as ae
+    monkeypatch.setattr(ae.anomaly_engine, "analyze", fake_analyze)
+    monkeypatch.setattr(ts, "_suppressed", no_suppress)
+
+    db = FakeDB2()
+    # Forma reale inviata da vecchi agent: processi annidati + anomalia dict.
+    await ts.process_telemetry(db, "agent-1", {
+        "cpu_usage": 15.8, "ram_usage": 50.8,
+        "processes": [{"name": {"name": "System Idle Process", "pid": 0,
+                                "cpu_percent": 1356.2}}],
+        "anomalies": [{"weird": True}],
+    })
+    alerts = [o for o in db.added if isinstance(o, Alert)]
+    assert alerts, "atteso almeno un alert anomalia"
+    for a in alerts:
+        assert isinstance(a.process_name, str), a.process_name
+
+
 # ── Audit: reliable queue (niente perdita su crash/errore) ────────────────
 class FakeRedis:
     """Liste in memoria con la semantica usata dal consumer."""

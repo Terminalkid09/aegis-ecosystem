@@ -65,6 +65,27 @@ def _bound_telemetry_data(data: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
+def _proc_str(entry: Any, *keys: str, default: str = "unknown") -> str:
+    """Stringa sicura da entry processo di forma qualsiasi (audit: vecchi
+    agent inviano {"name": {...}} annidato e il dict finiva in Alert
+    causando 500 su intera telemetria). Mai eccezioni, mai dict."""
+    value: Any = entry
+    for _ in range(3):
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned[:255] if cleaned else default
+        if isinstance(value, dict):
+            for key in keys or ("name", "process_name", "comm", "path", "process_path"):
+                candidate = value.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()[:255]
+            nested = value.get("name")
+            value = nested if isinstance(nested, (dict, str)) else None
+            continue
+        return default
+    return default
+
+
 async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any]):
     # 1. Store raw telemetry (bounded: vedi _bound_telemetry_data)
     data = _bound_telemetry_data(data)
@@ -164,9 +185,9 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                     key=get_proc_score, reverse=True
                 )
                 if sorted_procs:
-                    top_proc = sorted_procs[0].get("name") or sorted_procs[0].get("process_name") or "unknown"
+                    top_proc = _proc_str(sorted_procs[0])
                 elif normalized:
-                    top_proc = normalized[0].get("name") or "unknown"
+                    top_proc = _proc_str(normalized[0])
             except Exception:
                 pass
         alert = Alert(
@@ -209,8 +230,10 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
 
                 # Extract values from each process entry
                 for proc in processes:
-                    proc_name = proc.get("name") or proc.get("process_name") or ""
-                    proc_path = proc.get("path") or proc.get("process_path") or ""
+                    if not isinstance(proc, dict):
+                        continue
+                    proc_name = _proc_str(proc, "name", "process_name")
+                    proc_path = _proc_str(proc, "path", "process_path", default="")
                     values_to_check = {"process_name": proc_name, "process_path": proc_path}
 
                     value = values_to_check.get(field, "")
@@ -395,6 +418,9 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
             logger.warning("BEHAVIORAL_TAG alert: %s | agent=%s | tag=%s", data.get('process_name'), agent_id, tag)
 
     for anomaly_str in agent_anomalies:
+        # Audit: ignora voci non-stringa (vecchi agent mandavano dict).
+        if not isinstance(anomaly_str, str):
+            continue
         tag_key = anomaly_str.split(":")[0].strip()
         mapping = BEHAVIORAL_TAG_MITRE.get(tag_key)
         severity, tactic, technique_id, technique_name = mapping if mapping else ("MEDIUM", "Unknown", None, anomaly_str)
