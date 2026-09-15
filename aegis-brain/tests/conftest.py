@@ -18,6 +18,7 @@ for _mod in ("app", "app.main"):
 import asyncio
 import pytest
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.pool import NullPool
 
@@ -117,10 +118,16 @@ async def setup_database():
     try:
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
+            # `alembic_version` non e' nei metadata: se sopravvive al drop_all,
+            # il database resta con la versione "head" registrata e zero tabelle.
+            # Qualunque processo che parte con `alembic upgrade head` (per esempio
+            # un brain reale puntato al DB di test) crederebbe di avere lo schema.
+            await conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
             await conn.run_sync(Base.metadata.create_all)
         yield
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
+            await conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
     except Exception:
         yield
     finally:
