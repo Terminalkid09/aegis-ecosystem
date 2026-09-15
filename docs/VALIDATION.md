@@ -13,6 +13,7 @@ Classificazione: **pilot-ready lab** (non production-ready — vedi §5).
 | Area | Stato |
 |---|---|
 | Unit/integration suite (tutti i componenti) | **VERDE** |
+| SIEM v4: parser, Sigma, correlazione, store, pipeline | **VERDE** (§4.1) |
 | Detection replay su 3 split indipendenti | **VERDE** (P/R/F1 1.0 su corpus sintetico) |
 | Contratto eventi eBPF ↔ agent | **VERDE** |
 | Build frontend + typecheck | **VERDE** |
@@ -28,8 +29,10 @@ Tutte eseguite su host di sviluppo (Windows 11, Python 3.10, JDK 25),
 
 | Componente | Comando | Risultato |
 |---|---|---|
-| aegis-brain | `pytest tests/` | **301 passed, 102 skipped** (skipped = test che richiedono PG/Redis reali e OS non-Windows) |
-| aegis-brain (senza integrazione) | `pytest tests/ --ignore=tests/integration` | **279 passed, 14 skipped** |
+| aegis-brain (con PG+Redis reali) | `pytest tests/` (con `REQUIRE_INTEGRATION=1`) | **519 passed, 0 failed** — gli skipped in questo profilo sono solo i test OS-specifici (non-Windows) |
+| aegis-brain (senza integrazione) | `pytest tests/ --ignore=tests/integration` | **390 passed, 16 skipped** (skipped = richiedono PG/Redis reali) |
+| aegis-brain — SIEM v4 | `pytest tests/test_ingest_parsers.py tests/test_sigma_engine.py tests/test_correlation_engine.py tests/test_siem_store.py tests/test_siem_pipeline.py` | **VERDE** |
+| aegis-brain — API SIEM | `pytest tests/integration/test_siem_ingest.py` | **VERDE** |
 | aegis-guard | `mvn -o test` | **123 passed, 0 failed** |
 | aegis-link | `mvn -o test` | **17 passed, 0 failed** |
 | NodeTrace | `pytest` in `NodeTrace/agents/python` | **70 passed, 2 skipped** |
@@ -42,12 +45,26 @@ Tutte eseguite su host di sviluppo (Windows 11, Python 3.10, JDK 25),
 I numeri di replay valgono **solo** per il corpus sintetico versionato
 (`corpus-v2`). Vedi §4 per come ottenere numeri su dati reali.
 
+Nota ambiente: il port-forward Docker di Postgres/Redis è pubblicato solo su
+IPv4. Usare `127.0.0.1` (non `localhost`) in `TEST_DATABASE_URL`/`REDIS_URL`:
+`localhost` risolve a `::1`, che non è in ascolto, e ogni connessione attende il
+fallback IPv4 (~21s) superando il timeout di probe del conftest.
+
 ## 3. Cosa coprono (e cosa non coprono) i test
 
 Coperto: logica del motore di detection, pipeline eventi, idempotenza dei
 playbook SOAR, RBAC e permessi, cifratura VaultX, PKI/mTLS, hardening della
 configurazione, redazione/secret-scan, retention, parsing di Aegis Total,
 mapping OCSF, import corpus esterno.
+
+Coperto dal percorso SIEM v4: i **parser multi-sorgente** sono testati uno per
+uno su log di formato reale versionati in `tests/corpus/logs/` (syslog RFC3164
++ RFC5424, Windows Event JSON, Zeek `conn/dns/http`, Suricata `eve.json`,
+nginx/Squid, Windows Firewall/pfSense/iptables); il **motore Sigma** su
+modificatori, condizioni (`and/or/not`, `1 of them`), mapping di campo ed
+esclusione esplicita delle feature non supportate; la **correlazione** su
+threshold e sequenza; lo **store** su filtro/testo/dedup/ordinamento; la
+**pipeline** su evento → detection → alert.
 
 **Non** coperto dalle unit test: comportamento reale su kernel senza BTF,
 firewall Windows/Linux sotto carico, outbound bloccato da proxy aziendali,
@@ -87,6 +104,63 @@ del replay interno (`static-replay-v1`), quindi i risultati sono confrontabili.
 Fonti esterne suggerite: Atomic Red Team (mappatura exec → evento Aegis),
 log convertiti da EVTX/Auditd, dataset di ricerca con licenza compatibile.
 **Attenzione licenza**: verificare i termini prima di importare dati di terzi.
+
+## 4.1 SIEM v4 — cosa è validato e cosa no
+
+| Area | Stato | Come |
+|---|---|---|
+| Parser su formati di settore | **VERDE** | corpus versionato `tests/corpus/logs/`, 20 test |
+| Motore Sigma (modificatori, condizioni, esclusioni) | **VERDE** | `tests/test_sigma_engine.py`, 34 test |
+| Correlazione threshold + sequence | **VERDE** | `tests/test_correlation_engine.py` |
+| Store eventi + query/stats + dedup | **VERDE** | `tests/test_siem_store.py` |
+| Pipeline ingest → detection → alert | **VERDE** | `tests/test_siem_pipeline.py` |
+| API ingest/search end-to-end | **VERDE** | `tests/integration/test_siem_ingest.py` |
+| **Log reali dal tuo host** | **NOT-RUN** | collector `scripts/winevent-collector.ps1` pronto: l'output misura la qualità sui *tuoi* Event Log |
+| Log reali da Zeek/Suricata/syslog esterni | **NON DISPONIBILE in lab** | i parser sono validati su sample di formato reale; la sorgente non esiste in questo lab |
+
+Nota onesta sul corpus: i log in `tests/corpus/logs/` sono **sample di formato
+reale** (stessa struttura prodotta dagli strumenti), non catture di un
+incidente reale. Servono a provare che il parser legge il formato e che la
+regola scatta; **non** sono una misura di detection su traffico vero — quella
+richiede la sorgente, ed è dichiarata come tale.
+
+Per produrre eventi reali dal PC di sviluppo:
+
+```powershell
+# Windows Event Log → endpoint di ingestione (richiede un JWT)
+pwsh -File scripts/winevent-collector.ps1 -BrainUrl http://localhost:8000 -Token $env:AEGIS_JWT
+```
+
+Per la demo end-to-end con tutti i formati (dichiara i sample come sintetici):
+
+```bash
+python scripts/siem_demo.py --base-url http://127.0.0.1:8000 --api-key "$AEGIS_API_KEY" --scenario all
+```
+
+**Eseguita davvero** il 2026-09-15 su brain locale (PG + Redis reali),
+`--scenario all`:
+
+```
+[*] scenario=all passi=10 run=c2bce0
+[+] [5/10] syslog: stored=1 sigma=1 correlation=1 alerts=2
+[+] [7/10] windows_event: stored=9 sigma=6 correlation=0 alerts=6
+[+] [8/10] zeek: stored=4 sigma=2 correlation=0 alerts=2
+[*] eventi salvati ....... 28      (6 tipi di sorgente)
+[*] match Sigma .......... 15
+[*] match correlazione ... 2
+[*] alert creati ......... 17
+```
+
+Verifica di lettura sulle API reali (stesso run): `/ingest/stats` → 28 eventi,
+14/14 regole Sigma eseguibili, 5/5 regole di correlazione, distribuzione
+`windows_event=9, web=9, syslog=6, zeek=4`, severità `CRITICAL=1, HIGH=10,
+MEDIUM=2, LOW=2, INFO=13`; `/search/events?severity=HIGH` → 10 eventi;
+`/search/fields` → 24 campi filtrabili; `/telemetry/alerts` → alert con ID
+regola Sigma e tecnica MITRE valorizzata (es. `T1543.003`, `T1070.001`,
+`T1110`, `T1071.004`).
+
+Questa è l'unica parte della validazione eseguita **end-to-end su servizi
+reali**; i sample sono sintetici (dichiarato), l'infrastruttura no.
 
 ## 5. Cosa manca per "production-ready"
 

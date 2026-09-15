@@ -232,6 +232,28 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 - **Ingestion-ready**: `GET /api/v1/ocsf/alerts` returns JSON or **NDJSON** (`?download=true`) for batch pipelines (Splunk, Elastic, Sentinel, AWS Security Lake).
 - **No custom parser needed**: `POST /api/v1/ocsf/convert` lets an external producer convert an Aegis event to OCSF without database access.
 
+### SIEM — Multi-source Log Ingestion
+- **One pipeline for every source**: pushes land on `POST /api/v1/ingest/{source}` and are parsed, normalized and pushed through the *same* detection → alert → SOAR chain used by agents. An alert raised by a log source can trigger a playbook — it is one product, not two.
+- **Parser registry with auto-detection**: `syslog` (RFC 3164 + RFC 5424), generic JSON/NDJSON, **Windows Event Log** (`4624/4625/4688/4697/4720/7045/1102`…), **Zeek** (`conn/dns/http/ssl`), **Suricata** `eve.json`, web proxy (nginx/Squid/Apache), firewall (Windows Firewall, pfSense `filterlog`, iptables). `parser: auto` picks one from the payload shape; `GET /api/v1/ingest/catalog` is the single source of truth for the UI.
+- **Unified event model**: every source maps to one OCSF-aligned schema (time, severity, host/user, network 5-tuple, process, file, DNS/HTTP) — no per-source consumer.
+- **Real syslog listener**: optional UDP **and** TCP listener (`SYSLOG_ENABLED`, default off, bound to `127.0.0.1` unless `SYSLOG_BIND` is explicitly widened) so an rsyslog/firewall can point straight at the brain.
+- **Sub-second visibility**: `GET /api/v1/ingest/sources` exposes each source's health (last event, unparsed count, last error) — a silent source is visible, not invisible.
+
+### SIEM — Sigma Rule Engine
+- **Industry-standard rules**: Sigma YAML is loaded, field-mapped, modifier-expanded (`contains`, `startswith`, `endswith`, `re`, `all`, `base64`, `cidr`…) and compiled into executable internal rules — mapping custom rules to the format the whole industry writes.
+- **Fails loud, never half-way**: a rule using an unsupported modifier/feature is **excluded and reported**, not silently executed on a subset of its logic (`GET /api/v1/ingest/detection-coverage` lists every excluded rule and why).
+- **Bundled rules**: 14 real detection rules across Windows Event, Linux auth, Zeek DNS, Suricata and proxy/firewall log sources, each mapped to MITRE ATT&CK.
+
+### SIEM — Multi-event Correlation
+- **Threshold and sequence** over Redis-backed sliding windows: `N events in T` (brute-force, port sweep, denied burst) and `A then B` (failed logins **then** a success).
+- **Same alert path**: a correlation hit produces a normal alert with MITRE mapping, so triage, incidents and SOAR playbooks work unchanged.
+- **Explicitly bounded**: each rule caps its window, bucket size and max tracked entities, so correlation cannot be used as a memory amplifier.
+
+### SIEM — Event Store & Search
+- **Time-partitioned storage**: normalized events live in a monthly-partitioned table, so retention is a partition `DROP` instead of a mass `DELETE`.
+- **Structured search**: `POST /api/v1/search/events` filters on an **allowlist** of fields with `LIKE`-escaped free text — no column name, operator or `ORDER BY` ever reaches the database from the client; `GET /api/v1/search/events` is the shareable-link variant.
+- **Dedup + retention**: repeated relays collapse via `event_id` dedup in Redis; expired partitions are purged on the configured schedule.
+
 ### Syslog Event Viewer
 - **Centralized storage**: Syslog events from Aegis-Link or external parsers stored in `SyslogEvent` table
 - **Rich query API**: Filter by severity, facility, hostname, app name with pagination
@@ -309,6 +331,17 @@ java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
 | `DELETE /api/v1/soar/playbooks/{id}` | Bearer JWT | Delete SOAR playbook |
 | `GET /api/v1/soar/playbook-executions` | Bearer JWT | List all playbook execution history |
 | `GET /api/v1/syslog/events` | Bearer JWT | Query syslog events (severity, hostname, app filter) |
+| `POST /api/v1/ingest/{source}` | Bearer JWT / API key | Ingest raw log lines or JSON events; parsed + normalized + detected |
+| `POST /api/v1/ingest/test` | Bearer JWT | Dry-run a parser on a payload — nothing is stored |
+| `GET /api/v1/ingest/catalog` | Bearer JWT | Parser catalog (single source of truth for the UI) |
+| `GET /api/v1/ingest/sources` | Bearer JWT | Configured log sources with health (last event, unparsed, last error) |
+| `POST /api/v1/ingest/sources` | Bearer JWT (`operator`) | Register a log source |
+| `GET /api/v1/ingest/stats` | Bearer JWT | Ingestion stats (EPS, by source/severity) |
+| `GET /api/v1/ingest/detection-coverage` | Bearer JWT | Loaded vs. executable Sigma/correlation rules + exclusions |
+| `POST /api/v1/search/events` | Bearer JWT | Structured event search (allowlisted fields, escaped text) |
+| `GET /api/v1/search/events` | Bearer JWT | Simple event search (shareable URLs) |
+| `GET /api/v1/search/fields` | Bearer JWT | Searchable fields with descriptions |
+| `GET /api/v1/search/stats` | Bearer JWT | Event statistics over a time window |
 | `GET /api/v1/audit/logs` | Bearer JWT | List audit log entries |
 | `POST /api/v1/enroll/enroll` | enrollment key | Agent enrollment with key validation |
 | `POST /api/v1/vault/notes` | Bearer JWT | Create encrypted note (AES-256-GCM) |

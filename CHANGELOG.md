@@ -44,10 +44,44 @@
 - **`docs/VALIDATION.md`**: stato di validazione riproducibile (cosa gira,
   cosa è NOT-RUN, cosa manca per production-ready).
 
+- **SIEM v4 — ingestion multi-sorgente** (`app/ingest/`): parser registry
+  con auto-detection e 12 parser nominati (`windows_event`, `zeek`,
+  `suricata`, `pfsense`/`pfirewall`/`iptables`, `squid`/`nginx`, `syslog`
+  RFC3164+5424, `json`). Ogni sorgente mappa su un evento unificato
+  OCSF-aligned. Endpoint `POST /ingest/{source}` (+ `/ingest/test` dry-run,
+  `/ingest/catalog`, `/ingest/sources`, `/ingest/stats`) e listener syslog
+  UDP/TCP (`SYSLOG_ENABLED`, bind `127.0.0.1` di default).
+- **SIEM v4 — motore Sigma** (`app/rules/sigma/`): YAML → regole eseguibili con
+  mapping campi, modificatori (`contains/startswith/endswith/re/cidr/base64/…`)
+  e condizioni (`and/or/not`, `1 of them`, `all of them`). Le feature non
+  supportate **escludono** la regola e lo dichiarano (`/ingest/detection-coverage`)
+invece di eseguirla a metà. Bundle di 14 regole reali (Windows Event, Linux
+  auth, Zeek DNS, Suricata, proxy/firewall) con MITRE ATT&CK.
+- **SIEM v4 — correlazione multi-evento** (`app/services/correlation.py`):
+  finestre Redis per `threshold` (N in T) e `sequence` (A poi B); le detection
+  entrano nella stessa pipeline alert/playbook degli agenti.
+- **SIEM v4 — store e ricerca**: tabella eventi partizionata per mese, dedup su
+  `event_id`, `POST/GET /search/events` (filtri su allowlist + testo escapato),
+  `/search/fields`, `/search/stats`.
+- **Windows Event Log collector** (`scripts/winevent-collector.ps1`): log reali
+  dal PC di sviluppo (parametri configurabili, `wevtutil` → `/ingest`).
+- **Demo SIEM** (`scripts/siem_demo.py`): sample nei formati di settore con
+  scenari (bruteforce, Windows persistence, DNS tunneling, web attack) e
+  `--dry-run`. Dichiarati sintetici in `docs/VALIDATION.md`.
+- **Frontend**: pagine *Log Sources* (sorgenti, EPS, health, catalogo parser,
+  dry-run, copertura detection) e *Log Search* (filtri, tabella, dettaglio,
+  paginazione).
+- **`docs/V4_SCOPE.md`**: scope chiuso della v4 con definizione di "fatto".
+
 ### Test
-- Nuovi: `test_playbook_idempotency` (5), `test_ocsf` (8),
+- Nuovi: `test_playbook_idempotency` (5), `test_ocsf` (7),
   `test_total_formats` (9), `test_corpus_import` (6),
-  `MainCommandValidationTest` (5, Java). Tutte le suite verdi.
+  `test_ingest_parsers` (20), `test_sigma_engine` (34),
+  `test_correlation_engine` (15), `test_siem_store` (11),
+  `test_siem_pipeline` (11), `tests/integration/test_siem_ingest` (25),
+  `MainCommandValidationTest` (5, Java).
+  Suite completa: brain **519 passed / 0 failed** (con PG+Redis reali),
+  guard 123, link 17, NodeTrace 70, contratto eBPF ALL PASS.
 
 ## Unreleased — Audit F1–F10 (dataset indipendenti, metriche, health, supply-chain, E2E)
 
