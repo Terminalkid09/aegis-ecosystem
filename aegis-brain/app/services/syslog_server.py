@@ -72,9 +72,23 @@ class SyslogListener:
             except OSError as exc:
                 logger.warning(f"Syslog TCP non avviato su {self.host}:{self.port}: {exc}")
         self._running = True
-        self._tasks.append(asyncio.create_task(self._consumer()))
+        consumer = asyncio.create_task(self._consumer())
+        # Un task in background che muore non deve restare invisibile: senza
+        # questo callback un errore nel consumer si traduce in "nessun evento
+        # arrivato, nessun log", che è il guasto più difficile da diagnosticare.
+        consumer.add_done_callback(self._consumer_done)
+        self._tasks.append(consumer)
         logger.info(f"Syslog listener attivo su {self.host}:{self.port} "
                     f"(udp{'+tcp' if self._server else ''})")
+
+    def _consumer_done(self, task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            self.stats["errors"] += 1
+            self._running = False
+            logger.error(f"Consumer syslog terminato con errore: {exc!r}")
 
     async def stop(self) -> None:
         self._running = False
@@ -120,7 +134,7 @@ class SyslogListener:
 
     async def _consumer(self) -> None:
         """Consuma la coda a batch e alimenta la pipeline SIEM."""
-        from app.database.connection import async_session_factory
+        from app.database.connection import AsyncSessionLocal
         from app.services.siem_pipeline import ingest_payload
 
         batch: List[str] = []
@@ -139,7 +153,7 @@ class SyslogListener:
             payload = "\n".join(batch)
             batch = []
             try:
-                async with async_session_factory() as db:
+                async with AsyncSessionLocal() as db:
                     result = await ingest_payload(
                         db, self.source_name, payload,
                         meta={"source_type": "syslog", "received_at": None},

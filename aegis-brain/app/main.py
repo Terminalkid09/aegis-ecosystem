@@ -78,9 +78,9 @@ async def lifespan(app: FastAPI):
         try:
             from app.services.pki import RevokeList, REVOKED
             from app.database.models import RevokedCert
-            from app.database.connection import async_session_factory
+            from app.database.connection import AsyncSessionLocal
             from sqlalchemy import select
-            async with async_session_factory() as db:
+            async with AsyncSessionLocal() as db:
                 rows = (await db.execute(select(RevokedCert.agent_id))).scalars().all()
                 db_entries = [f"agent:{r}" for r in rows]
                 # Anche i serial se presenti (non usato ora, ma per completezza)
@@ -101,9 +101,9 @@ async def lifespan(app: FastAPI):
         # poi listener syslog opzionale (default OFF).
         if settings.SIEM_ENABLED:
             try:
-                from app.database.connection import async_session_factory
+                from app.database.connection import AsyncSessionLocal
                 from app.services.siem_store import ensure_monthly_partitions
-                async with async_session_factory() as _db:
+                async with AsyncSessionLocal() as _db:
                     created = await ensure_monthly_partitions(_db)
                     await _db.commit()
                 if created:

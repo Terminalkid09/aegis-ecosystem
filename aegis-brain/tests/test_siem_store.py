@@ -7,7 +7,6 @@ scartato, una colonna sbagliata). I test con PostgreSQL stanno in
 """
 import os
 
-import pytest
 from sqlalchemy import select
 
 from app.database.models import SiemEvent

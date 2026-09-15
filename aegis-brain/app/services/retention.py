@@ -55,6 +55,17 @@ async def preview_retention(db: AsyncSession) -> Dict[str, Any]:
             q = select(func.count()).select_from(model).where(model.timestamp < cutoff)
         result = await db.execute(q)
         counts[table] = result.scalar() or 0
+    # SIEM: gli eventi normalizzati hanno una retention propria e si cancellano
+    # per partizione (DROP) invece che per riga: senza questa voce il preview
+    # direbbe "0" mentre la purge ne elimina milioni.
+    try:
+        from app.database.models import SiemEvent
+        siem_cutoff = datetime.now(timezone.utc) - timedelta(days=settings.SIEM_RETENTION_DAYS)
+        counts["siem_events"] = await db.scalar(
+            select(func.count()).select_from(SiemEvent).where(SiemEvent.time < siem_cutoff)) or 0
+        cutoffs["siem_events"] = siem_cutoff
+    except Exception as exc:
+        logger.warning(f"Preview retention SIEM non disponibile: {exc}")
     return {"cutoffs": {k: v.isoformat() for k, v in cutoffs.items()}, "counts": counts}
 
 async def run_retention_purge(db: AsyncSession, confirmed: bool = False, backup_verified: bool = False,
@@ -106,6 +117,19 @@ async def run_retention_purge(db: AsyncSession, confirmed: bool = False, backup_
             continue
         result = await db.execute(stmt)
         purged[table] = result.rowcount or 0
+    # SIEM: DROP delle partizioni scadute (istantaneo, senza WAL) oppure DELETE
+    # bounded se la tabella è piatta. Non passa da `purge_statements` perché
+    # sono DDL, non DELETE.
+    try:
+        from app.services import siem_store
+        siem = await siem_store.purge_expired(db, settings.SIEM_RETENTION_DAYS)
+        if siem.get("partitions_dropped"):
+            purged["siem_events_partitions"] = len(siem["partitions_dropped"])
+        if siem.get("rows_deleted"):
+            purged["siem_events"] = siem["rows_deleted"]
+    except Exception as exc:
+        # La retention degli agenti non deve fallire perché il SIEM ha un problema.
+        logger.warning(f"Retention SIEM fallita: {exc}")
     # Audit F-05: metriche volumi per allarmi capacita' (SOC).
     try:
         import time as _time
@@ -148,8 +172,8 @@ async def retention_scheduler():
                 continue
             if os.getenv("PYTEST_CURRENT_TEST"):
                 continue
-            from app.database.connection import async_session_factory
-            async with async_session_factory() as db:
+            from app.database.connection import AsyncSessionLocal
+            async with AsyncSessionLocal() as db:
                 # Audit: backup check REALE + audit log mai toccati in automatico.
                 await run_retention_purge(db, confirmed=True, backup_verified=False,
                                           include_audit=False)
