@@ -1,0 +1,37 @@
+title: Service Installed From User-Writable Directory
+id: 8c4d9e21-71aa-4f4b-8f2c-9e0b3a5c6d42
+status: stable
+description: |
+  Un servizio Windows creato con un eseguibile che risiede in una directory
+  scrivibile dall'utente (Temp, AppData, ProgramData, Public) è una tecnica di
+  persistenza molto comune: il servizio parte come SYSTEM ad ogni boot.
+references:
+  - https://attack.mitre.org/techniques/T1543/003/
+author: Aegis Sigma bundle
+date: 2026/09/15
+logsource:
+  product: windows
+  service: system
+detection:
+  selection_event:
+    EventID: 7045
+  selection_path:
+    ImagePath|contains:
+      - '\Temp\'
+      - '\AppData\'
+      - '\ProgramData\'
+      - '\Users\Public\'
+      - '\Windows\Temp\'
+      - 'http://'
+      - 'https://'
+  condition: selection_event and selection_path
+fields:
+  - ServiceName
+  - ImagePath
+falsepositives:
+  - Installer aziendali che estraggono prima in Temp (verificare la firma)
+level: high
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1543.003

@@ -1,0 +1,39 @@
+title: DNS Query To Frequently Abused TLD
+id: 3b5e8a19-6c27-4d80-9e51-2a7f4c1b6e05
+status: experimental
+description: |
+  I domini su TLD economici e poco regolamentati (.top, .xyz, .tk, .pw, .cc…)
+  sono statisticamente sovra-rappresentati nel malware e nelle campagne
+  phishing, perché costano poco e non richiedono verifica d'identità.
+  Da solo non è un incidente: è un indicatore di priorità per il triage.
+references:
+  - https://attack.mitre.org/techniques/T1071/004/
+author: Aegis Sigma bundle
+date: 2026/09/15
+logsource:
+  product: zeek
+  service: dns
+detection:
+  selection:
+    query|endswith:
+      - '.top'
+      - '.xyz'
+      - '.tk'
+      - '.pw'
+      - '.cc'
+      - '.click'
+      - '.gq'
+      - '.work'
+  filter_allowlist:
+    query|endswith:
+      - 'windowsupdate.xyz'
+  condition: selection and not filter_allowlist
+fields:
+  - query
+  - id.orig_h
+falsepositives:
+  - Servizi legittimi di nuova generazione su TLD economici
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1071.004

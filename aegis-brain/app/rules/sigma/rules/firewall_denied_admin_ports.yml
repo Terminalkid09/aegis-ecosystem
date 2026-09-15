@@ -1,0 +1,43 @@
+title: Firewall Denied Connection To Remote Administration Port
+id: 8e4a1c67-3b52-4d98-a7f1-5c9e2b6d4a03
+status: stable
+description: |
+  Un firewall che nega una connessione verso una porta di amministrazione
+  remota (RDP, SMB, WinRM, SSH, VNC, Docker) è il segnale grezzo di una
+  scansione o di un tentativo di movimento laterale. La ripetizione verso più
+  destinazioni dallo stesso mittente è la regola di correlazione dedicata.
+references:
+  - https://attack.mitre.org/techniques/T1046/
+  - https://attack.mitre.org/techniques/T1021/
+author: Aegis Sigma bundle
+date: 2026/09/15
+logsource:
+  product: firewall
+detection:
+  selection_event:
+    event_type: 'network_denied'
+  selection_ports:
+    dst_port:
+      - 22
+      - 23
+      - 135
+      - 139
+      - 445
+      - 3389
+      - 5900
+      - 5985
+      - 5986
+      - 2375
+      - 2376
+  condition: selection_event and selection_ports
+fields:
+  - src_ip
+  - dst_ip
+  - dst_port
+falsepositives:
+  - Probe di monitoraggio interno su host dismessi
+level: medium
+tags:
+  - attack.discovery
+  - attack.lateral_movement
+  - attack.t1046

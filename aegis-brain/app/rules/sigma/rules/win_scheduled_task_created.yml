@@ -1,0 +1,30 @@
+title: Scheduled Task Created
+id: 1d7e5c33-9b42-4d61-a0f8-2c7b6e9a4f21
+status: stable
+description: |
+  La creazione di uno scheduled task (EventID 4698) è un vettore di persistenza
+  ed esecuzione: permette di far partire codice ad intervalli o al logon.
+references:
+  - https://attack.mitre.org/techniques/T1053/005/
+author: Aegis Sigma bundle
+date: 2026/09/15
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4698
+  filter_system:
+    TaskName|startswith:
+      - '\Microsoft\Windows\'
+  condition: selection and not filter_system
+fields:
+  - TaskName
+  - SubjectUserName
+falsepositives:
+  - Software di gestione (patch management, backup) che crea task propri
+level: medium
+tags:
+  - attack.persistence
+  - attack.execution
+  - attack.t1053.005

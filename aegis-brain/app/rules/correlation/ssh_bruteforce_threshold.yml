@@ -1,0 +1,21 @@
+title: SSH Brute Force From Single Source
+id: corr-ssh-bruteforce
+type: threshold
+description: |
+  Cinque fallimenti di autenticazione dallo stesso indirizzo in due minuti non
+  sono cinque eventi indipendenti: è un attacco di forza bruta in corso. La
+  regola Sigma sul singolo evento resta informativa; questa è l'azione.
+severity: HIGH
+window_seconds: 120
+threshold: 5
+group_by:
+  - src_ip
+match:
+  event_type: auth_failure
+source_types:
+  - syslog
+mitre:
+  - T1110
+  - T1110.001
+tags:
+  - attack.credential_access

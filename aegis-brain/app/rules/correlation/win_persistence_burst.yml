@@ -1,0 +1,20 @@
+title: Multiple Service Installations On Same Host
+id: corr-win-service-burst
+type: threshold
+description: |
+  Tre servizi installati sullo stesso host in dieci minuti non è un aggiornamento
+  software, è installazione massiva di persistenza. Un singolo 7045 è un dato;
+  tre insieme sono un pattern.
+severity: HIGH
+window_seconds: 600
+threshold: 3
+group_by:
+  - hostname
+match:
+  event_type: service_installed
+source_types:
+  - windows_event
+mitre:
+  - T1543.003
+tags:
+  - attack.persistence

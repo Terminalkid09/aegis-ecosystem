@@ -1,0 +1,20 @@
+title: Port Sweep Detected By Firewall
+id: corr-port-sweep
+type: threshold
+description: |
+  Molte connessioni negate verso destinazioni diverse dallo stesso mittente in
+  un minuto sono una scansione: il firewall le blocca una per una, ma solo la
+  vista aggregata dice che qualcuno sta mappando la rete.
+severity: MEDIUM
+window_seconds: 60
+threshold: 15
+group_by:
+  - src_ip
+match:
+  event_type: network_denied
+source_types:
+  - firewall
+mitre:
+  - T1046
+tags:
+  - attack.discovery

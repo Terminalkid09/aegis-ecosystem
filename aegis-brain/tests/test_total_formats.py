@@ -9,6 +9,8 @@ import io
 import struct
 import zipfile
 
+from httpx import AsyncClient
+
 from app.api.v1.total import (
     SUPPORTED_FORMATS, _analyze_bytes, _detect_format, _is_text_file,
 )
@@ -92,13 +94,13 @@ def test_unknown_binary_never_empty_analysis():
     assert "strings_preview" in detail and "hexdump" in detail
 
 
-def test_formats_endpoint_requires_auth(client):
-    r = client.get("/api/v1/total/formats")
+async def test_formats_endpoint_requires_auth(client: AsyncClient):
+    r = await client.get("/api/v1/total/formats")
     assert r.status_code in (401, 403)
 
 
-def test_formats_endpoint_returns_catalog(client, user_auth_headers):
-    r = client.get("/api/v1/total/formats", headers=user_auth_headers)
+async def test_formats_endpoint_returns_catalog(client: AsyncClient, user_auth_headers):
+    r = await client.get("/api/v1/total/formats", headers=user_auth_headers)
     if r.status_code == 401:
         # DB non disponibile: l'auth non può validare il token.
         return

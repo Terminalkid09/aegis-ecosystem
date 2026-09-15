@@ -130,11 +130,32 @@ class Settings(BaseSettings):
     # ordini di grandezza sopra il tasso reale di un sensore, sotto una tempesta.
     APP_EVENTS_PER_MIN: int = 10000
 
+    # ── SIEM v4: ingestione multi-sorgente ──────────────────────────────────
+    # `SIEM_ENABLED` spegne l'intero percorso di ingestione esterna (parser,
+    # store, detection Sigma) lasciando intatta la pipeline degli agenti.
+    SIEM_ENABLED: bool = True
+    SIEM_RETENTION_DAYS: int = 30
+    # Dedup eventi per `event_id` (hash sorgente+payload): un relay che
+    # reinvia la stessa riga non crea un alert duplicato.
+    SIEM_EVENT_DEDUP_TTL_S: int = 86400
+    # Bound sull'ingestione: oltre, il payload viene troncato dichiarandolo.
+    SIEM_MAX_EVENTS_PER_REQUEST: int = 5000
+    SIEM_SEARCH_MAX_LIMIT: int = 500
+    # Listener syslog (UDP+TCP). Default OFF: si abilita esplicitamente, così
+    # nessuna porta in ascolto compare per caso in un deploy.
+    SYSLOG_ENABLED: bool = False
+    # Secure by default: in loopback. Per ricevere da rsyslog/firewall su altri
+    # host va impostato esplicitamente a 0.0.0.0 (consapevolmente, dietro firewall).
+    SYSLOG_BIND: str = "127.0.0.1"
+    SYSLOG_PORT: int = 5514
+    SYSLOG_TCP_ENABLED: bool = True
+
     @field_validator(
         "RETENTION_TELEMETRY_DAYS",
         "RETENTION_ALERTS_DAYS",
         "RETENTION_AUDIT_DAYS",
         "RETENTION_SYSLOG_DAYS",
+        "SIEM_RETENTION_DAYS",
         mode="before",
     )
     @classmethod

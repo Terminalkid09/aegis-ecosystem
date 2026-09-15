@@ -417,3 +417,80 @@ class RevokedCert(Base):
     reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     revoked_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ─── SIEM v4: store eventi normalizzati + registro sorgenti ─────────────────
+# `extra` conserva TUTTI i campi sorgente (es. `win.ServiceName`, `conn_state`):
+# è ciò che permette a una regola Sigma di trovare il dato senza che lo schema
+# unificato debba avere una colonna per ogni prodotto.
+#
+# In produzione la tabella è RANGE-partizionata per mese (vedi migrazione
+# 0013_siem_ingest): retention = DROP PARTITION invece di DELETE su milioni di
+# righe. Il modello non dichiara la partizione perché la stessa tabella deve
+# poter nascere da `create_all` negli ambienti di test; l'app non dipende mai
+# dalla partizione (la crea `siem_store.ensure_monthly_partitions`).
+
+class SiemEvent(Base):
+    __tablename__ = "siem_events"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    event_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="INFO", index=True)
+    ocsf_class_uid: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    hostname: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    user: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    user_domain: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    process_name: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    parent_process_name: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    parent_pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    process_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    command_line: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    file_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    file_name: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    file_hash: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    src_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True, index=True)
+    src_port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    dst_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True, index=True)
+    dst_port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    protocol: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+
+    url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    http_method: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    domain: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    dns_query: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
+    signature: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    signature_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    message_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Testo aggregato su cui gira la ricerca libera (bounded lato app).
+    search_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    extra: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LogSource(Base):
+    """Sorgente di log configurata: nome, parser e statistiche di ingestione."""
+    __tablename__ = "log_sources"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    parser: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    events_total: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    events_invalid: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    last_event_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -49,11 +49,25 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up Aegis-Brain...")
     enforce_enterprise_strict()
     try:
-        # Run Alembic migrations asynchronously
+        # Run Alembic migrations asynchronously.
+        # `cwd` è la cartella che contiene alembic.ini (in container: /app), non
+        # un path assoluto hardcoded: senza questo il brain non parte fuori dal
+        # container, e un'immagine con workdir diverso rompe all'avvio.
         import subprocess
-        result = await asyncio.to_thread(
-            subprocess.run, ["alembic", "upgrade", "head"], capture_output=True, text=True, cwd="/app"
-        )
+        import sys
+        from pathlib import Path
+        project_dir = str(Path(__file__).resolve().parent.parent)
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run, ["alembic", "upgrade", "head"],
+                capture_output=True, text=True, cwd=project_dir
+            )
+        except FileNotFoundError:
+            # CLI `alembic` non nel PATH (venv minimale): stessa migrazione via modulo.
+            result = await asyncio.to_thread(
+                subprocess.run, [sys.executable, "-m", "alembic", "upgrade", "head"],
+                capture_output=True, text=True, cwd=project_dir
+            )
         if result.returncode != 0:
             logger.error(f"Alembic migration failed: {result.stderr or result.stdout}")
             raise RuntimeError("Database migration failed; refusing to start with an incomplete schema")
@@ -83,6 +97,24 @@ async def lifespan(app: FastAPI):
         # Start as background async task
         asyncio.create_task(_consumer.start())
         asyncio.create_task(_auto_enrich_loop())
+        # SIEM v4: partizioni mensili pronte prima che arrivi il primo evento,
+        # poi listener syslog opzionale (default OFF).
+        if settings.SIEM_ENABLED:
+            try:
+                from app.database.connection import async_session_factory
+                from app.services.siem_store import ensure_monthly_partitions
+                async with async_session_factory() as _db:
+                    created = await ensure_monthly_partitions(_db)
+                    await _db.commit()
+                if created:
+                    logger.info(f"Partizioni SIEM verificate/creare: {created}")
+            except Exception as e:
+                logger.warning(f"Partizioni SIEM non verificate: {e}")
+            try:
+                from app.services.syslog_server import start_syslog_listener
+                await start_syslog_listener()
+            except Exception as e:
+                logger.warning(f"Listener syslog non avviato: {e}")
         # Retention schedulata (Fase 7): solo se abilitata, con audit e backup check
         try:
             if getattr(settings, "RETENTION_ENABLED", False):
@@ -101,6 +133,11 @@ async def lifespan(app: FastAPI):
     finally:
         if _consumer:
             _consumer.stop()
+        try:
+            from app.services.syslog_server import stop_syslog_listener
+            await stop_syslog_listener()
+        except Exception:
+            pass
         try:
             from app.services.retention import stop_retention_task
             stop_retention_task()

@@ -1,0 +1,27 @@
+title: DNS Query With Suspiciously Long Labels
+id: 9d2c7f43-1a86-4e5b-8c30-4f6d2b9e7a18
+status: experimental
+description: |
+  Il DNS tunneling codifica i dati nei nomi delle query: compaiono label molto
+  lunghe e ad alta entropia. La lunghezza è il primo filtro a basso costo; il
+  secondo è la frequenza, che appartiene alla correlazione.
+references:
+  - https://attack.mitre.org/techniques/T1071/004/
+author: Aegis Sigma bundle
+date: 2026/09/15
+logsource:
+  product: zeek
+  service: dns
+detection:
+  selection_long:
+    query|re: '[a-z0-9]{40,}\.'
+  condition: selection_long
+fields:
+  - query
+  - id.orig_h
+falsepositives:
+  - Alcuni CDN e telemetrie di prodotto usano label lunghe su domini noti
+level: medium
+tags:
+  - attack.exfiltration
+  - attack.t1071.004

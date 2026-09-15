@@ -1,0 +1,39 @@
+title: PowerShell Script Block With Encoded Or In-Memory Payload
+id: 6a9f0b14-3c85-4e2d-b7a1-8d5f2c6e9b03
+status: stable
+description: |
+  L'uso di `-EncodedCommand`/`-enc` o di decodifica base64 in uno script block
+  PowerShell è tipico di payload offuscati e di esecuzione fileless: il codice
+  non tocca mai il disco.
+references:
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://attack.mitre.org/techniques/T1027/
+author: Aegis Sigma bundle
+date: 2026/09/15
+logsource:
+  product: windows
+  service: powershell
+detection:
+  selection_block:
+    EventID: 4104
+  selection_encoded:
+    ScriptBlockText|contains:
+      - '-EncodedCommand'
+      - '-enc '
+      - 'FromBase64String'
+      - 'Invoke-Expression'
+      - 'IEX'
+      - 'DownloadString'
+      - 'DownloadFile'
+  condition: selection_block and selection_encoded
+fields:
+  - ScriptBlockText
+  - UserId
+falsepositives:
+  - Software di automazione legittimo che usa payload firmati e codificati
+level: high
+tags:
+  - attack.execution
+  - attack.defense_evasion
+  - attack.t1059.001
+  - attack.t1027

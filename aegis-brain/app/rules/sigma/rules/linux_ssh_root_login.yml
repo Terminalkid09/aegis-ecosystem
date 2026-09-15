@@ -1,0 +1,35 @@
+title: Direct Root SSH Login
+id: 7c0b3d56-2e94-4a8f-b5d1-9f6c4a2e8b37
+status: stable
+description: |
+  Un login SSH riuscito direttamente come root (PermitRootLogin=yes) elimina
+  l'accountability: non si sa chi ha agito, e un secondo fattore sulla chiave
+  non basta a tracciare la persona. È una configurazione da evitare e un
+  accesso da verificare quando compare.
+references:
+  - https://attack.mitre.org/techniques/T1078/003/
+author: Aegis Sigma bundle
+date: 2026/09/15
+logsource:
+  product: linux
+detection:
+  selection_login:
+    program|contains:
+      - 'sshd'
+      - 'ssh'
+    message|contains:
+      - 'Accepted'
+      - 'session opened for user root'
+  selection_user:
+    user: 'root'
+  condition: selection_login and selection_user
+fields:
+  - user
+  - src_ip
+falsepositives:
+  - Host di laboratorio dove il login root è intenzionale
+level: medium
+tags:
+  - attack.initial_access
+  - attack.persistence
+  - attack.t1078.003
