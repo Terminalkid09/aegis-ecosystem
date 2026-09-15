@@ -14,6 +14,7 @@ set "RESET=[0m"
 
 if /i "%~1"=="start" goto start_platform
 if /i "%~1"=="agents" goto start_agents
+if /i "%~1"=="pilot" goto pilot
 if /i "%~1"=="stop" goto stop
 if /i "%~1"=="clean" goto clean_db
 if /i "%~1"=="build" goto build
@@ -27,6 +28,7 @@ echo  %CYAN%====================================================================
 echo.
 echo  %GREEN%[1]%RESET% Start Backend (Docker) + Frontend (npm start)
 echo  %GREEN%[2]%RESET% Start Local Agents (NodeTrace ^& Aegis-Guard)
+echo  %GREEN%[P]%RESET% Pilot: platform + agents + verify (one command)
 echo  %GREEN%[3]%RESET% Stop All Services (Docker)
 echo  %GREEN%[4]%RESET% Clean Database (Wipes DB to apply new schemas)
 echo  %GREEN%[5]%RESET% View Agent Logs
@@ -38,6 +40,7 @@ set /p choice="Select an option: "
 
 if "%choice%"=="1" goto start_platform
 if "%choice%"=="2" goto start_agents
+if /i "%choice%"=="p" goto pilot
 if "%choice%"=="3" goto stop
 if "%choice%"=="4" goto clean_db
 if "%choice%"=="5" goto view_logs
@@ -73,9 +76,9 @@ if errorlevel 1 (
 echo  %YELLOW%[*] Pulling Llama3 model for Ollama (first time only)...%RESET%
 start "Ollama Pull" /B cmd /c "timeout /t 5 >nul && docker exec aegis-ollama ollama pull llama3 2>nul"
 
-netstat -ano | findstr ":3000 " | findstr "LISTENING" >nul
+netstat -ano | findstr ":5173 " | findstr "LISTENING" >nul
 if !errorlevel! equ 0 (
-    echo  %YELLOW%[!] Port 3000 is already in use. Skipping local npm start.%RESET%
+    echo  %YELLOW%[!] Port 5173 is already in use. Skipping local vite start.%RESET%
 ) else (
     if /i "%AEGIS_SKIP_FRONTEND_START%"=="1" (
         echo  %YELLOW%[!] AEGIS_SKIP_FRONTEND_START=1. Frontend launch skipped.%RESET%
@@ -90,13 +93,12 @@ if !errorlevel! equ 0 (
         )
         echo  %PURPLE%[*] Waiting for backend to initialize...%RESET%
         timeout /t 8 >nul
-        echo  %CYAN%[*] Starting React Dashboard (dev) on http://localhost:3000...%RESET%
-        echo  %CYAN%[*] Production dashboard: https://aegis.local (via Caddy TLS)%RESET%
-        start "Aegis Dashboard" cmd /k "cd /d "%ROOT%frontend" && set REACT_APP_API_URL=http://localhost:8000/api/v1 && npm start"
+        echo  %CYAN%[*] Starting Vite dev dashboard on http://localhost:5173 ^(container UI: http://localhost:3000^)...%RESET%
+        start "Aegis Dashboard" cmd /k "cd /d "%ROOT%frontend" && set VITE_API_URL=http://127.0.0.1:8000/api/v1 && npm run dev"
     )
 )
 echo  %GREEN%[+] Platform is running!%RESET%
-echo  %GREEN%[+] Dev API: http://localhost:8000/api/v1 ^| Dev UI: http://localhost:3000%RESET%
+echo  %GREEN%[+] Dev API: http://127.0.0.1:8000/api/v1 ^| Dev UI: http://localhost:5173 ^| Container UI: http://localhost:3000%RESET%
 echo  %GREEN%[+] Production (TLS): https://aegis.local (requires hosts file entry)%RESET%
 call :maybe_pause
 goto menu_or_exit
@@ -158,10 +160,10 @@ if exist "%ROOT%aegis-guard\secret.json" del /q /f "%ROOT%aegis-guard\secret.jso
 if exist "%ROOT%logs" rmdir /s /q "%ROOT%logs" >nul 2>&1
 mkdir "%ROOT%logs" 2>nul
 
-echo  %YELLOW%[*] Checking Docker backend is running (http://localhost:8000)...%RESET%
-cmd /c curl -s -o nul http://localhost:8000/ >nul 2>&1
+echo  %YELLOW%[*] Checking Docker backend is running (http://127.0.0.1:8000)...%RESET%
+cmd /c curl -s -o nul http://127.0.0.1:8000/ >nul 2>&1
 if !errorlevel! neq 0 (
-    echo  %RED%[!] Backend is not reachable at http://localhost:8000. Start it first with option [1].%RESET%
+    echo  %RED%[!] Backend is not reachable at http://127.0.0.1:8000. Start it first with option [1].%RESET%
     call :maybe_pause
     goto menu_or_exit
 )
@@ -173,8 +175,9 @@ if not defined ENV_KEY set "ENV_KEY=aegis-enroll-e17f250567d35991aadc5e60"
 
 set "AEGIS_ENROLL_KEY=!ENV_KEY!"
 
-:: Override HTTPS defaults for local dev (agents connect directly to brain, bypassing Caddy)
-set "NODETRACE_BASE=http://localhost:8000/api/v1"
+:: Override HTTPS defaults for local dev (agents connect directly to brain, bypassing Caddy).
+:: 127.0.0.1 esplicito (audit: "localhost" su Windows tenta prima ::1 con timeout lunghi).
+set "NODETRACE_BASE=http://127.0.0.1:8000/api/v1"
 set "NODETRACE_REGISTER_URL=%NODETRACE_BASE%/register"
 set "NODETRACE_UPDATE_URL=%NODETRACE_BASE%/update"
 set "NODETRACE_HEARTBEAT_URL=%NODETRACE_BASE%/heartbeat"
@@ -211,6 +214,17 @@ echo  %GREEN%[+] Host agents launched.%RESET%
 echo  %GREEN%  Logs: nodetrace.log, aegis-guard.log%RESET%
 call :maybe_pause
 goto menu_or_exit
+
+:pilot
+echo.
+echo  %PURPLE%=== AEGIS PILOT: platform + agents + verify (single command) ===%RESET%
+where python >nul 2>&1
+if errorlevel 1 (
+    echo  %RED%[!] Python not found on PATH. Install Python 3.10+ to run pilot.%RESET%
+    exit /b 1
+)
+python "%ROOT%scripts\pilot.py" %~2 %~3 %~4 %~5
+exit /b %errorlevel%
 
 :stop
 echo.
