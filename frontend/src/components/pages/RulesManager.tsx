@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ShieldAlert, Plus, Trash2, CheckCircle, XCircle, Beaker, Swords, Filter, Eye, EyeOff, Activity, Loader2 } from 'lucide-react'
 import { apiClient } from '@/services/api'
-import { cn } from '@/lib/utils'
+import { cn, asArray } from '@/lib/utils'
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: 'bg-red-500/10 text-red-400 border border-red-500/20',
@@ -42,12 +42,13 @@ export default function RulesManager() {
 
   const { data: rules = [], isLoading: loadingRules, error: rulesError } = useQuery({
     queryKey: ['custom-rules'],
-    queryFn: () => apiClient.get('/rules/').then(r => r.data || []),
+    // Audit schermo-nero: asArray, mai `|| []` su dati non verificati.
+    queryFn: () => apiClient.get('/rules/').then(r => asArray(r.data)),
   })
 
   const { data: staticRules = [], isLoading: loadingStatic } = useQuery({
     queryKey: ['static-rules'],
-    queryFn: () => apiClient.get('/rules/static').then(r => r.data || []),
+    queryFn: () => apiClient.get('/rules/static').then(r => asArray(r.data)),
   })
 
   const createMut = useMutation({
