@@ -43,6 +43,22 @@ else:
 
 TEST_REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
+# Guardrail: i test di integrazione eseguono `drop_all`/`create_all`. Un
+# `TEST_DATABASE_URL` che punta a un database reale **cancella dati reali**: non
+# e' un rischio teorico, e' successo puntandolo al DB di sviluppo — `drop_all`
+# ha emesso `DROP TABLE` su tabelle vere (il lock lo ha fermato, non la logica).
+# Qui si rifiuta a priori un nome di database che non contenga "test";
+# `ALLOW_NON_TEST_DB=1` resta l'unico modo esplicito per procedere.
+_test_db_name = TEST_DATABASE_URL.rsplit("/", 1)[-1].split("?")[0]
+if ("test" not in _test_db_name.lower()
+        and os.getenv("ALLOW_NON_TEST_DB", "").strip().lower() not in ("1", "true", "yes")):
+    raise RuntimeError(
+        f"Rifiutato: TEST_DATABASE_URL punta a {_test_db_name!r}, che non sembra un "
+        "database di test. La suite esegue drop_all/create_all e cancellerebbe i "
+        "dati reali. Usa un database dedicato (es. aegis_test), oppure — solo se "
+        "sei davvero sicuro — imposta ALLOW_NON_TEST_DB=1."
+    )
+
 # Ensure test database exists by connecting to default `postgres` database first
 async def _ensure_test_db():
     """Create aegis_test database if it doesn't exist."""

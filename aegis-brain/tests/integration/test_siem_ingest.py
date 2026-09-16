@@ -13,8 +13,11 @@ legittimo — e il test misurerebbe la dedup invece dell'ingestione.
 Richiede PostgreSQL (come il resto di `tests/integration`); Redis è opzionale:
 dedup e correlazione degradano senza, e i test lo dichiarano.
 """
+import json
 import os
+import re
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import func, select
@@ -29,6 +32,27 @@ LOGS = os.path.join(os.path.dirname(os.path.dirname(__file__)), "corpus", "logs"
 def _corpus(name: str) -> str:
     with open(os.path.join(LOGS, name), encoding="utf-8") as fh:
         return fh.read()
+
+
+def _window_hours(name: str = "windows_security.jsonl") -> int:
+    """Ore di finestra che coprono il corpus, calcolate dai suoi timestamp.
+
+    Il corpus ha timestamp **fissi**. Una finestra relativa scritta a mano
+    (`hours=24`) rende il test dipendente dal giorno in cui lo esegui: il
+    2026-09-16 il corpus del 2026-09-15T12:00 era gia' fuori finestra, e quattro
+    test di ricerca tornavano 0 eventi senza che nulla fosse rotto. La finestra
+    si ricava quindi dai timestamp del corpus, entro il massimo accettato
+    dall'API (720h), cosi' il test misura la ricerca e non il calendario.
+    """
+    first = json.loads(_corpus(name).splitlines()[0])
+    raw = first.get("TimeCreated") or first.get("Timestamp") or first.get("ts")
+    iso = str(raw).replace("Z", "+00:00")
+    # Windows Event Log usa 7 cifre frazionarie: `fromisoformat` prima di
+    # Python 3.11 ne accetta 3 o 6 (stessa normalizzazione di parse_timestamp).
+    iso = re.sub(r"(\.\d{6})\d+", r"\1", iso)
+    start = datetime.fromisoformat(iso)
+    age_hours = int((datetime.now(timezone.utc) - start).total_seconds() // 3600) + 2
+    return max(24, min(720, age_hours))
 
 
 def _source(prefix: str) -> str:
@@ -274,7 +298,7 @@ class TestSearch:
         source = await self._seed(client, admin_auth_headers)
 
         by_text = await client.get("/api/v1/search/events",
-                                   params={"q": "log was cleared", "hours": 24},
+                                   params={"q": "log was cleared", "hours": _window_hours()},
                                    headers=admin_auth_headers)
         assert by_text.status_code == 200
         assert by_text.json()["total"] >= 1
@@ -310,7 +334,8 @@ class TestSearch:
     async def test_search_wildcards_in_text_are_escaped(self, client, admin_auth_headers):
         """`%` non deve comportarsi da wildcard: altrimenti la ricerca torna tutto."""
         await self._seed(client, admin_auth_headers)
-        response = await client.get("/api/v1/search/events", params={"q": "%", "hours": 24},
+        response = await client.get("/api/v1/search/events",
+                                    params={"q": "%", "hours": _window_hours()},
                                     headers=admin_auth_headers)
         assert response.status_code == 200
         assert response.json()["total"] == 0
@@ -318,7 +343,8 @@ class TestSearch:
     async def test_search_pagination_is_bounded(self, client, admin_auth_headers):
         await self._seed(client, admin_auth_headers)
         response = await client.get("/api/v1/search/events",
-                                    params={"hours": 24, "limit": 3, "order": "asc"},
+                                    params={"hours": _window_hours(), "limit": 3,
+                                            "order": "asc"},
                                     headers=admin_auth_headers)
         assert response.status_code == 200
         body = response.json()
@@ -328,7 +354,8 @@ class TestSearch:
 
     async def test_stats_and_fields(self, client, admin_auth_headers):
         await self._seed(client, admin_auth_headers)
-        stats = await client.get("/api/v1/search/stats", params={"hours": 24},
+        stats = await client.get("/api/v1/search/stats",
+                                 params={"hours": _window_hours()},
                                  headers=admin_auth_headers)
         assert stats.status_code == 200
         assert stats.json()["total"] >= 1
@@ -340,7 +367,9 @@ class TestSearch:
 
     async def test_ingest_stats_include_rule_counts(self, client, admin_auth_headers):
         await self._seed(client, admin_auth_headers)
-        response = await client.get("/api/v1/ingest/stats", headers=admin_auth_headers)
+        response = await client.get("/api/v1/ingest/stats",
+                                    params={"hours": _window_hours()},
+                                    headers=admin_auth_headers)
         assert response.status_code == 200
         body = response.json()
         assert body["total"] >= 1
