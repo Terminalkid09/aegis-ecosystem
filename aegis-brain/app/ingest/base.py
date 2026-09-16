@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -117,9 +117,28 @@ def parse_timestamp(value: Any, *, default: Optional[datetime] = None) -> dateti
                 "%d/%b/%Y:%H:%M:%S %z"):
         try:
             dt = datetime.strptime(text[:26], fmt)
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
         except ValueError:
             continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if "%Y" not in fmt:
+            # Formato senza anno (syslog RFC3164, e i firewall/NAS/appliance che
+            # lo copiano): strptime ci mette il **1900**, e un evento del 1900
+            # non compare in nessuna ricerca a finestra temporale, viene
+            # cancellato subito dalla retention e non entra in nessuna
+            # correlazione. Si aggancia l'anno del riferimento, con il rollover
+            # di fine anno: una riga del 31/12 letta il 01/01 e' dell'anno prima.
+            anchor = fallback if fallback.tzinfo else fallback.replace(tzinfo=timezone.utc)
+            try:
+                dt = dt.replace(year=anchor.year)
+            except ValueError:
+                continue  # 29 febbraio in un anno non bisestile
+            if dt - anchor > timedelta(days=1):
+                try:
+                    dt = dt.replace(year=anchor.year - 1)
+                except ValueError:
+                    continue
+        return dt
     return fallback
 
 

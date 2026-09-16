@@ -55,6 +55,47 @@ def test_sigma_alert_carries_mitre_technique():
         assert alert.mitre_technique_id.startswith("T")
 
 
+def test_sigma_alert_mitre_fields_are_canonical():
+    """Id tecnica, nome tecnica e tattica: tre campi distinti, nessun riuso.
+
+    Regressione: `mitre_technique_name` conteneva il **titolo della regola**
+    (la UI mostrava `T1110.001 SSH Authentication Failure`, dove il nome della
+    tecnica e' "Password Guessing"), e i campi tattica restavano vuoti anche
+    quando la regola aveva il tag `attack.defense_evasion`.
+    """
+    event = _by_message_id(_windows_events(), 1102)      # win_log_cleared.yml
+    matches = get_sigma_engine().evaluate(event)
+    assert matches, "la regola log-cleared deve scattare sull'evento 1102"
+    alert = siem_pipeline._alert_from_sigma(event, matches[0], AGENT_ID)
+
+    assert alert.mitre_technique_id == "T1070.001"
+    assert alert.mitre_technique_name == "Clear Windows Event Logs"
+    assert alert.mitre_technique_name != matches[0].title, \
+        "il nome della tecnica non e' il titolo della regola"
+    assert alert.mitre_tactic_id == "TA0005"
+    assert alert.mitre_tactic_name == "Defense Evasion"
+
+
+def test_correlation_alert_inherits_tactic_from_rule_tags():
+    """Anche l'alert di correlazione porta la tattica della sua regola.
+
+    `CorrelationMatch` non trasportava i tag della regola, quindi l'alert di
+    correlazione perdeva la tattica che quello Sigma invece riportava.
+    """
+    match = CorrelationMatch(
+        rule_id="CORR-TEST", title="SSH brute force threshold", severity="HIGH",
+        description="Troppi fallimenti SSH dallo stesso mittente",
+        mitre=["T1110.001"], group_key="203.0.113.77", group_label="203.0.113.77",
+        observed=7, window_seconds=300, tags=["attack.credential_access"],
+    )
+    alert = siem_pipeline._alert_from_correlation(match, AGENT_ID)
+    assert alert.mitre_tactic_id == "TA0006"
+    assert alert.mitre_tactic_name == "Credential Access"
+    assert alert.mitre_technique_id == "T1110.001"
+    assert alert.mitre_technique_name == "Password Guessing"
+    assert alert.mitre_technique_name != match.title
+
+
 def test_sigma_alert_description_is_bounded():
     """Una descrizione lunghissima non deve finire intera nel DB."""
     from app.rules.sigma.model import SigmaMatch

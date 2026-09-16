@@ -222,7 +222,11 @@ class WindowsEventParser:
         events: List[UnifiedEvent] = []
         for record in records:
             norm = self._extract(record)
-            if not norm or not norm.get("Id"):
+            # `can_parse`/`_MARKERS` rivendicano anche la chiave `EventID` e
+            # `_parse_record` la gestisce: scartarla qui faceva rifiutare con
+            # "no Windows Event record found" un record che il parser aveva
+            # dichiarato di saper leggere.
+            if not norm or not (norm.get("Id") or norm.get("EventID")):
                 continue
             events.append(self._parse_record(norm, source, fallback_ts))
         if not events:

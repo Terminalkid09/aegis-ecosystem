@@ -87,6 +87,10 @@ class CorrelationMatch:
     group_label: str
     observed: int
     window_seconds: int
+    # Tag della regola: servono a chi costruisce l'alert per ricavare la
+    # tattica MITRE (`attack.credential_access` → TA0006). Senza, l'alert di
+    # correlazione perdeva la tattica che l'alert Sigma invece riportava.
+    tags: List[str] = field(default_factory=list)
     event: Optional[UnifiedEvent] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -279,7 +283,7 @@ class CorrelationEngine:
             return None
         return CorrelationMatch(
             rule_id=rule.id, title=rule.title, severity=rule.severity,
-            description=rule.description, mitre=rule.mitre,
+            description=rule.description, mitre=rule.mitre, tags=rule.tags,
             group_key=group_key, group_label=self._label(rule, event),
             observed=count, window_seconds=rule.window_seconds, event=event,
         )
@@ -303,7 +307,7 @@ class CorrelationEngine:
                         return None
                     return CorrelationMatch(
                         rule_id=rule.id, title=rule.title, severity=rule.severity,
-                        description=rule.description, mitre=rule.mitre,
+                        description=rule.description, mitre=rule.mitre, tags=rule.tags,
                         group_key=group_key, group_label=self._label(rule, event),
                         observed=len(rule._matchers), window_seconds=rule.window_seconds,
                         event=event,

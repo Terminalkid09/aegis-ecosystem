@@ -43,6 +43,43 @@ def test_timestamp_parsing_variants():
     assert parse_timestamp("not a date") is not None         # fallback, mai eccezione
 
 
+def test_timestamp_without_year_uses_reference_year():
+    """RFC3164 non porta l'anno, e `strptime` ci metteva il **1900**.
+
+    Per un SIEM che dichiara syslog come sorgente primaria e' un guasto
+    silenzioso: un evento del 1900 non compare in nessuna ricerca a finestra
+    temporale (quindi la pagina Log Search resta vuota), viene eliminato subito
+    dalla retention e non entra in nessuna finestra di correlazione.
+    """
+    from datetime import datetime, timezone
+
+    anchor = datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)
+    dt = parse_timestamp("Sep 16 11:48:45", default=anchor)
+    assert dt.year == 2026, f"anno sbagliato per una riga senza anno: {dt}"
+
+    # Rollover di fine anno: una riga del 31/12 letta il 01/01 e' dell'anno prima.
+    newyear = datetime(2027, 1, 1, 0, 5, tzinfo=timezone.utc)
+    assert parse_timestamp("Dec 31 23:59:00", default=newyear).year == 2026
+
+    # Un formato che l'anno ce l'ha non viene toccato.
+    assert parse_timestamp("2026-09-15 12:00:00", default=newyear).year == 2026
+    # 29 febbraio in un anno non bisestile: si ricade sul default, mai eccezione.
+    assert parse_timestamp("Feb 29 10:00:00", default=newyear) == newyear
+
+
+def test_windows_event_accepts_event_id_key():
+    """`can_parse` rivendica la chiave `EventID`, quindi `parse` deve accettarla.
+
+    Prima il record veniva scartato con "no Windows Event record found": un
+    payload che il parser dichiarava di saper leggere, e che poi rifiutava.
+    """
+    payload = {"EventID": 4625,
+               "EventData": {"TargetUserName": "root", "IpAddress": "203.0.113.9"}}
+    result = registry.parse("windows_event", payload, {"source": "winevent-test"})
+    assert result.events, f"record con chiave EventID rifiutato: {result.errors}"
+    assert str(result.events[0].message_id) == "4625"
+
+
 # ── registry ────────────────────────────────────────────────────────────────
 def test_registry_exposes_all_documented_sources():
     names = set(registry.names())

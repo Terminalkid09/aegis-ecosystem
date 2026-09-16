@@ -29,6 +29,7 @@ from app.core.logging import get_logger
 from app.database.models import Agent, Alert
 from app.ingest import default_registry
 from app.ingest.base import UnifiedEvent
+from app.rules.mitre import tactic_from_tags, technique_name
 from app.rules.sigma import get_engine as get_sigma_engine
 from app.services import siem_store
 from app.services.correlation import CorrelationMatch, get_correlation_engine
@@ -86,6 +87,7 @@ def _severity_rank(severity: str) -> int:
 
 def _alert_from_sigma(event: UnifiedEvent, match: Any, agent_id: uuid.UUID) -> Alert:
     technique = match.mitre_techniques[0] if match.mitre_techniques else None
+    tactic = tactic_from_tags(getattr(match, "tags", None))
     return Alert(
         agent_id=agent_id,
         severity=match.level.upper() if match.level else "MEDIUM",
@@ -97,14 +99,17 @@ def _alert_from_sigma(event: UnifiedEvent, match: Any, agent_id: uuid.UUID) -> A
         event_type=str(event.extra.get("event_type") or event.source_type)[:100],
         description=f"[SIGMA {match.rule_id}] {match.title}"
                     + (f" — {event.message[:200]}" if event.message else ""),
+        mitre_tactic_id=tactic[0] if tactic else None,
+        mitre_tactic_name=tactic[1] if tactic else None,
         mitre_technique_id=technique,
-        mitre_technique_name=match.title if technique else None,
+        mitre_technique_name=technique_name(technique),
     )
 
 
 def _alert_from_correlation(match: CorrelationMatch, agent_id: uuid.UUID) -> Alert:
     event = match.event
     technique = match.mitre[0] if match.mitre else None
+    tactic = tactic_from_tags(match.tags)
     detail = f" ({match.group_label})" if match.group_label else ""
     return Alert(
         agent_id=agent_id,
@@ -115,8 +120,10 @@ def _alert_from_correlation(match: CorrelationMatch, agent_id: uuid.UUID) -> Ale
         event_type="CORRELATION",
         description=f"[CORRELATION {match.rule_id}] {match.title}{detail} — "
                     f"{match.observed} eventi in {match.window_seconds}s",
+        mitre_tactic_id=tactic[0] if tactic else None,
+        mitre_tactic_name=tactic[1] if tactic else None,
         mitre_technique_id=technique,
-        mitre_technique_name=match.title if technique else None,
+        mitre_technique_name=technique_name(technique),
     )
 
 
