@@ -33,7 +33,7 @@ ricerca distribuito. Il limite di scala è misurato e documentato
 | 4 | **Correlazione multi-evento** | Regole `threshold` (N eventi in T su un gruppo) e `sequence` (A poi B in T) su stato Redis; ≥3 regole demo (brute force, service creation post-logon, port sweep) con test |
 | 5 | **Store + ricerca** | Tabella eventi con indice su `(timestamp, source)`; `POST /api/v1/search/events` con filtro tempo/sorgente/severità/campo/testo + paginazione; `GET /api/v1/search/stats` (EPS, top sources, top field) |
 | 6 | **Pipeline detection → SOAR** | Una detection Sigma/correlazione crea un alert che entra nella pipeline esistente (dedup, suppression, playbook, UI) senza modifiche ai consumer |
-| 7 | **Dato reale dal lab** | Collector **Windows Event Log** funzionante sul PC di sviluppo che invia eventi reali (4624/4625/7045…) all'endpoint di ingest |
+| 7 | **Dato reale dal lab** | Collector **Windows Event Log** funzionante sul PC di sviluppo che invia eventi reali (4624/4625/7045…) all'endpoint di ingest — **ESEGUITO**: canale `System`, 10 eventi `7045` reali → `stored=10` in `siem_events` (2026-09-16). Sul canale `Security` serve una shell elevata |
 | 8 | **Demo riproducibile** | `scripts/siem_demo.py` invia sample **nei formati reali** (Zeek, Suricata, syslog RFC5424, Windows Event JSON) marcati come sintetici in docs; `--dry-run` per ispezionare i payload |
 | 9 | **UI** | Pagina *Log Sources* (sorgenti, EPS, health, istruzioni di invio) + pagina *Search* (query, filtri, risultati, dettaglio) |
 | 10 | **Validazione** | Tutte le suite verdi; `docs/VALIDATION.md` aggiornato con i numeri del SIEM; test per parser, Sigma, correlazione, search |

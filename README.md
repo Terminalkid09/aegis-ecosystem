@@ -94,6 +94,14 @@ build.bat
 ## Authentication Model
 
 - **Dashboard**: Bearer JWT after `POST /api/v1/auth/login` or register. Telemetry, rules, VaultX, OSINT, AI, OCSF export and Aegis Total all require JWT.
+- **Roles**: `ROLE_PERMISSIONS` in `app/core/deps.py` maps `viewer`/`user`/`auditor`/`responder`/`analyst`/`admin` to permissions. The role is read from the database on **every** request, so a change applies without re-login. Registration always creates a `user`: privilege is granted from a shell, never from an exposed API.
+
+  ```cmd
+  docker exec aegis-brain python -m app.admin list
+  docker exec aegis-brain python -m app.admin set-role <email> admin
+  ```
+
+  Without at least one `admin`, host isolation, deploy approval, rule and alert deletion and site assignment all return 403 by design. `set-role` refuses to demote the last remaining admin unless `--force` is given.
 - **Agents**: enrollment key at registration, then per-agent Bearer token (NodeTrace) or gateway API key (Aegis-Link).
 - **Aegis-Link**: `X-Api-Key` for event ingestion — server-side only, not exposed to the React app.
 
@@ -140,8 +148,45 @@ python agent.py
 ```cmd
 cd aegis-guard
 set AEGIS_BRAIN_URL=http://localhost:8000/api/v1
-java -jar jre-new/bin/java.exe -jar target\aegis-guard.jar
+set AEGIS_GATEWAY_URL=http://localhost:8000/api/v1/telemetry/report
+set AEGIS_ENROLL_KEY=<key>
+jre-new\bin\java.exe -jar target\aegis-guard.jar
 ```
+
+Due dettagli che fanno fallire l'avvio in modo poco leggibile:
+
+- **Serve una JVM 21+**, e la `java` del `PATH` non è automaticamente adatta: se
+  è una 8, il servizio si installa, parte e muore con
+  `UnsupportedClassVersionError`. L'installer (`install.ps1`) verifica la
+  **versione** e usa il percorso risolto, non la stringa `java`.
+- **`AEGIS_ENROLL_KEY` è obbligatoria** anche quando `secret.json` esiste già:
+  `Config.ENROLL_KEY` viene letta all'avvio con `getEnvOrThrow`, quindi senza di
+  essa il processo termina subito.
+
+Se usi il runtime minimo creato da `build.bat`, deve contenere il modulo
+`jdk.net`: Apache HttpClient 5 usa `jdk.net.Sockets` e `jlink` non deduce le
+ dipendenze del codice sul classpath. Il modulo è già nell'elenco
+`--add-modules` di `build.bat`.
+
+## Telemetry Collection Layers
+
+Ogni sorgente entra nello **stesso** modello evento e nello **stesso** motore di
+rilevazione. Due strade convergono, e la prima non richiede alcun agente
+residente sul sistema osservato.
+
+| Livello | Dove gira | Cosa porta | Firma richiesta |
+|---|---|---|---|
+| **eBPF** (`aegis-ebpf/`) | Linux, kernel | `sched_process_exec`, `do_exit`, TCP ESTABLISHED via ringbuf | no (verifier del kernel) |
+| **ETW Kernel providers** (`aegis-ebpf/aegis_etw.c`) | Windows, consumer user-mode | `Kernel-Process` 1/2, `Kernel-Network` TcpIp | no (provider di sistema) |
+| **Agenti endpoint** | host | Guard (processi, persistenze, servizi), NodeTrace (CPU/RAM/disco/rete/utenti) | enrollment firmato + mTLS |
+| **Sorgenti di log** | appliance, server | syslog RFC5424/3164, Windows Event, Zeek, Suricata, nginx/Squid, firewall | nessuna installazione: solo una riga verso l'endpoint |
+
+Su Linux la telemetria kernel è nativa (eBPF, validata 300/300 eventi senza
+perdite su kernel 6.6 con BTF). Su Windows lo è tramite ETW, che è esposto dal
+sistema operativo e quindi **non richiede** un driver firmato. Un driver
+kernel-mode proprietario serve solo per la **prevenzione inline**: quella
+richiede firma EV e attestazione Microsoft, ed è dichiarata fuori scope in
+`docs/V4_SCOPE.md` insieme a ETW-TI.
 
 ## Features
 

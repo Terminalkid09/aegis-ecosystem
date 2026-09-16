@@ -29,7 +29,10 @@ Tutte eseguite su host di sviluppo (Windows 11, Python 3.10, JDK 25),
 
 | Componente | Comando | Risultato |
 |---|---|---|
-| aegis-brain (con PG+Redis reali) | `pytest tests/` (con `REQUIRE_INTEGRATION=1`) | **533 passed, 0 failed** — gli skipped in questo profilo sono solo i test OS-specifici (non-Windows) |
+| aegis-brain (con PG+Redis reali) | `pytest tests/` (con `REQUIRE_INTEGRATION=1`) | **537 passed, 0 failed** — gli skipped in questo profilo sono solo i test OS-specifici (non-Windows) |
+| **Stack live, end-to-end via API** | `python scripts/api_smoke.py --email <utente> --password <pw>` | **ALL PASS** — 17 controlli: ingestione syslog reale → evento normalizzato e ricercabile (`src_ip` estratto) → alert Sigma con tecnica MITRE → idempotenza `event_id` → 422 su payload non riconosciuto → RBAC coerente col ruolo. Senza credenziali l'uscita è 2, non un "tutto verde" incompleto |
+| **Collector Windows Event Log (log reali del PC)** | `powershell -File scripts/winevent-collector.ps1 -Once -Channels System -ApiKey <key>` | **`[ok] 10 eventi -> stored=10`** in `siem_events`, timestamp corretti, accenti preservati (era l'unico componente v4 mai eseguito) |
+| **Aegis-Guard end-to-end (Windows 11)** | `jre\bin\java.exe -jar target/aegis-guard.jar` | enrollment + identità device via CSR + process monitor attivo (18 persistenze, 820 servizi) + eventi consegnati `HTTP 200` |
 | aegis-brain (senza integrazione) | `pytest tests/ --ignore=tests/integration` | **390 passed, 16 skipped** (skipped = richiedono PG/Redis reali) |
 | aegis-brain — SIEM v4 | `pytest tests/test_ingest_parsers.py tests/test_sigma_engine.py tests/test_correlation_engine.py tests/test_siem_store.py tests/test_siem_pipeline.py` | **VERDE** |
 | aegis-brain — API SIEM | `pytest tests/integration/test_siem_ingest.py` | **VERDE** |
@@ -119,7 +122,7 @@ log convertiti da EVTX/Auditd, dataset di ricerca con licenza compatibile.
 | API ingest/search end-to-end | **VERDE** | `tests/integration/test_siem_ingest.py` (25 test) |
 | **Listener syslog** (UDP + TCP) | **VERDE** | `test_syslog_listener.py` (8) + `tests/integration/test_syslog_listener.py` (3): datagrammi reali sullo store, non chiamate interne |
 | Retention degli eventi SIEM | **VERDE** | `tests/integration/test_retention_siem.py` (3) |
-| **Log reali dal tuo host** | **NOT-RUN** | collector `scripts/winevent-collector.ps1` pronto: l'output misura la qualità sui *tuoi* Event Log |
+| **Log reali dal tuo host** | **VERDE** | collector eseguito sugli Event Log reali del PC (canale System): 10 eventi `7045` → `stored=10` in `siem_events`. Sui canali `Security`/`Application` serve una shell **elevata** (`Get-WinEvent` su Security senza admin non restituisce nulla) |
 | Log reali da Zeek/Suricata/syslog esterni | **NON DISPONIBILE in lab** | i parser sono validati su sample di formato reale; la sorgente non esiste in questo lab |
 
 Nota onesta sul corpus: i log in `tests/corpus/logs/` sono **sample di formato
@@ -131,8 +134,10 @@ richiede la sorgente, ed è dichiarata come tale.
 Per produrre eventi reali dal PC di sviluppo:
 
 ```powershell
-# Windows Event Log → endpoint di ingestione (richiede un JWT)
-pwsh -File scripts/winevent-collector.ps1 -BrainUrl http://localhost:8000 -Token $env:AEGIS_JWT
+# Windows Event Log → endpoint di ingestione (una passata, invio reale)
+# -ApiKey accetta AEGIS_API_KEY; un JWT non e' supportato da questo collector.
+powershell -File scripts/winevent-collector.ps1 -Once -Channels System `
+    -BaseUrl http://127.0.0.1:8000 -ApiKey $env:AEGIS_API_KEY
 ```
 
 Per la demo end-to-end con tutti i formati (dichiara i sample come sintetici):

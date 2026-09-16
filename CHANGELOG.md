@@ -35,6 +35,97 @@
   parser dedicato e nessuna estensione viene rifiutata.
 - **Elenchi di accettazione**: nuovi formati + endpoint `/total/formats`
   (fonte unica di verità per la UI).
+- **Timestamp syslog nel 1900 (P0)**: RFC3164 non porta l'anno e
+  `parse_timestamp` usava `datetime.strptime`, che in assenza di anno mette
+  **1900**. Conseguenza: ogni evento da firewall/switch/NAS/appliance — cioè la
+  sorgente che `syslog.py` stessa dichiara come primaria per un SIEM — finiva
+  nel 1900. Non era visibile in nessuna ricerca a finestra temporale (la pagina
+  *Log Search* risultava vuota), veniva eliminato subito dalla retention e non
+  entrava in nessuna finestra di correlazione. Ora l'anno si aggancia al
+  riferimento, con rollover di fine anno e senza toccare i formati che l'anno
+  ce l'hanno.
+- **MITRE: nome della tecnica sbagliato e tattica assente**: gli alert Sigma
+  scrivevano in `mitre_technique_name` il **titolo della regola**, quindi la UI
+  mostrava `T1110.001 SSH Authentication Failure` dove il nome della tecnica è
+  "Password Guessing"; `mitre_tactic_id`/`mitre_tactic_name` restavano vuoti
+  anche con il tag `attack.credential_access` presente nella regola. Aggiunta
+  la tabella condivisa `app/rules/mitre.py` (tattiche + nomi delle tecniche
+  referenziate dalle regole in bundle; una tecnica sconosciuta resta senza nome
+  invece di essere indovinata) e i tag delle regole ora viaggiano anche su
+  `CorrelationMatch`, così l'alert di correlazione porta la sua tattica.
+- **Nessun percorso per ottenere il ruolo privilegiato (P1)**: la matrice
+  `ROLE_PERMISSIONS` era applicata in una decina di endpoint, ma nulla — né API
+  né UI — poteva assegnare `admin`/`analyst`/`responder`: il database non aveva
+  **nessun** admin, e anche l'utente `admin@aegis.com` era ruolo `user`. Così
+  isolamento host, approvazione deploy, cancellazione regole/alert e
+  assegnazione site rispondevano sempre 403. Aggiunta `python -m app.admin`
+  (`list`, `set-role`, `create-user`): **fuori** dal processo HTTP, con audit e
+  rifiuto di togliere l'ultimo admin. Un privilegio si concede da una shell,
+  non da un'API esposta.
+- **`windows_event` rifiutava ciò che `can_parse` rivendicava**: un record con
+  chiave `EventID` (per `_MARKERS` e `_parse_record` sono supportati) veniva
+  scartato con "no Windows Event record found". Un payload dichiarato leggibile
+  e poi rifiutato.
+- **Aegis-Guard non partiva (P0 di packaging, tre cause)**: (1) `build.bat`
+  costruiva il runtime minimo con `jlink` senza il modulo **`jdk.net`**, che
+  Apache HttpClient 5 richiede (`jdk.net.Sockets`): il JRE risultava corretto e
+  l'agente moriva con `NoClassDefFoundError`; (2) `install.ps1` installava il
+  servizio con la stringa `"java"` letterale invece del percorso risolto, e non
+  verificava la **versione**: con una `java` 8 nel `PATH` il servizio partiva e
+  moriva con `UnsupportedClassVersionError`; (3) lo stesso script impostava solo
+  `AEGIS_GATEWAY_URL`/`AEGIS_AGENT_ID`/`AEGIS_SCAN_INTERVAL_MS`, mai
+  `AEGIS_ENROLL_KEY` (che `Config.ENROLL_KEY` legge con `getEnvOrThrow`, quindi
+  fatale all'avvio) né `AEGIS_BRAIN_URL`. Verificato end-to-end su Windows 11:
+  enrollment, emissione identità device via CSR, process monitor attivo, eventi
+  consegnati con HTTP 200.
+- **Estrazione del JRE portatile incompleta**: l'installer spostava solo `bin/`
+  dalla distribuzione scaricata, producendo un runtime che non parte
+  (`could not open ...\lib\jvm.cfg`). Ora si sposta l'intera distribuzione.
+- **Test dipendenti dal calendario**: `tests/integration/test_siem_ingest.py`
+  interrogava la ricerca con `hours=24` su un corpus con timestamp **fissi**
+  (2026-09-15T12:00). Il giorno dopo quattro test fallivano senza che nulla
+  fosse rotto — un falso negativo che arriva esattamente quando si esegue la
+  suite prima di una release. La finestra ora si calcola dai timestamp del
+  corpus, entro il massimo accettato dall'API.
+- **Suite di test che poteva cancellare il database di sviluppo**: `conftest.py`
+  si fidava di `TEST_DATABASE_URL` senza controllare il nome del database, e i
+  test eseguono `drop_all`/`create_all`. Ora un database che non contenga
+  "test" nel nome viene rifiutato con un messaggio esplicito
+  (`ALLOW_NON_TEST_DB=1` è l'unico override).
+
+- **Collector Windows Event Log: nessun evento inviato (tre bug distinti, tutti
+  silenziosi)**: il collector era l'unico componente dello scope v4 **mai
+  eseguito su log reali**. Al primo utilizzo serio sono emersi tre difetti:
+  1. **`Get-WinEvent` con troppi ID restituisce zero eventi senza errore**: la
+     lista completa di `$InterestingIds` (24 ID) non produce nulla su System,
+     mentre un sottoinsieme di 22 produce i 201 eventi attesi. Il collector
+     dichiarava "0 eventi" su un canale che ne aveva 201. Ora la query si fa a
+     blocchi da 16 e i risultati si uniscono per `RecordId`.
+  2. **Corpo troncato da PowerShell 5.1**: il body JSON era passato a
+     `Invoke-RestMethod` come *stringa*, e PS 5.1 calcola `Content-Length` dal
+     numero di caratteri. Un messaggio di Windows con accenti (2470 caratteri,
+     2479 byte) veniva troncato e il brain rispondeva `There was an error
+     parsing the body`. Su qualunque Windows non inglese l'invio era
+     impossibile. Ora il corpo è inviato come byte UTF-8.
+  3. **Bookmark avanzato prima dell'invio**: lo stato per canale veniva scritto
+     *prima* di sapere se l'invio era riuscito, quindi un 4xx/5xx marcava gli
+     eventi come "già inviati" e la passata successiva non li ritrovava più:
+     perdita definitiva. Ora il bookmark si aggiorna solo dopo un invio
+     riuscito, e `-DryRun` non lo tocca affatto (prima la passata di prova
+     "consumava" gli eventi senza inviarli).
+  Verificato end-to-end sul PC di sviluppo: 10 eventi `7045` reali →
+  `stored=10` in `siem_events`, con timestamp corretti e accenti preservati.
+
+### Test e verifica
+- **`scripts/api_smoke.py` esteso da 3 a 17 controlli**: oltre a
+  `/health/live`, `/health/ready` e `/metrics`, ora esegue uno sweep
+  **autenticato** sul percorso reale: login → catalogo parser → copertura
+  detection → ingestione di un log syslog vero → evento normalizzato e
+  ricercabile con `src_ip` estratto → alert Sigma con tecnica MITRE →
+  idempotenza dell'`event_id` → 422 con diagnosi su payload non riconosciuto →
+  coerenza del RBAC col ruolo dichiarato. Senza credenziali il livello
+  autenticato **non viene saltato in silenzio**: l'uscita è 2 con il motivo
+  (`--public-only` è la scelta esplicita per il run incompleto).
 
 ### Sicurezza
 - **Rate limiter**: storage Redis (`RATE_LIMIT_STORAGE_URI`) e `key_func`
