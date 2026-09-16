@@ -17,6 +17,13 @@ token_agent.json
 NodeTrace/agents/python/*.secret
 NodeTrace/agents/python/token.json
 aegis-guard/secret.json
+# Identità di device emessa all'enrollment (`device.key` è già coperta da
+# `*.key`) e spool dell'outbox: il certificato lega l'agente alla propria
+# identità e lo spool contiene telemetria bufferizzata, nessuno dei due va
+# versionato. Senza queste righe un `git add -A` li committa.
+aegis-guard/device.crt
+aegis-guard/device.pem
+aegis-guard/spool/
 
 # Build artifacts & target directories
 target/

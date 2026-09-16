@@ -21,23 +21,64 @@ if (-not (Test-Path $nssmPath)) {
 }
 Write-Host "  [OK] nssm.exe found" -ForegroundColor Green
 
-# Automated JRE check/download
-$jrePath = Join-Path $scriptPath "jre\bin\java.exe"
-if ($null -eq (Get-Command java -ErrorAction SilentlyContinue) -and -not (Test-Path $jrePath)) {
-    Write-Host "  *  Java not found. Downloading portable JRE..." -ForegroundColor Yellow
-    $jreZip = Join-Path $scriptPath "jre.zip"
-    Invoke-WebRequest -Uri "https://aka.ms/download-jdk/microsoft-jdk-21-windows-x64.zip" -OutFile $jreZip # Example URL
-    Expand-Archive -Path $jreZip -DestinationPath (Join-Path $scriptPath "jre_temp")
-    Move-Item (Join-Path $scriptPath "jre_temp\*\bin") (Join-Path $scriptPath "jre\bin") -Force
-    Remove-Item $jreZip
-    Remove-Item (Join-Path $scriptPath "jre_temp") -Recurse
-    $javaExe = $jrePath
-} elseif (Test-Path $jrePath) {
-    $javaExe = $jrePath
-} else {
-    $javaExe = "java"
+# Java: il jar è compilato con target 21, quindi serve una JVM 21+.
+# Va verificata la **versione**, non la sola presenza: un `java` nel PATH può
+# essere la 8 (su questa macchina lo era), il servizio si installa, parte e
+# muore con UnsupportedClassVersionError — e in UI l'host semplicemente non
+# compare. Inoltre il percorso risolto va usato nel comando di installazione:
+# prima c'era la stringa "java", quindi $javaExe veniva calcolato e ignorato.
+function Get-JavaMajor([string]$exe) {
+    try {
+        $first = (& $exe -version 2>&1 | Select-Object -First 1)
+        if ("$first" -match 'version "(\d+)(?:\.(\d+))?') {
+            $major = [int]$Matches[1]
+            if ($major -eq 1 -and $Matches[2]) { return [int]$Matches[2] }   # 1.8 -> 8
+            return $major
+        }
+    } catch { }
+    return 0
 }
-Write-Host "  [OK] Using Java: $javaExe" -ForegroundColor Green
+
+$requiredMajor = 21
+$javaCandidates = @()
+foreach ($bundled in @("$scriptPath\jre-new\bin\java.exe", "$scriptPath\jre\bin\java.exe")) {
+    if (Test-Path $bundled) { $javaCandidates += $bundled }
+}
+$pathJava = (Get-Command java -ErrorAction SilentlyContinue).Source
+if ($pathJava) { $javaCandidates += $pathJava }
+
+$javaExe = $null
+foreach ($candidate in $javaCandidates) {
+    if ((Get-JavaMajor $candidate) -ge $requiredMajor) { $javaExe = $candidate; break }
+}
+
+if (-not $javaExe) {
+    Write-Host "  *  Nessuna Java $requiredMajor+ trovata: scarico il JDK portatile..." -ForegroundColor Yellow
+    $jreZip = Join-Path $scriptPath "jre.zip"
+    Invoke-WebRequest -Uri "https://aka.ms/download-jdk/microsoft-jdk-21-windows-x64.zip" -OutFile $jreZip
+    $jreTemp = Join-Path $scriptPath "jre_temp"
+    Expand-Archive -Path $jreZip -DestinationPath $jreTemp
+    # Va spostata l'intera distribuzione, non solo `bin`: con il solo `bin` il
+    # JRE risultante non parte ("could not open ...\lib\jvm.cfg"), ed è
+    # esattamente ciò che era rimasto su disco in aegis-guard\jre.
+    $inner = (Get-ChildItem $jreTemp -Directory | Select-Object -First 1).FullName
+    if (-not $inner) { $inner = $jreTemp }
+    $jreDest = Join-Path $scriptPath "jre"
+    if (Test-Path $jreDest) { Remove-Item $jreDest -Recurse -Force }
+    New-Item -ItemType Directory -Path $jreDest -Force | Out-Null
+    Move-Item (Join-Path $inner "*") $jreDest -Force
+    Remove-Item $jreZip
+    Remove-Item $jreTemp -Recurse
+    $javaExe = Join-Path $jreDest "bin\java.exe"
+}
+
+$javaMajor = Get-JavaMajor $javaExe
+if ($javaMajor -lt $requiredMajor) {
+    Write-Error "[X] Serve Java $requiredMajor+ per Aegis-Guard; trovata la versione $javaMajor in $javaExe"
+    Write-Host "    Installa una JRE/JDK 21+ (o copia un runtime in '$scriptPath\jre') e ripeti." -ForegroundColor Yellow
+    exit 1
+}
+Write-Host "  [OK] Using Java: $javaExe (major $javaMajor)" -ForegroundColor Green
 
 if ($null -eq (Get-Command mvn -ErrorAction SilentlyContinue)) {
     Write-Error "[X] Maven not found in PATH. Please install Maven 3.8+ and add to PATH."
@@ -75,7 +116,16 @@ if (-not $envVars['AEGIS_API_KEY']) {
     Write-Error "[X] AEGIS_API_KEY not found in .env"
     exit 1
 }
+# La chiave di enrollment è **obbligatoria**: `Config.ENROLL_KEY` la legge con
+# getEnvOrThrow all'avvio, quindi senza di essa il servizio si installa, parte e
+# muore. Prima non veniva passata al servizio (solo AGENT_ENROLL_KEY nel .env,
+# con nome diverso da quello che il Java legge).
+if (-not ($envVars['AGENT_ENROLL_KEY'] -or $envVars['AEGIS_ENROLL_KEY'])) {
+    Write-Error "[X] AGENT_ENROLL_KEY not found in .env — senza chiave di enrollment il servizio non parte."
+    exit 1
+}
 Write-Host "  [OK] AEGIS_API_KEY configured" -ForegroundColor Green
+Write-Host "  [OK] enrollment key configured" -ForegroundColor Green
 Write-Host "  [OK] Environment loaded" -ForegroundColor Green
 
 # === BUILD / ARTIFACT CHECK ===
@@ -128,6 +178,17 @@ if (-not $gatewayUrl) {
     $gatewayUrl = "http://localhost:8088/api/v1/events"
 }
 
+# Il brain serve per enrollment, CSR e update. `Config.BRAIN_URL` si aspetta
+# l'URL **con** il prefisso /api/v1 (il suo default è
+# `https://aegis.local/api/v1`), quindi va composto qui e non lasciato al default:
+# senza questa variabile il servizio puntava a aegis.local e l'enrollment falliva.
+$brainUrl = $envVars['AEGIS_BRAIN_URL']
+if (-not $brainUrl) { $brainUrl = "http://localhost:8000/api/v1" }
+if ($brainUrl -match "aegis-brain:8000") {
+    $brainUrl = $brainUrl -replace "aegis-brain:8000", "localhost:8000"
+}
+if ($brainUrl -notmatch "/api/v1/?$") { $brainUrl = $brainUrl.TrimEnd('/') + "/api/v1" }
+
 # Rewrite Docker internal URL to localhost for host execution
 if ($gatewayUrl -match "aegis-link:8080") {
     $externalPort = $envVars['LINK_PORT_EXTERNAL']
@@ -151,7 +212,7 @@ if (Get-Service "AegisGuard" -ErrorAction SilentlyContinue) {
 }
 
 # Install service
-& $nssmPath install AegisGuard "java" "-jar `"$jarPath`""
+& $nssmPath install AegisGuard "$javaExe" "-jar `"$jarPath`""
 if ($LASTEXITCODE -ne 0) {
     Write-Error "[X] Failed to install service via NSSM"
     exit 1
@@ -165,8 +226,15 @@ if ($envVars['AEGIS_SCAN_INTERVAL_MS']) {
     $scanInterval = '1000'
 }
 
+$enrollKey = $envVars['AGENT_ENROLL_KEY']
+if (-not $enrollKey) { $enrollKey = $envVars['AEGIS_ENROLL_KEY'] }
+
+# Nota: la chiave di enrollment resta nella configurazione del servizio. È
+# inevitabile perché `Config.ENROLL_KEY` è letta all'avvio anche quando
+# `secret.json` esiste già; il token di enrollment ha scadenza breve ed è
+# monouso, quindi il valore esposto non è una credenziale device.
 & $nssmPath set AegisGuard AppEnvironmentExtra `
-    "AEGIS_GATEWAY_URL=$gatewayUrl`nAEGIS_GUARD_API_KEY=$apiKey`nAEGIS_AGENT_ID=$agentId`nAEGIS_SCAN_INTERVAL_MS=$scanInterval"
+    "AEGIS_GATEWAY_URL=$gatewayUrl`nAEGIS_BRAIN_URL=$brainUrl`nAEGIS_GUARD_API_KEY=$apiKey`nAEGIS_ENROLL_KEY=$enrollKey`nAEGIS_AGENT_ID=$agentId`nAEGIS_SCAN_INTERVAL_MS=$scanInterval"
 
 # Set service recovery
 & $nssmPath set AegisGuard AppExit Default Restart
@@ -188,9 +256,9 @@ if ($svc.Status -eq "Running") {
     Write-Host "  [X] Service failed to start (Status: $($svc.Status))" -ForegroundColor Red
     Write-Host "`n  Troubleshooting:" -ForegroundColor Yellow
     Write-Host "    - Check Event Viewer: Applications and Services Logs > Windows > NSSM"
-    Write-Host "    - Check Java version: java -version"
+    Write-Host "    - Check Java version: & '$javaExe' -version"
     Write-Host "    - Check JAR exists: Test-Path '$jarPath'"
-    Write-Host "    - Try manual start: java -jar '$jarPath'"
+    Write-Host "    - Try manual start: & '$javaExe' -jar '$jarPath'"
     exit 1
 }
 

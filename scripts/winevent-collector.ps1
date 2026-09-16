@@ -149,7 +149,13 @@ function Send-Batch {
     $params = @{
         Uri         = $uri
         Method      = 'POST'
-        Body        = $body
+        # Il corpo va inviato come **byte UTF-8**, non come stringa: PowerShell
+        # 5.1 calcola Content-Length dal numero di caratteri, quindi un messaggio
+        # di Windows con accenti (es. 2470 caratteri ma 2479 byte) viene
+        # troncato e il brain risponde "There was an error parsing the body".
+        # Su un Windows non inglese questo rendeva impossibile inviare
+        # qualunque evento: il collector leggeva, inviava e falliva sempre.
+        Body        = [System.Text.Encoding]::UTF8.GetBytes($body)
         ContentType = 'application/json'
         Headers     = $headers
         TimeoutSec  = 30
@@ -170,33 +176,67 @@ function Send-Batch {
     }
 }
 
+# `Get-WinEvent -FilterHashtable` con un array `Id` lungo restituisce **zero
+# eventi senza segnalare un errore**: su un canale System la lista completa di
+# $InterestingIds (24 ID) non produce nulla, mentre un sottoinsieme di 22
+# produce i 201 eventi attesi. La query sembra riuscita e non arriva niente,
+# quindi il collector dichiarava "0 eventi" su un canale che ne aveva 201 —
+# esattamente il guasto silenzioso che un collector non si puo' permettere.
+# Si interroga a blocchi e si uniscono i risultati per RecordId.
+$IdChunkSize = 16
+
+function Get-EventsById {
+    param(
+        [string]   $Channel,
+        [int[]]    $Ids,
+        [datetime] $StartTime,
+        [int]      $MaxEvents = 200
+    )
+
+    $byRecordId = @{}
+    for ($i = 0; $i -lt $Ids.Count; $i += $IdChunkSize) {
+        $chunk = $Ids[$i..([Math]::Min($i + $IdChunkSize - 1, $Ids.Count - 1))]
+        try {
+            $batch = Get-WinEvent -FilterHashtable @{
+                LogName   = $Channel
+                Id        = $chunk
+                StartTime = $StartTime
+            } -MaxEvents $MaxEvents -ErrorAction Stop
+        } catch {
+            # Nessun evento per questo blocco, oppure canale assente o senza
+            # permessi (es. Security senza sessione elevata): non e' fatale.
+            Write-Verbose "blocco su $Channel non leggibile: $($_.Exception.Message)"
+            continue
+        }
+        foreach ($item in $batch) { $byRecordId[$item.RecordId] = $item }
+    }
+
+    # Il piu' nuovo di ogni blocco e' nel blocco: unire e riordinare per
+    # RecordId da' gli N piu' recenti davvero, senza perdere quelli di un
+    # blocco con ID poco trafficati.
+    $merged = @($byRecordId.Values | Sort-Object RecordId -Descending)
+    if ($merged.Count -gt $MaxEvents) { $merged = $merged[0..($MaxEvents - 1)] }
+    return $merged
+}
+
 function Get-RecordsForChannel {
     param([string] $Channel, [object] $State)
 
     $lastId = 0
     if ($State.PSObject.Properties.Name -contains $Channel) { $lastId = [int64]$State.$Channel }
 
-    $filter = @{
-        LogName   = $Channel
-        Id        = $InterestingIds
-        StartTime = (Get-Date).AddHours(-$LookbackHours)
-    }
-    try {
-        $events = Get-WinEvent -FilterHashtable $filter -MaxEvents $MaxEvents -ErrorAction Stop
-    } catch {
-        # Canale assente o senza permessi (es. Security senza admin): non e' un
-        # errore fatale, si continua con gli altri canali.
-        Write-Verbose "canale $Channel non leggibile: $($_.Exception.Message)"
-        return @()
-    }
+    $events = Get-EventsById -Channel $Channel -Ids $InterestingIds `
+                             -StartTime (Get-Date).AddHours(-$LookbackHours) `
+                             -MaxEvents $MaxEvents
     if (-not $events) { return @() }
 
     $fresh = $events | Where-Object { $_.RecordId -gt $lastId } | Sort-Object RecordId
     if (-not $fresh) { return @() }
 
-    $max = ($fresh | Measure-Object -Property RecordId -Maximum).Maximum
-    $State | Add-Member -NotePropertyName $Channel -NotePropertyValue $max -Force
-
+    # Il bookmark NON si aggiorna qui. Aggiornandolo prima dell'invio, una
+    # risposta 4xx/5xx faceva marcare gli eventi come "già inviati" e la
+    # passata successiva non li ritrovava più: perdita definitiva e silenziosa.
+    # Lo aggiorna Invoke-Sweep solo dopo un invio riuscito.
     return @($fresh | ForEach-Object { Convert-EventToRecord -Event $_ -Channel $Channel -Mask:$Redact })
 }
 
@@ -205,11 +245,11 @@ function Get-FirewallRecords {
 
     if (-not (Test-Path $FirewallLogPath)) {
         Write-Verbose "firewall log assente: $FirewallLogPath"
-        return @()
+        return [pscustomobject]@{ Lines = @(); Consumed = 0 }
     }
 
     $lines = @(Get-Content -Path $FirewallLogPath -ErrorAction SilentlyContinue)
-    if ($lines.Count -eq 0) { return @() }
+    if ($lines.Count -eq 0) { return [pscustomobject]@{ Lines = @(); Consumed = 0 } }
 
     $sentKey = 'FirewallLines'
     $already = 0
@@ -218,13 +258,14 @@ function Get-FirewallRecords {
     if ($already -gt $lines.Count) { $already = 0 }
 
     $fresh = $lines[$already..($lines.Count - 1)]
-    $State | Add-Member -NotePropertyName $sentKey -NotePropertyValue $lines.Count -Force
 
     $interesting = @($fresh | Where-Object { $_ -and $_ -notmatch '^#' -and $_ -match '(DROP|ALLOW)' })
     if ($interesting.Count -gt $FirewallMaxLines) {
         $interesting = $interesting[($interesting.Count - $FirewallMaxLines)..($interesting.Count - 1)]
     }
-    return $interesting
+    # `Consumed` torna a Invoke-Sweep, che aggiorna il bookmark solo a invio
+    # riuscito (stessa ragione del bookmark dei canali).
+    return [pscustomobject]@{ Lines = $interesting; Consumed = $lines.Count }
 }
 
 function Invoke-Sweep {
@@ -233,18 +274,32 @@ function Invoke-Sweep {
     foreach ($channel in $Channels) {
         $records = Get-RecordsForChannel -Channel $channel -State $State
         if ($records.Count -gt 0) {
-            if (Send-Batch -Records $records) { $total += $records.Count }
+            if (Send-Batch -Records $records) {
+                $total += $records.Count
+                # Bookmark solo dopo l'invio riuscito: un errore di rete non
+                # deve trasformarsi in eventi persi per sempre.
+                $max = 0
+                foreach ($record in $records) {
+                    if ([int64]$record.RecordId -gt $max) { $max = [int64]$record.RecordId }
+                }
+                $State | Add-Member -NotePropertyName $channel -NotePropertyValue $max -Force
+            }
         }
     }
     if ($IncludeFirewallLog) {
         $fw = Get-FirewallRecords -State $State
-        if ($fw.Count -gt 0) {
-            if (Send-Batch -Records $fw -Parser 'pfirewall' -Source "$SourceName-fw") {
-                $total += $fw.Count
+        if ($fw.Lines.Count -gt 0) {
+            if (Send-Batch -Records $fw.Lines -Parser 'pfirewall' -Source "$SourceName-fw") {
+                $total += $fw.Lines.Count
+                $State | Add-Member -NotePropertyName 'FirewallLines' -NotePropertyValue $fw.Consumed -Force
             }
         }
     }
-    Save-State -State $State
+    # In dry-run il bookmark NON si avanza: altrimenti la passata di prova
+    # "consuma" gli eventi (li marca come gia' inviati senza inviarli) e quella
+    # successiva non li trova piu'. La modalita' di prova che perde dati e'
+    # peggio di nessuna modalita' di prova.
+    if (-not $DryRun) { Save-State -State $State }
     return $total
 }
 

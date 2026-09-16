@@ -113,8 +113,12 @@ if exist "%ROOT%aegis-guard\jre" (
     set "JRE_OUT=%ROOT%aegis-guard\jre"
 )
 
+:: jdk.net e' obbligatorio: Apache HttpClient 5 usa jdk.net.Sockets
+:: (DefaultHttpClientConnectionOperator). jlink non analizza le dipendenze del
+:: codice non modulare sul classpath, quindi il JRE si costruisce "bene" e
+:: l'agente poi muore con NoClassDefFoundError: jdk/net/Sockets.
 "!JLINK!" --module-path "!JMODS!" ^
-    --add-modules java.base,java.datatransfer,java.desktop,java.logging,java.naming,java.security.jgss,java.sql,java.xml,jdk.crypto.ec ^
+    --add-modules java.base,java.datatransfer,java.desktop,java.logging,java.naming,java.security.jgss,java.sql,java.xml,jdk.crypto.ec,jdk.net ^
     --output "!JRE_OUT!" ^
     --strip-debug --compress zip-6 --no-header-files --no-man-pages
 if !errorlevel! neq 0 (
