@@ -41,8 +41,22 @@ def log(msg: str, kind: str = "*") -> None:
 
 
 def run(cmd: list[str], timeout: int = 600) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=REPO, capture_output=True, text=True,
-                          timeout=timeout)
+    """Esegue un comando catturandone l'output.
+
+    Un eseguibile assente (tipico: `docker` non installato su una macchina
+    vergine) non deve far esplodere un traceback: e' un prerequisito mancante,
+    quindi torna l'exit code 127, che il chiamante gia' interpreta come
+    fallimento del comando.
+    """
+    try:
+        return subprocess.run(cmd, cwd=REPO, capture_output=True, text=True,
+                              timeout=timeout)
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(cmd, 127, stdout="",
+                                           stderr=f"{cmd[0]}: not found")
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, 124, stdout="",
+                                           stderr=f"{cmd[0]}: timeout")
 
 
 def die(msg: str) -> int:

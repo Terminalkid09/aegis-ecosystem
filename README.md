@@ -10,6 +10,21 @@ Aegis is a local XDR/SIEM lab made of four main services:
 | `NodeTrace` | Python | Host telemetry agent for CPU/RAM/process/users/network flows |
 | `frontend` | React | Dashboard for alerts, agents, rules, VaultX, OSINT, AI, playbooks, syslog viewer, audit log |
 
+**In a hurry?** → [Quick Start](#quick-start): one command, from clone to a working platform.
+
+## Table of contents
+
+- [Architecture](#architecture)
+- [Quick Start](#quick-start) — install, update, requirements, profiles
+- [Authentication Model](#authentication-model)
+- [Database](#database) · [Redis](#redis) · [Agents](#agents)
+- [Telemetry Collection Layers](#telemetry-collection-layers)
+- [Features](#features) — detection, YARA/FIM, OSINT/AI, SOAR, SIEM, Aegis Total
+- [API Endpoints](#api-endpoints)
+- [Security Notes](#security-notes)
+- [Pilot & Enterprise Readiness](#pilot--enterprise-readiness)
+- [References](#references)
+
 ## Architecture
 
 ```text
@@ -22,9 +37,16 @@ Aegis-Link  ---> Redis queue/cache ---> Aegis-Brain ---> PostgreSQL
                                       React Dashboard
 ```
 
+**Topology.** Each agent knows a single endpoint (`AEGIS_BRAIN_URL` for
+enrollment, commands and PKI; `AEGIS_GATEWAY_URL` for high-rate telemetry via
+`aegis-link`, which queues into Redis for the brain to consume). Dashboards are
+just browsers reading the brain: adding an operator is a registration, adding a
+host is an enrollment — agents never need to know about dashboards, and
+dashboards never talk to agents.
+
 ## Quick Start
 
-### Da zero (clone) a piattaforma funzionante: un comando
+### From clone to a working platform (one command)
 
 Serve **Docker Desktop in esecuzione** e **Python 3.10+**. Nient'altro per
 partire: il `.env` (con segreti casuali), la build degli agenti se mancano,
@@ -40,7 +62,7 @@ Al termine stampa credenziali admin, URL della dashboard e i passi per
 l'aggiornamento (`python scripts/setup.py update`, che **non tocca il
 database**).
 
-Note oneste sui requisiti:
+Honest notes on requirements:
 
 | Serve | Quando |
 |---|---|
@@ -49,11 +71,36 @@ Note oneste sui requisiti:
 | `nssm.exe` | **solo** per installare gli agenti come servizi Windows (l'installer lo chiede; senza, resta il fallback senza admin) |
 | `yara64.exe` | **solo** per le scansioni YARA sull'endpoint (senza, le scansioni dichiarano di essere non disponibili) |
 
-I file `.bat` **non** sono un passaggio obbligatorio: `aegis.bat` è il menu
-di comodo per start/stop/log/build in sviluppo. L'AI locale non parte di
-default: `set AEGIS_WITH_AI=1` prima di `setup.py` per attivare ollama.
+The `.bat` files are **not** a required step: `aegis.bat` is a convenience menu
+for start/stop/logs/build in development. Local AI does not start by default:
+`set AEGIS_WITH_AI=1` before `setup.py` to enable ollama.
 
-### Installazione manuale (senza lo script)
+### Updating (data preserved)
+
+```cmd
+python scripts/setup.py update
+```
+
+Rebuilds the images and restarts the stack **without touching the database**
+(events, alerts, users and agents live in the DB volume; the schema is
+self-created at startup). Use `--rebuild-agents` to recompile the host agents
+too.
+
+### Alternatives, and optional extras
+
+- Manual path: `aegis.bat` (interactive menu: backend, agents, build, pilot)
+  and `docker exec aegis-brain python -m app.admin bootstrap <email> <password>`
+  for the first admin.
+- **Kernel telemetry (ETW)**, optional: install [MinGW-w64](https://winlibs.com/)
+  and the build compiles `aegis-etw.exe`; the launcher wires it to Guard by
+  itself. Without it everything still works — Guard declares the degradation
+  and falls back to user-mode polling.
+- **`nssm.exe`** (for installing agents as Windows services) and
+  **`yara64.exe`** (on-agent YARA scans) are the only two binaries not shipped
+  in the repo; the installers use them if present, and declare the missing
+  capability if not.
+
+### Manual installation (without the script)
 
 1. Copy the example environment file:
 
@@ -228,42 +275,6 @@ agenti sono **reali** sull'host di lab. Zeek, Suricata, Squid/nginx e pfSense
 sono dimostrati con **sample sintetici in formato reale** (`scripts/siem_demo.py`),
 non con traffico di produzione: servono a provare i parser e la pipeline, non a
 produrre metriche di detection su traffico reale.
-
-### Da clone a piattaforma funzionante (zero config, un comando)
-
-```cmd
-git clone <repo> && cd aegis-ecosystem
-python scripts/setup.py
-```
-
-Un comando fa tutto: verifica le dipendenze, genera il `.env` con segreti
-casuali se manca, compila gli agenti se assenti, avvia la piattaforma,
- attende la readiness, lancia gli agenti host, crea l'admin e verifica il
-tutto con lo smoke API end-to-end. Le credenziali vengono stampate a fine
-installazione (e salvate in `.env`, che è gitignored).
-
-Aggiornamento successivo — senza reinstallare e **senza perdere i dati**
-(eventi, alert, utenti e agenti stanno nel volume del DB, che l'update non
-tocca; lo schema si auto-crea all'avvio):
-
-```cmd
-python scripts/setup.py update
-```
-
-Alternativa manuale: `aegis.bat` (menu interattivo: backend, agenti, build,
-pilot) e `docker exec aegis-brain python -m app.admin bootstrap <email>
-<password>` per il primo admin.
-
-Opzionale ma consigliato: installa [MinGW-w64](https://winlibs.com/) per avere
-la telemetria kernel ETW (il build la compila e l'avvio la collega a Guard da
-solo). Senza, tutto funziona: Guard degrada al polling user-mode.
-
-**Topologia.** Ogni agente conosce un solo endpoint (`AEGIS_BRAIN_URL` per
-enrollment, comandi e PKI; `AEGIS_GATEWAY_URL` per il flusso telemetry ad alto
-turismo via `aegis-link`, che accoda su Redis quello che il brain consuma). Le
-dashboard sono browser che leggono tutti dal brain: aggiungere un operatore è
-una registrazione, aggiungere un host è un enrollment — gli agenti non devono
-mai conoscere le dashboard, e le dashboard non parlano mai agli agenti.
 
 ## Features
 
@@ -554,7 +565,7 @@ Production profile: `docker compose -f docker-compose.yml -f docker-compose.prod
 (requires `BACKUP_PASSPHRASE`; Postgres/Redis not published). HA overlay adds
 resource limits and scale-readiness (`--scale aegis-brain=2`).
 
-## Riferimenti
+## References
 
 | Documento | Path |
 |-----------|------|
