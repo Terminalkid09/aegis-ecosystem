@@ -56,6 +56,19 @@ PROVIDERS: Dict[str, ProviderSpec] = {
             help_text="Reputazione IP/domini: analisi e sentimento della community.",
             docs_url="https://www.virustotal.com/gui/my-apikey",
         ),
+        ProviderSpec(
+            key="gemini", label="Google Gemini (AI)", env_var="GEMINI_API_KEY",
+            help_text=("Chiave API per l'AI (free tier): riassunti e analisi degli alert "
+                       "SENZA container LLM locale. I dati anonimizzati escono dalla rete "
+                       "solo quando lo chiedi, se AI_AUTOMATIC_ENRICH=false."),
+            docs_url="https://aistudio.google.com/apikey",
+        ),
+        ProviderSpec(
+            key="openai", label="OpenAI / compatibile", env_var="OPENAI_API_KEY",
+            help_text=("Chiave per endpoint OpenAI-compatibile (OPENAI_BASE_URL: OpenAI, "
+                       "Azure, vLLM, LM Studio, un server tuo...)."),
+            docs_url="https://platform.openai.com/api-keys",
+        ),
     )
 }
 

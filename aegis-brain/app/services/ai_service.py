@@ -32,6 +32,155 @@ SENSITIVE_PATTERNS = {
 class PromptInjectionError(Exception):
     pass
 
+
+# ---------------------------------------------------------------- Provider
+# Il provider e' pluggabile: locale (ollama) o cloud via API key. La chiave
+# si legge env -> dashboard (integration_settings, cifrata col KEK), stesso
+# meccanismo dei provider OSINT: nessun .env obbligatorio.
+PROVIDERS = ("ollama", "gemini", "openai")
+
+_LOCAL_PROVIDERS = {"ollama"}
+
+
+async def _provider_key(name: str) -> str:
+    """Chiave del provider: env vince, poi override DB della dashboard."""
+    env_name = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}.get(name)
+    if not env_name:
+        return ""
+    env_val = (getattr(settings, env_name, "") or "").strip()
+    if env_val and not env_val.startswith("your_") and env_val != "replace-with":
+        return env_val
+    try:
+        from app.database.connection import AsyncSessionLocal
+        from app.services.integration_settings import get_key
+
+        async with AsyncSessionLocal() as db:
+            return await get_key(db, name)
+    except Exception:
+        logger.debug("Lettura chiave %s da dashboard fallita", name)
+        return ""
+
+
+async def _ollama_reachable() -> bool:
+    """Probe breve: l'URL configurato non basta, il server deve rispondere.
+
+    Senza questo, `auto` sceglieva ollama solo perche' OLLAMA_URL esiste nel
+    compose: a container spento ogni arricchimento falliva con connection
+    refused invece di degradare a 'AI disattivata' o a un altro provider.
+    """
+    url = (settings.OLLAMA_URL or "").strip()
+    if not url:
+        return False
+    probe = url.replace("/api/generate", "/api/tags").replace("/v1/chat/completions", "/api/tags")
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            r = await client.get(probe)
+            return r.status_code < 500
+    except Exception:
+        return False
+
+
+async def resolve_provider() -> Dict[str, Any]:
+    """Provider effettivo + modello + chiave. Mai eccezioni.
+
+    `auto` sceglie in ordine: ollama configurato, gemini con chiave, openai
+    con chiave, altrimenti disabled — cosi' chi non configura nulla non paga
+    nulla e non vede errori a raffica: vede 'AI disattivata'.
+    """
+    requested = (settings.AI_PROVIDER or "auto").strip().lower()
+    model_override = (settings.AI_MODEL or "").strip()
+
+    if requested == "disabled":
+        return {"provider": "disabled", "model": "", "key": "", "reason": "disabled by configuration"}
+
+    if requested in PROVIDERS and requested != "auto":
+        chosen = requested
+    elif requested in ("auto", ""):
+        # auto = usa cio' che FUNZIONA: ollama solo se risponde davvero.
+        chosen = ""
+        if settings.OLLAMA_URL and await _ollama_reachable():
+            chosen = "ollama"
+        else:
+            for cand in ("gemini", "openai"):
+                if await _provider_key(cand):
+                    chosen = cand
+                    break
+        if not chosen:
+            return {"provider": "disabled", "model": "", "key": "",
+                    "reason": "no AI provider available (ollama not reachable, no cloud key)"}
+    else:
+        return {"provider": "disabled", "model": "", "key": "",
+                "reason": f"unknown AI_PROVIDER '{requested}'"}
+
+    if chosen == "ollama":
+        model = model_override or (settings.OLLAMA_DEFAULT_MODEL or "llama3")
+        return {"provider": "ollama", "model": model, "key": "",
+                "reason": "local", "automatic": bool(settings.AI_AUTOMATIC_ENRICH)}
+
+    key = await _provider_key(chosen)
+    if not key:
+        return {"provider": "disabled", "model": "", "key": "",
+                "reason": f"{chosen} selected but no API key configured"}
+    default_model = settings.GEMINI_MODEL if chosen == "gemini" else settings.OPENAI_MODEL
+    return {"provider": chosen, "model": model_override or default_model, "key": key,
+            "reason": "cloud", "automatic": bool(settings.AI_AUTOMATIC_ENRICH)}
+
+
+async def provider_summary() -> Dict[str, Any]:
+    """Stato per la UI: provider, modello, se i dati escono dalla rete."""
+    info = await resolve_provider()
+    return {
+        "provider": info["provider"],
+        "model": info.get("model") or "",
+        "local": info["provider"] in _LOCAL_PROVIDERS,
+        "automatic_enrichment": bool(info.get("automatic")) if info["provider"] in _LOCAL_PROVIDERS
+        else bool(info.get("automatic")) and bool(settings.AI_AUTOMATIC_ENRICH),
+        "reason": info.get("reason", ""),
+    }
+
+
+async def _call_ollama(prompt: str, model: str) -> Dict[str, Any]:
+    # num_ctx 2048 = compatibilita' con i modelli piccoli; timeout lungo per
+    # il caricamento del modello.
+    payload = {"model": model, "prompt": prompt, "stream": False, "options": {"num_ctx": 2048}}
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        r = await client.post(settings.OLLAMA_URL, json=payload)
+        r.raise_for_status()
+        data = r.json()
+        raw_text = data.get("response") or data.get("message") or data.get("result") or data.get("text") or ""
+        return {"answer": raw_text.strip(), "raw": raw_text, "model": model, "provider": "ollama"}
+
+
+async def _call_gemini(prompt: str, model: str, key: str) -> Dict[str, Any]:
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+           f":generateContent?key={key}")
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post(url, json=payload)
+        r.raise_for_status()
+        data = r.json()
+        try:
+            raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError):
+            raw_text = json.dumps(data)[:1000]
+        return {"answer": raw_text.strip(), "raw": raw_text, "model": model, "provider": "gemini"}
+
+
+async def _call_openai(prompt: str, model: str, key: str) -> Dict[str, Any]:
+    base = (settings.OPENAI_BASE_URL or "https://api.openai.com/v1").rstrip("/")
+    payload = {"model": model, "messages": [{"role": "user", "content": prompt}]}
+    headers = {"Authorization": f"Bearer {key}"}
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post(f"{base}/chat/completions", json=payload, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+        try:
+            raw_text = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError):
+            raw_text = json.dumps(data)[:1000]
+        return {"answer": raw_text.strip(), "raw": raw_text, "model": model, "provider": "openai"}
+
+
 def _heuristic_suspicion_score(prompt: str) -> float:
     # Euristica dichiarata ( NON un modello ML): conta pattern noti.
     # Storicamente si chiamava _stub_ml_classifier con soglia 0.85 —
@@ -98,33 +247,51 @@ def allowed_model(model: Optional[str]) -> str:
         raise ValueError(f"model not allowed: {model}")
     return model
 
-async def call_llm(prompt: str, model: Optional[str] = None) -> Dict[str, Any]:
+async def call_llm(prompt: str, model: Optional[str] = None,
+                   respect_automatic: bool = False) -> Dict[str, Any]:
+    """Chiama il provider AI configurato. Mai eccezioni verso il chiamante.
+
+    `respect_automatic=True` (usato dall'arricchimento automatico degli
+    alert): se il provider e' CLOUD e l'arricchimento automatico e' spento,
+    non manda nulla fuori — ritorna uno stato esplicito. Con AI_AUTOMATIC_
+    ENRICH=false i dati sensibili escono solo su richiesta dell'utente.
+    """
     dev_fallback = settings.AI_DEV_FALLBACK
-    try:
-        model = allowed_model(model)
-    except ValueError as exc:
-        return {"error": "model_not_allowed", "message": str(exc)}
+    info = await resolve_provider()
 
-    if not settings.OLLAMA_URL:
+    if info["provider"] == "disabled":
+        msg = info.get("reason") or "AI disabled"
         if dev_fallback:
-            return {"answer": "[AI fallback] Ollama not configured. Development stub.", "raw": "", "model": model}
-        return {"error": "ollama_url_not_configured"}
+            return {"answer": f"[AI fallback] {msg}", "raw": "", "model": ""}
+        return {"error": "ai_disabled", "message": msg}
 
-    # Use num_ctx=2048 for tinyllama compatibility (supports max 2048)
-    payload = {"model": model, "prompt": prompt, "stream": False, "options": {"num_ctx": 2048}}
-    # Increased timeout to 300s to allow for model loading/swapping
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        try:
-            r = await client.post(settings.OLLAMA_URL, json=payload)
-            r.raise_for_status()
-            data = r.json()
-            raw_text = data.get("response") or data.get("message") or data.get("result") or data.get("text") or ""
-            return {"answer": raw_text.strip(), "raw": raw_text, "model": model}
-        except Exception as exc:
-            logger.exception("LLM request failed")
-            if dev_fallback:
-                return {"answer": f"[AI fallback] LLM error: {str(exc)}", "raw": str(exc), "model": model}
-            return {"error": "request_exception", "message": str(exc)}
+    if respect_automatic and info["provider"] not in _LOCAL_PROVIDERS and not settings.AI_AUTOMATIC_ENRICH:
+        return {"error": "ai_cloud_requires_optin",
+                "message": "cloud provider in use: automatic enrichment disabled, ask on-demand"}
+
+    effective = info["model"]
+    if model:
+        if info["provider"] == "ollama":
+            # Allowlist solo per ollama: i modelli cloud sono fissati dal provider.
+            try:
+                effective = allowed_model(model)
+            except ValueError as exc:
+                return {"error": "model_not_allowed", "message": str(exc)}
+        else:
+            effective = model
+
+    try:
+        if info["provider"] == "ollama":
+            return await _call_ollama(prompt, effective)
+        if info["provider"] == "gemini":
+            return await _call_gemini(prompt, effective, info["key"])
+        return await _call_openai(prompt, effective, info["key"])
+    except Exception as exc:
+        logger.exception("LLM request failed (%s)", info["provider"])
+        if dev_fallback:
+            return {"answer": f"[AI fallback] LLM error: {str(exc)}", "raw": str(exc), "model": effective}
+        return {"error": "request_exception", "message": str(exc),
+                "provider": info["provider"]}
 
 async def generate_ai_response(prompt: str, model: Optional[str] = None) -> Dict[str, Any]:
     if is_prompt_suspicious(prompt):
@@ -155,7 +322,10 @@ Alert context:
 Respond in JSON format: {{"summary": "...", "confidence": "...", "recommended_actions": [...], "detailed_analysis": "..."}}
 """
     try:
-        response = await call_llm(prompt, model="tinyllama")
+        # Nessun modello hardcoded: si usa quello del provider configurato
+        # (ollama/gemini/openai). respect_automatic evita che un provider
+        # cloud riceva gli alert senza consenso esplicito.
+        response = await call_llm(prompt, respect_automatic=True)
         text = response.get("answer", "")
         try:
             import json

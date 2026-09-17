@@ -37,6 +37,16 @@ async def get_or_create_thread(db: AsyncSession, user: User, thread_id: Optional
     await db.refresh(thread)
     return thread
 
+@router.get("/status")
+async def ai_status(user: User = Depends(get_current_user)):
+    """Provider AI effettivo, modello e se i dati escono dalla rete.
+
+    La UI lo mostra in Settings: con AI disattivata non si vedono errori a
+    raffica, si vede lo stato con il motivo (e come attivarla).
+    """
+    return await ai_service.provider_summary()
+
+
 @router.get("/threads")
 async def list_threads(
     db: AsyncSession = Depends(get_db),

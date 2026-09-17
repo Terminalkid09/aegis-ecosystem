@@ -256,7 +256,19 @@ mai conoscere le dashboard, e le dashboard non parlano mai agli agenti.
 
 ### OSINT + AI Automation
 - **Auto-enrichment**: When an alert fires, IPs/domains in the alert context are automatically looked up via VirusTotal, Shodan, AbuseIPDB
-- **AI threat reports**: Ollama generates structured threat analysis with confidence score and recommended actions
+- **Pluggable AI provider** (`AI_PROVIDER`): `auto` (default) | `disabled` | `ollama` | `gemini` | `openai`
+  - `auto` uses **what actually works**: a local Ollama **only if it responds** (short reachability probe), otherwise Gemini/OpenAI if a key exists, otherwise `disabled`. A configured-but-dead endpoint never turns into a stream of connection errors.
+  - `disabled` is a first-class state, not a failure: `GET /api/v1/ai/status` returns provider/model/`local`/reason and the dashboard shows it — no fake AI text.
+  - **Cloud keys from the dashboard** (Settings → Integrations): `Gemini` and `OpenAI / OpenAI-compatible` appear in the catalog like the OSINT providers, encrypted at rest (KEK), env wins over DB.
+  - **Data-exit control** (`AI_AUTOMATIC_ENRICH`): with a **cloud** provider, automatic alert enrichment is skipped unless explicitly enabled — alert context (already anonymized: IPs/emails/tokens redacted) leaves the network only when you ask. With a **local** provider there is no such limit.
+  - **Ollama is optional and not started by default**: the stack runs light (`aegis.bat start`). Enable local AI with `set AEGIS_WITH_AI=1` and pick the model your hardware can run (`set AEGIS_MODEL=qwen2.5:14b`). Point `OLLAMA_URL` at a **powerful machine on your network** to keep AI local while running big models.
+  - Detection does **not** depend on AI at any point: rules, Sigma, behavioral tags, correlation, FIM and YARA are deterministic. AI only summarizes.
+
+### Host agents survive reboot
+Docker containers come back on their own (`restart: unless-stopped`), but host agents started by hand die with the session. Two ways to make collection truly always-on:
+- **Guard**: the Windows installer registers it as an **NSSM service** (`AegisGuard`, auto-restart on crash) — survives reboot and runs elevated.
+- **NodeTrace + Guard without the service**: `powershell -ExecutionPolicy Bypass -File scripts/install-agents-autostart.ps1` registers Scheduled Tasks “at log on” (needs an **elevated** shell). Remove with `-Remove`.
+- Both write to `logs\nodetrace.txt` and `logs\guard.txt`.
 - **Auto IP reputation**: OSINT results update the IP reputation database automatically
 - **Keys from the dashboard (Settings → Integrations)**: providers are discovered dynamically from the backend catalog, keys are stored encrypted at rest and take effect immediately — no restart. An env var set in `.env` **wins** over the DB value, so ops can still pin a key per deployment.
 - **Fallback order**: env var → DB (dashboard) → provider skipped with `api_key_not_configured` (never a hard failure)

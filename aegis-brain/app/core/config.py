@@ -47,6 +47,25 @@ class Settings(BaseSettings):
     # Audit: allowlist modelli caricabili via API (niente pull arbitrari).
     # Vuoto = solo default + tinyllama (uso interno report).
     OLLAMA_ALLOWED_MODELS: str = ""
+    # --- Provider AI pluggabile ---------------------------------------
+    # auto      = ollama se configurato, altrimenti gemini/openai se la
+    #             chiave esiste, altrimenti disabled (nessuna chiamata)
+    # disabled  = AI spenta per scelta: gli endpoint rispondono con stato
+    #             esplicito, mai testo finto
+    # ollama    = modello locale (o server potente in rete via OLLAMA_URL)
+    # gemini    = Google AI Studio (free tier), chiave dalla dashboard
+    # openai    = qualunque endpoint OpenAI-compatibile (OPENAI_BASE_URL)
+    AI_PROVIDER: str = "auto"
+    # Vuoto = default del provider (OLLAMA_DEFAULT_MODEL / GEMINI_MODEL / ...)
+    AI_MODEL: str = ""
+    # Arricchimento automatico degli alert: default solo per provider LOCALI
+    # (nessun dato esce dalla rete). Gli esterni si usano on-demand.
+    AI_AUTOMATIC_ENRICH: bool = True
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    OPENAI_MODEL: str = "gpt-4o-mini"
     AI_RATE_LIMIT_PER_MIN: int = 20
     # Enterprise default: NO silent stub. In DEBUG lab it may fallback for DX,
     # in prod it must return an explicit degraded error instead of fake AI text.

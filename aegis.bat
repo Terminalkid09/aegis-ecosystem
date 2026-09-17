@@ -35,6 +35,11 @@ echo  %GREEN%[5]%RESET% View Agent Logs
 echo  %RED%[6] Exit%RESET%
 echo.
 echo  %CYAN%[B] Build Agents (PyInstaller + Maven + JRE)%RESET%
+if defined AI_PROFILE (
+    echo  %GREEN%  [AI] Locale ON - !AEGIS_MODEL!%RESET%
+) else (
+    echo  %YELLOW%  [AI] Locale OFF - per attivarla: set AEGIS_WITH_AI=1%RESET%
+)
 echo.
 set /p choice="Select an option: "
 
@@ -67,14 +72,34 @@ goto menu_or_exit
 echo.
 echo  %PURPLE%[*] Starting Aegis Backend (Docker Compose)...%RESET%
 cd /d "%ROOT%"
-call docker compose --profile ollama up -d
+
+:: AI locale opzionale. Il container Ollama resta in RAM (~850MB) e in CPU
+:: anche a riposo: la detection di Aegis NON ne ha bisogno (le regole sono
+:: deterministiche). Avvio leggero di default; per l'AI locale:
+::   set AEGIS_WITH_AI=1  &&  aegis.bat start
+:: con modello a scelta (anche diversi GB, se il tuo hardware regge):
+::   set AEGIS_MODEL=qwen2.5:14b
+:: Per puntare a un server Ollama potente in rete invece del container locale,
+:: imposta OLLAMA_URL nel .env (es. http://192.168.1.50:11434/api/generate).
+set "AI_PROFILE="
+if /i "%AEGIS_WITH_AI%"=="1" set "AI_PROFILE=--profile ollama"
+if not defined AEGIS_MODEL set "AEGIS_MODEL=llama3"
+if defined AI_PROFILE (
+    echo  %GREEN%  [+] AI locale: ON - profilo ollama, modello !AEGIS_MODEL!%RESET%
+) else (
+    echo  %YELLOW%  [i] AI locale: OFF - avvio leggero. Attivabile con: set AEGIS_WITH_AI=1%RESET%
+)
+
+call docker compose !AI_PROFILE! up -d
 if errorlevel 1 (
     echo  %RED%[!] Docker Compose returned an error. Check for port conflicts or missing images.%RESET%
     echo  %YELLOW%[*] Attempting to continue anyway...%RESET%
 )
 
-echo  %YELLOW%[*] Pulling Llama3 model for Ollama (first time only)...%RESET%
-start "Ollama Pull" /B cmd /c "timeout /t 5 >nul && docker exec aegis-ollama ollama pull llama3 2>nul"
+if defined AI_PROFILE (
+    echo  %YELLOW%[*] Pulling !AEGIS_MODEL! model for Ollama - first time only...%RESET%
+    start "Ollama Pull" /B cmd /c "timeout /t 5 >nul && docker exec aegis-ollama ollama pull !AEGIS_MODEL! 2>nul"
+)
 
 netstat -ano | findstr ":5173 " | findstr "LISTENING" >nul
 if !errorlevel! equ 0 (

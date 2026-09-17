@@ -68,8 +68,20 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       MASTER_KEY_B64: ${MASTER_KEY_B64:?MASTER_KEY_B64 must be set}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://aegis.local,http://localhost:3000}
-      OLLAMA_URL: http://aegis-ollama:11434/api/generate
-      OLLAMA_DEFAULT_MODEL: llama3
+      # AI pluggabile: auto = ollama se OLLAMA_URL e' raggiungibile, altrimenti
+      # gemini/openai se la chiave esiste, altrimenti disabled (nessun costo).
+      # Per usare un server Ollama potente in rete: OLLAMA_URL=http://host:11434/api/generate
+      OLLAMA_URL: ${OLLAMA_URL:-http://aegis-ollama:11434/api/generate}
+      OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3}
+      OLLAMA_ALLOWED_MODELS: ${OLLAMA_ALLOWED_MODELS:-}
+      AI_PROVIDER: ${AI_PROVIDER:-auto}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_AUTOMATIC_ENRICH: ${AI_AUTOMATIC_ENRICH:-true}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       SHODAN_API_KEY: ${SHODAN_API_KEY}
       ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY}
       PKI_DIR: /app/pki
