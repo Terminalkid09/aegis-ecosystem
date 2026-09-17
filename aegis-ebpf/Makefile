@@ -21,5 +21,12 @@ aegis_exec.bpf.o: aegis_exec.bpf.c
 aegis-collector: aegis_collector.c
 	$(CC) -O2 -Wall $< -o $@ -lbpf -lelf -lz
 
+# Windows (MinGW-w64): consumer ETW user-mode, nessun driver e nessuna firma.
+# -lws2_32 non e' opzionale: ntohl arriva da winsock2.h.
+# L'esecuzione richiede una sessione admin (StartTrace -> 5 senza elevazione).
+CC_WIN ?= gcc
+aegis-etw.exe: aegis_etw.c
+	$(CC_WIN) -O2 -Wall $< -o $@ -ladvapi32 -ltdh -lws2_32
+
 clean:
-	rm -f aegis_exec.bpf.o aegis-collector
+	rm -f aegis_exec.bpf.o aegis-collector aegis-etw.exe

@@ -11,7 +11,7 @@
   Perche' cosi' e non un driver ETW: un consumer ETW in user-mode non richiede
   certificati, e' esattamente il livello di telemetria che serve a un SIEM
   (osservare, correlare, rilevare). La prevenzione inline invece richiede
-  firme kernel: fuori scope, dichiarato in docs/V4_SCOPE.md.
+  firme kernel: fuori scope.
 
   Stato incrementale: un file di bookmark per canale con l'ultimo RecordId
   inviato. `-Once` = una passata, `-Follow` = polling continuo (default 15s).

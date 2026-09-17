@@ -9,7 +9,7 @@ esplicito; niente Android; niente macOS oltre il polling esistente.
 
 | OS | Versione | Tier 1 (kernel) | Tier 2 | Tier 3 fallback | Stato |
 |---|---|---|---|---|---|
-| Windows 11 | 22H2+ | ETW Kernel-Process 1/2 + Kernel-Network TcpIp (codice `aegis_etw.c` pronto) | Security log 4688 (richiede audit policy) | polling Toolhelp32 (`WindowsProcessMonitor`) | primario, validazione lab admin in Fase 3 |
+| Windows 11 | 22H2+ | ETW Kernel-Process 1/2 + Kernel-Network TcpIp (`aegis_etw.c`: build verificata, runtime richiede admin) | Security log 4688 (richiede audit policy) | polling Toolhelp32 (`WindowsProcessMonitor`) | primario, validazione runtime lab in Fase 3 |
 | Windows Server 2022 / 2025 | — | come Windows 11 | come sopra | polling | primario, Fase 3 |
 | Windows 10 | 22H2 | come sopra | come sopra | polling | solo compatibilità/lab iniziale |
 | Ubuntu 22.04 / 24.04 | kernel ≥5.8 + BTF | eBPF `sched_process_exec` + kprobe `do_exit` + `inet_sock_set_state` ESTABLISHED, ringbuf (verificato bench 300/300, 0 loss, kernel 6.6) | — | polling JNA/proc | primario, Fase 4 |
@@ -24,8 +24,14 @@ esplicito; niente Android; niente macOS oltre il polling esistente.
   `CAP_PERFMON` (o `--privileged`); `vmlinux.h` generato dal BTF target e mai
   committato (`.gitignore`); exit via `kprobe/do_exit` (il tracepoint
   `sched_process_exit` non esiste più sui kernel recenti).
-* Windows: build `gcc -O2 -Wall aegis_etw.c -o aegis-etw.exe -ladvapi32 -ltdh`;
-  runtime richiede sessione admin; output `events.jsonl` → Guard
+* Windows: build `make aegis-etw.exe` oppure
+  `gcc -O2 -Wall aegis_etw.c -o aegis-etw.exe -ladvapi32 -ltdh -lws2_32`.
+  `-lws2_32` è obbligatorio: `ntohl` arriva da `winsock2.h`, senza la libreria il
+  link fallisce con `undefined reference to __imp_ntohl`. Build verificata su
+  MinGW-w64 15.2 (2026-09-16); l'**esecuzione** richiede una sessione admin
+  (`StartTrace` restituisce 5 senza elevazione: il binario parte e fallisce in
+  modo pulito, la sola parte mai eseguita è il consumo reale della trace);
+  output `events.jsonl` → Guard
   `ExternalEventIngester` (niente JNI per decisione documentata: pipe/stdout,
   stesso JSON, niente crash JVM da nativo).
 * NodeTrace forward eBPF: opt-in `ebpf_enabled`, sottoprocesso collector →

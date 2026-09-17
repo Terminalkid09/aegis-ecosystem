@@ -182,11 +182,57 @@ residente sul sistema osservato.
 | **Sorgenti di log** | appliance, server | syslog RFC5424/3164, Windows Event, Zeek, Suricata, nginx/Squid, firewall | nessuna installazione: solo una riga verso l'endpoint |
 
 Su Linux la telemetria kernel è nativa (eBPF, validata 300/300 eventi senza
-perdite su kernel 6.6 con BTF). Su Windows lo è tramite ETW, che è esposto dal
-sistema operativo e quindi **non richiede** un driver firmato. Un driver
-kernel-mode proprietario serve solo per la **prevenzione inline**: quella
-richiede firma EV e attestazione Microsoft, ed è dichiarata fuori scope in
-`docs/V4_SCOPE.md` insieme a ETW-TI.
+perdite su kernel 6.6 con BTF). Su Windows lo è tramite ETW: `aegis_etw.c` è un
+consumer **user-mode** dei provider di sistema (nessun driver, nessuna firma),
+che Guard stesso spawna quando `AEGIS_ETW_ENABLED=true` e legge dal suo stdout
+(`EtwPipeSource`). Il servizio gira come LocalSystem, quindi il collector
+eredita l'elevazione: zero UAC, zero passaggi manuali. Il build lo compila
+automaticamente quando MinGW-w64 è presente, e l'installer/l'avvio lo
+deployano e abilitano da soli. Un driver kernel-mode proprietario serve solo
+per la **prevenzione inline**: quella richiede firma EV e attestazione
+Microsoft, ed è fuori scope insieme a ETW-TI.
+
+**Honest scope.** Windows Event Log, Windows Firewall log e telemetria degli
+agenti sono **reali** sull'host di lab. Zeek, Suricata, Squid/nginx e pfSense
+sono dimostrati con **sample sintetici in formato reale** (`scripts/siem_demo.py`),
+non con traffico di produzione: servono a provare i parser e la pipeline, non a
+produrre metriche di detection su traffico reale.
+
+### Da clone a piattaforma funzionante (zero config, un comando)
+
+```cmd
+git clone <repo> && cd aegis-ecosystem
+python scripts/setup.py
+```
+
+Un comando fa tutto: verifica le dipendenze, genera il `.env` con segreti
+casuali se manca, compila gli agenti se assenti, avvia la piattaforma,
+ attende la readiness, lancia gli agenti host, crea l'admin e verifica il
+tutto con lo smoke API end-to-end. Le credenziali vengono stampate a fine
+installazione (e salvate in `.env`, che è gitignored).
+
+Aggiornamento successivo — senza reinstallare e **senza perdere i dati**
+(eventi, alert, utenti e agenti stanno nel volume del DB, che l'update non
+tocca; lo schema si auto-crea all'avvio):
+
+```cmd
+python scripts/setup.py update
+```
+
+Alternativa manuale: `aegis.bat` (menu interattivo: backend, agenti, build,
+pilot) e `docker exec aegis-brain python -m app.admin bootstrap <email>
+<password>` per il primo admin.
+
+Opzionale ma consigliato: installa [MinGW-w64](https://winlibs.com/) per avere
+la telemetria kernel ETW (il build la compila e l'avvio la collega a Guard da
+solo). Senza, tutto funziona: Guard degrada al polling user-mode.
+
+**Topologia.** Ogni agente conosce un solo endpoint (`AEGIS_BRAIN_URL` per
+enrollment, comandi e PKI; `AEGIS_GATEWAY_URL` per il flusso telemetry ad alto
+turismo via `aegis-link`, che accoda su Redis quello che il brain consuma). Le
+dashboard sono browser che leggono tutti dal brain: aggiungere un operatore è
+una registrazione, aggiungere un host è un enrollment — gli agenti non devono
+mai conoscere le dashboard, e le dashboard non parlano mai agli agenti.
 
 ## Features
 
@@ -206,6 +252,8 @@ richiede firma EV e attestazione Microsoft, ed è dichiarata fuori scope in
 - **Auto-enrichment**: When an alert fires, IPs/domains in the alert context are automatically looked up via VirusTotal, Shodan, AbuseIPDB
 - **AI threat reports**: Ollama generates structured threat analysis with confidence score and recommended actions
 - **Auto IP reputation**: OSINT results update the IP reputation database automatically
+- **Keys from the dashboard (Settings → Integrations)**: providers are discovered dynamically from the backend catalog, keys are stored encrypted at rest and take effect immediately — no restart. An env var set in `.env` **wins** over the DB value, so ops can still pin a key per deployment.
+- **Fallback order**: env var → DB (dashboard) → provider skipped with `api_key_not_configured` (never a hard failure)
 
 ### Real-time Updates
 - **WebSocket overview**: `/api/v1/ws/overview` pushes a counters snapshot every **30s**. It authenticates with the `aegis_token` HttpOnly cookie — bearer tokens are never placed in the URL, since proxies log URLs.

@@ -250,7 +250,7 @@ class TestDiscoveryDeployment:
 
     async def test_deploy_missing_creds(self, client: AsyncClient, admin_auth_headers):
         # Legacy credential deploy rimosso di proposito (410): rollout via
-        # /deploy/token + signed enrollment (CHANGELOG 3.0.0).
+        # /deploy/token + signed enrollment (v3.0.0).
         resp = await client.post(
             "/api/v1/discovery/deploy",
             json={"ip_address": "192.168.1.100", "agent_type": "nodetrace"},
