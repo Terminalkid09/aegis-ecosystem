@@ -68,8 +68,10 @@ Honest notes on requirements:
 |---|---|
 | Docker Desktop (avviato) + Python 3.10+ | sempre (preflight di `setup.py`: se manca, si ferma e lo dice) |
 | JDK 21+ e Maven, pip/PyInstaller | **solo** se gli artefatti agenti non esistono e vanno compilati (su Windows il setup invoca `build.bat` da sé) |
-| `nssm.exe` | **solo** per installare gli agenti come servizi Windows (l'installer lo chiede; senza, resta il fallback senza admin) |
-| `yara64.exe` | **solo** per le scansioni YARA sull'endpoint (senza, le scansioni dichiarano di essere non disponibili) |
+| `nssm.exe` | **scaricato da `setup.py`** con SHA-256 pinnato: serve per installare gli agenti come servizi Windows |
+| `yara64.exe` | **scaricato da `setup.py`** con SHA-256 pinnato: serve per le scansioni YARA sull'endpoint |
+
+I due binari non sono nel repo (`.exe` è in `.gitignore`): li prende il setup e ne verifica l'hash — prima dell'estrazione e sull'eseguibile. Se la rete manca (o l'hash non torna) l'installazione **prosegue** e dichiara cosa resta spento, con il comando per metterli a mano; `--skip-binaries` salta il download.
 
 The `.bat` files are **not** a required step: `aegis.bat` is a convenience menu
 for start/stop/logs/build in development. Local AI does not start by default:
@@ -95,10 +97,13 @@ too.
   and the build compiles `aegis-etw.exe`; the launcher wires it to Guard by
   itself. Without it everything still works — Guard declares the degradation
   and falls back to user-mode polling.
-- **`nssm.exe`** (for installing agents as Windows services) and
-  **`yara64.exe`** (on-agent YARA scans) are the only two binaries not shipped
-  in the repo; the installers use them if present, and declare the missing
-  capability if not.
+- **`nssm.exe`** (installing agents as Windows services) and **`yara64.exe`**
+  (on-agent YARA scans) are the only two binaries not shipped in the repo.
+  `setup.py` downloads both with a **pinned SHA-256** (checked on the archive
+  and again on the extracted executable) and installs them where the
+  installers expect them. Offline, or if the hash does not match, nothing is
+  installed and the installer tells you the exact manual step — the platform
+  still comes up, declaring the missing capability instead of faking it.
 
 ### Manual installation (without the script)
 
@@ -298,11 +303,11 @@ produrre metriche di detection su traffico reale.
 
 ### OSINT + AI Automation
 - **Auto-enrichment**: When an alert fires, IPs/domains in the alert context are automatically looked up via VirusTotal, Shodan, AbuseIPDB
-- **Pluggable AI provider** (`AI_PROVIDER`): `auto` (default) | `disabled` | `ollama` | `gemini` | `openai`
+- **Pluggable AI provider** — chosen **from the dashboard** (Settings → AI Provider), no `.env` edit and no restart: `auto` (default) | `disabled` | `ollama` | `gemini` | `openai`, plus the model per provider (`GET`/`PUT /api/v1/ai/settings`). A value set explicitly in `.env` wins over the dashboard, and the UI labels each field with where its value comes from (`da .env` / `da dashboard` / `default`) so a field that has no effect never looks like it should.
   - `auto` uses **what actually works**: a local Ollama **only if it responds** (short reachability probe), otherwise Gemini/OpenAI if a key exists, otherwise `disabled`. A configured-but-dead endpoint never turns into a stream of connection errors.
   - `disabled` is a first-class state, not a failure: `GET /api/v1/ai/status` returns provider/model/`local`/reason and the dashboard shows it — no fake AI text.
   - **Cloud keys from the dashboard** (Settings → Integrations): `Gemini` and `OpenAI / OpenAI-compatible` appear in the catalog like the OSINT providers, encrypted at rest (KEK), env wins over DB.
-  - **Data-exit control** (`AI_AUTOMATIC_ENRICH`): with a **cloud** provider, automatic alert enrichment is skipped unless explicitly enabled — alert context (already anonymized: IPs/emails/tokens redacted) leaves the network only when you ask. With a **local** provider there is no such limit.
+  - **Data-exit control** (`AI_AUTOMATIC_ENRICH`, default **off**): with a **cloud** provider, automatic alert enrichment happens only if you switch it on (Settings → AI Provider) — alert context (already anonymized: IPs/emails/tokens redacted) leaves the network only when you ask. With a **local** provider enrichment is always on, because nothing leaves the machine. The flag is in the dashboard and in the `.env`, and the effective value is whatever the resolution returns.
   - **Ollama is optional and not started by default**: the stack runs light (`aegis.bat start`). Enable local AI with `set AEGIS_WITH_AI=1` and pick the model your hardware can run (`set AEGIS_MODEL=qwen2.5:14b`). Point `OLLAMA_URL` at a **powerful machine on your network** to keep AI local while running big models.
   - Detection does **not** depend on AI at any point: rules, Sigma, behavioral tags, correlation, FIM and YARA are deterministic. AI only summarizes.
 
