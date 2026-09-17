@@ -103,6 +103,15 @@ public class Main {
 
         new Thread(monitor::startMonitoring, "process-monitor").start();
 
+        // FIM: avviato vuoto; la watchlist arriva dal brain via FIM_SET_WATCH
+        // (o dal ripristino della configurazione salvata, se implementata lato
+        // install). Il monitor vive nel processo Guard: nessun componente extra.
+        final com.aegis.guard.hooks.FileIntegrityMonitor fim =
+                new com.aegis.guard.hooks.FileIntegrityMonitor(
+                        finalAgentId, System.getProperty("os.name"),
+                        Config.AGENT_VERSION, SystemInfoCollector.getHostname(), client);
+        FIM.set(fim);
+
         // Heartbeat
         new Thread(() -> {
             while (true) {
@@ -211,6 +220,12 @@ public class Main {
                     break;
                 case "UPDATE_AGENT":
                     handleUpdateAgent(client, cmd);
+                    break;
+                case "FIM_SET_WATCH":
+                    handleFimSetWatch(cmd);
+                    break;
+                case "YARA_SCAN":
+                    handleYaraScan(client, agentId, cmd);
                     break;
                 default:
                     log.info("[MITIGATION] Unknown command type: {}", type);
@@ -636,6 +651,62 @@ public class Main {
         catch (IOException ignored) {}
         log.info("[MITIGATION] DEISOLATE_HOST: {}", ok ? "connectivity restored" : "restore PARTIAL — check firewall");
         if (!ok) throw new RuntimeException("Restore partially applied — see logs");
+    }
+
+    // ----------------------------------------------------------------
+    //  FIM (File Integrity Monitoring)
+    // ----------------------------------------------------------------
+
+    /** Holder per il monitor FIM: il main lo crea, i comandi lo pilotano. */
+    static final java.util.concurrent.atomic.AtomicReference<com.aegis.guard.hooks.FileIntegrityMonitor> FIM =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
+    private static void handleFimSetWatch(JsonObject cmd) {
+        com.aegis.guard.hooks.FileIntegrityMonitor fim = FIM.get();
+        if (fim == null) {
+            log.warn("[FIM] monitor non inizializzato: FIM_SET_WATCH ignorato");
+            throw new IllegalStateException("FIM monitor not initialized");
+        }
+        java.util.List<String> paths = new java.util.ArrayList<>();
+        if (cmd.has("paths") && cmd.get("paths").isJsonArray()) {
+            for (var el : cmd.getAsJsonArray("paths")) {
+                if (el.isJsonPrimitive()) paths.add(el.getAsString());
+            }
+        }
+        boolean recursive = !cmd.has("recursive") || cmd.get("recursive").getAsBoolean();
+        fim.applyWatchlist(paths, recursive);
+        log.info("[FIM] watchlist applicata: {} percorso/i (recursive={})", paths.size(), recursive);
+    }
+
+    /** Scansione YARA on-demand: regole dal comando, target path espliciti. */
+    private static void handleYaraScan(AegisClient client, String agentId, JsonObject cmd) {
+        List<String> targets = new ArrayList<>();
+        if (cmd.has("targets") && cmd.get("targets").isJsonArray()) {
+            for (var el : cmd.getAsJsonArray("targets")) {
+                if (el.isJsonPrimitive()) targets.add(el.getAsString());
+            }
+        }
+        String rules = cmd.has("rules_yara") && !cmd.get("rules_yara").isJsonNull()
+                ? cmd.get("rules_yara").getAsString() : null;
+        com.aegis.guard.hooks.YaraScanner.ScanResult res =
+                new com.aegis.guard.hooks.YaraScanner().scan(rules, targets);
+        if (!res.ok) {
+            log.warn("[YARA] scan failed: {}", res.error);
+            throw new IllegalStateException("YARA scan failed: " + res.error);
+        }
+        // Ogni match diventa un evento sulla pipeline standard (ricercabile,
+        // alertable, playbook-able), non un canale parallelo.
+        for (com.aegis.guard.hooks.YaraScanner.Match m : res.matches) {
+            SystemEvent ev = new SystemEvent(agentId, 0, 0, "",
+                    m.rule, "YARA", System.getProperty("user.name"),
+                    System.getProperty("os.name"), "YARA_MATCH");
+            ev.setProcessPath("YARA");
+            ev.setFileHash(m.fileSha256);
+            ev.setCommandLine("[YARA] " + m.rule + " -> "
+                    + (m.filePath != null ? m.filePath : "?"));
+            client.sendEvent(ev);
+        }
+        log.info("[YARA] scan ok: {} match su {} target", res.matches.size(), targets.size());
     }
 
     // ----------------------------------------------------------------
