@@ -32,7 +32,7 @@ async def ip_lookup(ip_address: str, force: bool = False, db: AsyncSession = Dep
         cached = await osint_service.get_cached_result(db, "ip", ip_address)
         if cached: return {"cached": True, "data": cached}
     
-    data = await osint_service.fetch_ip_info(ip_address)
+    data = await osint_service.fetch_ip_info(ip_address, db)
     await osint_service.save_osint_result(db, "ip", ip_address, data)
     return {"cached": False, "data": data}
 
@@ -47,7 +47,7 @@ async def domain_lookup(domain: str, force: bool = False, db: AsyncSession = Dep
         cached = await osint_service.get_cached_result(db, "domain", domain)
         if cached: return {"cached": True, "data": cached}
 
-    data = await osint_service.fetch_domain_info(domain)
+    data = await osint_service.fetch_domain_info(domain, db)
     await osint_service.save_osint_result(db, "domain", domain, data)
     return {"cached": False, "data": data}
 
@@ -67,7 +67,7 @@ async def batch_ip_lookup(payload: BatchLookupRequest, db: AsyncSession = Depend
             if cached:
                 results[ip] = {"cached": True, "data": cached}
             else:
-                data = await osint_service.fetch_ip_info(ip)
+                data = await osint_service.fetch_ip_info(ip, db)
                 await osint_service.save_osint_result(db, "ip", ip, data)
                 results[ip] = {"cached": False, "data": data}
         except ValueError:

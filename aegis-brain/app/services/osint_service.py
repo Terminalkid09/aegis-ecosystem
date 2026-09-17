@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.database.connection import AsyncSessionLocal
 from app.database.models import OSINTReport
 
 logger = get_logger(__name__)
@@ -32,10 +33,22 @@ async def save_osint_result(db: AsyncSession, scan_type: str, target: str, data:
     await db.commit()
     return rec
 
-async def _shodan_lookup(client: httpx.AsyncClient, ip: str) -> Dict[str, Any]:
-    if not settings.SHODAN_API_KEY or settings.SHODAN_API_KEY == "your_shodan_key_here": 
+async def _provider_key(db: Optional[AsyncSession], name: str) -> str:
+    """Chiave effettiva: env vince, poi override DB (integration_settings)."""
+    if db is None:
+        from app.services.integration_settings import get_key
+        async with AsyncSessionLocal() as session:
+            return await get_key(session, name)
+    from app.services.integration_settings import get_key
+    return await get_key(db, name)
+
+
+async def _shodan_lookup(client: httpx.AsyncClient, ip: str,
+                         db: Optional[AsyncSession] = None) -> Dict[str, Any]:
+    key = await _provider_key(db, "shodan")
+    if not key:
         return {"error": "api_key_not_configured"}
-    url = f"https://api.shodan.io/shodan/host/{ip}?key={settings.SHODAN_API_KEY}"
+    url = f"https://api.shodan.io/shodan/host/{ip}?key={key}"
     try:
         r = await client.get(url, timeout=10.0)
         if r.status_code == 200:
@@ -50,11 +63,13 @@ async def _shodan_lookup(client: httpx.AsyncClient, ip: str) -> Dict[str, Any]:
     except Exception as e:
         return {"error": "exception", "message": str(e)}
 
-async def _abuseipdb_lookup(client: httpx.AsyncClient, ip: str) -> Dict[str, Any]:
-    if not settings.ABUSEIPDB_API_KEY or settings.ABUSEIPDB_API_KEY == "your_abuseipdb_key_here":
+async def _abuseipdb_lookup(client: httpx.AsyncClient, ip: str,
+                            db: Optional[AsyncSession] = None) -> Dict[str, Any]:
+    key = await _provider_key(db, "abuseipdb")
+    if not key:
         return {"error": "api_key_not_configured"}
     url = "https://api.abuseipdb.com/api/v2/check"
-    headers = {"Key": settings.ABUSEIPDB_API_KEY, "Accept": "application/json"}
+    headers = {"Key": key, "Accept": "application/json"}
     try:
         r = await client.get(url, headers=headers, params={"ipAddress": ip}, timeout=10.0)
         if r.status_code == 200:
@@ -68,11 +83,13 @@ async def _abuseipdb_lookup(client: httpx.AsyncClient, ip: str) -> Dict[str, Any
     except Exception as e:
         return {"error": "exception", "message": str(e)}
 
-async def _virustotal_lookup(client: httpx.AsyncClient, ip: str) -> Dict[str, Any]:
-    if not settings.VIRUSTOTAL_API_KEY or settings.VIRUSTOTAL_API_KEY == "your_virustotal_key_here":
+async def _virustotal_lookup(client: httpx.AsyncClient, ip: str,
+                             db: Optional[AsyncSession] = None) -> Dict[str, Any]:
+    key = await _provider_key(db, "virustotal")
+    if not key:
         return {"error": "api_key_not_configured"}
     url = f"https://www.virustotal.com/api/v3/ip_addresses/{ip}"
-    headers = {"x-apikey": settings.VIRUSTOTAL_API_KEY, "Accept": "application/json"}
+    headers = {"x-apikey": key, "Accept": "application/json"}
     try:
         r = await client.get(url, headers=headers, timeout=10.0)
         if r.status_code == 200:
@@ -91,10 +108,11 @@ async def _virustotal_lookup(client: httpx.AsyncClient, ip: str) -> Dict[str, An
     except Exception as e:
         return {"error": "exception", "message": str(e)}
 
-async def fetch_ip_info(ip: str) -> Dict[str, Any]:
+async def fetch_ip_info(ip: str, db: Optional[AsyncSession] = None) -> Dict[str, Any]:
     async with httpx.AsyncClient() as client:
         shodan, abuse, vt = await asyncio.gather(
-            _shodan_lookup(client, ip), _abuseipdb_lookup(client, ip), _virustotal_lookup(client, ip)
+            _shodan_lookup(client, ip, db), _abuseipdb_lookup(client, ip, db),
+            _virustotal_lookup(client, ip, db),
         )
         return {
             "target": ip,
@@ -102,11 +120,13 @@ async def fetch_ip_info(ip: str) -> Dict[str, Any]:
             "sources": {"shodan": shodan, "abuseipdb": abuse, "virustotal": vt}
         }
 
-async def _virustotal_domain_lookup(client: httpx.AsyncClient, domain: str) -> Dict[str, Any]:
-    if not settings.VIRUSTOTAL_API_KEY or settings.VIRUSTOTAL_API_KEY == "your_virustotal_key_here":
+async def _virustotal_domain_lookup(client: httpx.AsyncClient, domain: str,
+                                    db: Optional[AsyncSession] = None) -> Dict[str, Any]:
+    key = await _provider_key(db, "virustotal")
+    if not key:
         return {"error": "api_key_not_configured"}
     url = f"https://www.virustotal.com/api/v3/domains/{domain}"
-    headers = {"x-apikey": settings.VIRUSTOTAL_API_KEY, "Accept": "application/json"}
+    headers = {"x-apikey": key, "Accept": "application/json"}
     try:
         r = await client.get(url, headers=headers, timeout=10.0)
         if r.status_code == 200:
@@ -126,7 +146,7 @@ async def _virustotal_domain_lookup(client: httpx.AsyncClient, domain: str) -> D
         return {"error": "exception", "message": str(e)}
 
 
-async def fetch_domain_info(domain: str) -> Dict[str, Any]:
+async def fetch_domain_info(domain: str, db: Optional[AsyncSession] = None) -> Dict[str, Any]:
     import socket
     try:
         ip = await asyncio.to_thread(socket.gethostbyname, domain)
@@ -137,7 +157,7 @@ async def fetch_domain_info(domain: str) -> Dict[str, Any]:
             "sources": {"error": "Failed to resolve domain"}
         }
     async with httpx.AsyncClient() as client:
-        vt = await _virustotal_domain_lookup(client, domain)
+        vt = await _virustotal_domain_lookup(client, domain, db)
     return {
         "target": domain,
         "fetched_at": datetime.now(timezone.utc).isoformat(),

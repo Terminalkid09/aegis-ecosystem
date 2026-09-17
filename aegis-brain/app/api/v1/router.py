@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, vault, osint, ai, telemetry, nodetrace, enroll, history, rules, discovery, ws, playbooks, syslog, audit, deploy, total, incidents, ocsf, ingest, search
+from app.api.v1 import auth, vault, osint, ai, telemetry, nodetrace, enroll, history, rules, discovery, ws, playbooks, syslog, audit, deploy, total, incidents, ocsf, ingest, search, integrations
 
 api_router = APIRouter()
 
@@ -22,6 +22,8 @@ api_router.include_router(ocsf.router, prefix="/ocsf")
 api_router.include_router(ingest.router, prefix="/ingest")
 api_router.include_router(search.router, prefix="/search")
 api_router.include_router(audit.router, prefix="/audit")
+# Chiavi di integrazione (OSINT ecc.): stato mascherato + override da UI.
+api_router.include_router(integrations.router, prefix="/integrations")
 api_router.include_router(ws.router, prefix="/ws")
 api_router.include_router(nodetrace.router) # Root level compatibility routes
 

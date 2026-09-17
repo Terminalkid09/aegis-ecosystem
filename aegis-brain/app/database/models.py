@@ -281,6 +281,22 @@ class PlaybookExecution(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
+class IntegrationSetting(Base):
+    """Chiavi API di integrazione (provider OSINT ecc.) cifrate con il KEK.
+
+    Scope: chiavi di SERVIZIO (una per deployment), non per-utente: per questo
+    non usano il DEK per-utente del VaultX ma encrypt_value/decrypt_value.
+    La risoluzione runtime è env -> override DB: chiave in env ha precedenza
+    (12-factor), l'override in DB serve quando non vuoi toccare il .env o
+    fare restart del container.
+    """
+    __tablename__ = "integration_settings"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class SyslogEvent(Base):
     __tablename__ = "syslog_events"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
