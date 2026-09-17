@@ -172,6 +172,66 @@ def start_agents() -> int:
     return 0 if ok else 1
 
 
+def is_elevated() -> bool:
+    """True solo se il processo puo' installare servizi Windows."""
+    if not IS_NT:
+        return False
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def install_agent_services() -> bool:
+    """Registra NodeTrace e Guard come SERVIZI Windows (autostart al boot).
+
+    Perche' qui e non nel .ps1 a parte: l'autostart e' una proprieta'
+    dell'installazione, non un passo manuale da ricordare. Il processo che
+    avvia gli agenti e' lo stesso che li rende persistenti — come per Guard,
+    che era gia' un servizio NSSM installato dall'installer.
+
+    Ritorna True se i servizi sono stati registrati e avviati (in quel caso
+    gli agenti NON vanno lanciati in modalita' dev, altrimenti si avrebbero
+    due istanze per endpoint). Senza privilegi: False + istruzioni.
+    """
+    if not IS_NT:
+        return False
+
+    installers = [
+        ("NodeTrace", os.path.join(REPO, "NodeTrace", "install", "windows", "install.ps1")),
+        ("Guard", os.path.join(REPO, "aegis-guard", "install", "windows", "install.ps1")),
+    ]
+    available = [(name, path) for name, path in installers if os.path.isfile(path)]
+    if not available:
+        return False
+
+    if not is_elevated():
+        log("autostart: servizi agenti NON registrati (serve PowerShell elevato)", "!")
+        print("  Per renderli persistenti (una volta sola, da shell admin):")
+        for name, path in available:
+            print(f"    powershell -ExecutionPolicy Bypass -File {os.path.relpath(path, REPO)}")
+        print("  Alternativa senza admin (Scheduled Task al logon):")
+        print("    powershell -ExecutionPolicy Bypass -File "
+              "scripts\\install-agents-autostart.ps1")
+        return False
+
+    registered = True
+    for name, path in available:
+        log(f"registro il servizio {name} (autostart al boot)...")
+        r = run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path],
+                timeout=600)
+        tail = (r.stdout or "").strip().splitlines()[-3:]
+        for line in tail:
+            print(f"    {line}")
+        if r.returncode != 0:
+            log(f"servizio {name}: registrazione fallita (exit {r.returncode})", "!")
+            registered = False
+        else:
+            log(f"servizio {name}: installato e avviato", "+")
+    return registered
+
+
 def run_smoke(base: str, email: str, password: str) -> int:
     r = run([sys.executable, os.path.join(SCRIPTS, "api_smoke.py"), "--base", base,
              "--email", email, "--password", password], timeout=300)
@@ -291,6 +351,8 @@ def main() -> int:
     ap.add_argument("--email", help="email admin (default: admin@aegis.local o quella nel .env)")
     ap.add_argument("--password", help="password admin (default: generata e salvata nel .env)")
     ap.add_argument("--no-agents", action="store_true", help="non avviare gli agenti host")
+    ap.add_argument("--no-autostart", action="store_true",
+                    help="non registrare gli agenti come servizi Windows (solo avvio dev)")
     ap.add_argument("--force-build", action="store_true", help="ricompila gli artefatti anche se presenti")
     ap.add_argument("--skip-build", action="store_true", help="salta la build degli artefatti")
     args = ap.parse_args()
@@ -328,8 +390,14 @@ def main() -> int:
     log(f"admin pronto: {email}", "+")
 
     if not args.no_agents:
-        if start_agents() != 0:
-            log("agenti non avviati: la piattaforma resta utilizzabile", "!")
+        # Prima i servizi (persistono al reboot), poi — solo se NON registrati —
+        # l'avvio dev. Mai entrambi: due istanze per endpoint = telemetria doppia.
+        services_up = False if args.no_autostart else install_agent_services()
+        if services_up:
+            log("agenti gestiti dai servizi Windows (ripartono da soli al boot)", "+")
+        else:
+            if start_agents() != 0:
+                log("agenti non avviati: la piattaforma resta utilizzabile", "!")
         time.sleep(8)
 
     if run_smoke("http://127.0.0.1:8000", email, password) != 0:

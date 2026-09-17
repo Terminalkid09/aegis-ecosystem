@@ -265,10 +265,12 @@ mai conoscere le dashboard, e le dashboard non parlano mai agli agenti.
   - Detection does **not** depend on AI at any point: rules, Sigma, behavioral tags, correlation, FIM and YARA are deterministic. AI only summarizes.
 
 ### Host agents survive reboot
-Docker containers come back on their own (`restart: unless-stopped`), but host agents started by hand die with the session. Two ways to make collection truly always-on:
-- **Guard**: the Windows installer registers it as an **NSSM service** (`AegisGuard`, auto-restart on crash) — survives reboot and runs elevated.
-- **NodeTrace + Guard without the service**: `powershell -ExecutionPolicy Bypass -File scripts/install-agents-autostart.ps1` registers Scheduled Tasks “at log on” (needs an **elevated** shell). Remove with `-Remove`.
-- Both write to `logs\nodetrace.txt` and `logs\guard.txt`.
+Docker containers come back on their own (`restart: unless-stopped`), but host agents started by hand die with the session. Autostart is a property of the **installation**, not a manual step:
+- **Both agents are Windows services (NSSM)** — `AegisGuard` and `AegisNodeTrace` — installed by their installers:
+  `aegis-guard\install\windows\install.ps1` and `NodeTrace\install\windows\install.ps1` (elevated shell; auto-start, restart-on-crash, log file). Uninstall with the matching `uninstall.ps1`.
+- **`python scripts/setup.py` registers them for you** when it runs elevated; if it is not, it prints the exact commands instead of leaving a silent gap. Use `--no-autostart` to force dev-mode agents only (two instances per endpoint are never started: either services **or** dev processes).
+- **No-admin fallback**: `powershell -ExecutionPolicy Bypass -File scripts/install-agents-autostart.ps1` registers Scheduled Tasks “at log on” (user context; elevated Guard actions unavailable). Remove with `-Remove`.
+- Logs: `logs\` — `nodetrace.txt`, `guard.txt`, `nodetrace-service.log`.
 - **Auto IP reputation**: OSINT results update the IP reputation database automatically
 - **Keys from the dashboard (Settings → Integrations)**: providers are discovered dynamically from the backend catalog, keys are stored encrypted at rest and take effect immediately — no restart. An env var set in `.env` **wins** over the DB value, so ops can still pin a key per deployment.
 - **Fallback order**: env var → DB (dashboard) → provider skipped with `api_key_not_configured` (never a hard failure)

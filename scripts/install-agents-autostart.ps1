@@ -1,7 +1,16 @@
-# Aegis — Autostart degli agenti host su Windows, senza NSSM e senza necessita'
-# di privilegi elevati (usa schtasks: i task "at log on" stanno nel contesto
-# dell'utente). Registra due task che avviano NodeTrace e Guard con le stesse
-# variabili che userebbe `aegis.bat agents`.
+# Aegis — Autostart degli agenti host su Windows: FALLBACK senza privilegi.
+#
+# La via primaria e' un'altra, ed e' quella che usa l'installazione: gli
+# agenti vengono registrati come SERVIZI Windows (NSSM), che partono al boot,
+# ripartono da soli se crashano e girano elevati (necessario a Guard per le
+# azioni di risposta). La registra `scripts/setup.py` quando ha privilegi, o
+# a mano:
+#   powershell -ExecutionPolicy Bypass -File aegis-guard\install\windows\install.ps1
+#   powershell -ExecutionPolicy Bypass -File NodeTrace\install\windows\install.ps1
+#
+# Questo script serve a chi NON puo'/vuole installare servizi: usa schtasks
+# (task "al logon", contesto utente, nessun nssm). Limite dichiarato: Guard
+# non elevato non puo' terminare processi di altri utenti.
 #
 # Perché esiste: i container Docker tornano su da soli (restart: unless-stopped)
 # ma gli agenti host no: avviati a mano muoiono con la sessione e dopo un
