@@ -450,6 +450,18 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
             created_alerts.append(alert)
             logger.warning("NODETRACE_ANOMALY alert: agent=%s | %s", agent_id, anomaly_str)
 
+    # 6. Eventi file (FIM) e match YARA: stessi effetti della pipeline batch
+    # (alert MITRE + evento OCSF in Log Search). Prima non erano gestiti QUI:
+    # gli eventi reali degli agenti morivano silenziosi — solo il consumer
+    # Redis li sapeva gestire — bug trovato con il test end-to-end live.
+    if event_type in ("FILE_MODIFIED", "YARA_MATCH"):
+        from app.services.file_event_service import handle_file_event
+
+        try:
+            await handle_file_event(db, EventSchema(**data))
+        except Exception:
+            logger.exception("Gestione evento file (FIM/YARA) fallita")
+
     await db.commit()
 
     # Trigger SOAR playbooks SOLO sugli alert creati da questo evento

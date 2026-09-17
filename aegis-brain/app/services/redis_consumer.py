@@ -12,9 +12,6 @@ from app.api.schemas.common import EventSchema
 from app.rules.heuristic_engine import HeuristicEngine
 from app.rules.correlation_engine import correlation_engine
 from app.services.anomaly_engine import anomaly_engine
-from app.services import siem_store
-from app.services.ocsf import severity_to_ocsf
-from app.ingest.base import UnifiedEvent
 from app.core.metrics import inc, observe_hist, set_gauge
 from sqlalchemy import select
 
@@ -122,73 +119,15 @@ class RedisConsumer:
             return uuid.uuid5(uuid.NAMESPACE_DNS, agent_id_str)
 
     async def _process_file_event(self, db, event: EventSchema):
-        """FILE_MODIFIED (FIM) e YARA_MATCH: alert MITRE statico + evento
-        normalizzato nella pipeline SIEM (ricercabile, Sigma, correlazione).
+        """FILE_MODIFIED (FIM) e YARA_MATCH: delega al servizio condiviso.
 
-        MITRE per FIM dipende dal percorso: Run keys/tasks/services ->
-        Persistence (T1547/T1543), tutto il resto -> T1565.001 (Stored Data
-        Manipulation e' il piu' vicino onesto per modifiche file generiche).
-        La classificazione fine la fanno le regole Sigma su fim_path.
+        La logica (alert MITRE + evento SIEM) vive in
+        app.services.file_event_service ed e' la stessa usata dalla pipeline
+        `report` degli agenti: una sola implementazione, due pipeline.
         """
-        agent_uuid = self._get_agent_uuid(event.agent_id)
-        path = (event.command_line or "").replace("[FIM] ", "").strip() or (event.process_name or "?")
-        change = "modified"
-        if "[FIM] created" in (event.command_line or ""): change = "created"
-        elif "[FIM] deleted" in (event.command_line or ""): change = "deleted"
+        from app.services.file_event_service import handle_file_event
 
-        if event.event_type == "YARA_MATCH":
-            alert = Alert(
-                agent_id=agent_uuid,
-                severity="HIGH",
-                process_name=event.process_name,  # nome regola YARA
-                event_type="yara_match",
-                description=f"YARA match '{event.process_name}': {path}",
-                mitre_tactic_name="Execution",
-                mitre_technique_id="T1204",
-                mitre_technique_name="User Execution",
-            )
-            db.add(alert)
-        else:
-            low = path.lower()
-            if any(k in low for k in ("\\tasks", "currentversion\\run", "startup", "/cron.", "/systemd/", "/rc")):
-                tactic, tech_id, tech_name = "Persistence", "T1547", "Boot or Logon Autostart Execution"
-            elif any(k in low for k in ("\\services", "/etc/init.d", "systemd")):
-                tactic, tech_id, tech_name = "Persistence", "T1543", "Create or Modify System Process"
-            else:
-                tactic, tech_id, tech_name = "Impact", "T1565.001", "Stored Data Manipulation"
-            alert = Alert(
-                agent_id=agent_uuid,
-                severity="MEDIUM",
-                event_type="fim_file_change",
-                description=f"FIM: file {change}: {path}",
-                process_name=event.process_name or "file",
-                mitre_tactic_name=tactic,
-                mitre_technique_id=tech_id,
-                mitre_technique_name=tech_name,
-            )
-            db.add(alert)
-
-        # Evento nel SIEM store (ricercabile in Log Search, OCSF File Activity).
-        try:
-            unified = UnifiedEvent(
-                time=event.timestamp,
-                source=f"agent:{event.agent_id}",
-                source_type="agent_file",
-                event_id=event.event_id or uuid.uuid5(
-                    uuid.NAMESPACE_DNS, f"{event.agent_id}:{event.timestamp}:{path}"),
-                ocsf_class_uid=1001,
-                severity="NOTICE" if event.event_type == "FILE_MODIFIED" else "HIGH",
-                hostname=event.hostname,
-                user=event.user,
-                process_name=event.process_name,
-                file_path=path if event.event_type == "FILE_MODIFIED" else path.split("-> ")[-1],
-                file_hash=event.file_hash,
-                command_line=event.command_line,
-            )
-            unified.severity_id = severity_to_ocsf(unified.severity)
-            await siem_store.store_events(db, [unified])
-        except Exception as exc:
-            logger.error(f"SIEM store evento file fallito: {exc}")
+        await handle_file_event(db, event)
 
     async def _update_agent(self, db, event: EventSchema):
         agent_id_uuid = self._get_agent_uuid(event.agent_id)
