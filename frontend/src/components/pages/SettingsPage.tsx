@@ -1,6 +1,125 @@
-import { Bell, Lock, Zap, Shield, HelpCircle, Network } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Bell, Lock, Zap, Shield, HelpCircle, Network, KeyRound, ExternalLink, RefreshCw } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
+import { integrationsAPI } from '@/services/api'
 import { cn } from '@/lib/utils'
+
+interface ProviderSetting {
+  key: string
+  label: string
+  env_var: string
+  help_text: string
+  docs_url: string
+  source: 'env' | 'database' | 'not set'
+  active: boolean
+  masked: string
+  overridable: boolean
+}
+
+/** Sezione API keys: i campi sono generati dalla risposta del backend
+ *  (catalogo dinamico) — aggiungere un provider nel brain lo fa comparire
+ *  qui senza toccare il frontend. Le chiavi non si rileggono mai: si vede
+ *  solo il mascheramento; salvare una stringa vuota rimuove l'override. */
+function ApiKeysSection() {
+  const [providers, setProviders] = useState<ProviderSetting[]>([])
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const load = async () => {
+    try {
+      const res = await integrationsAPI.status()
+      setProviders(res.data?.providers || [])
+    } catch {
+      setProviders([])
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const save = async (p: ProviderSetting) => {
+    setBusy(true); setMsg('')
+    try {
+      await integrationsAPI.setKey(p.key, drafts[p.key] ?? '')
+      setDrafts(d => ({ ...d, [p.key]: '' }))
+      await load()
+      setMsg(`${p.label} aggiornato.`)
+    } catch (e: any) {
+      setMsg(e?.response?.status === 403
+        ? 'Serve il ruolo admin per modificare le chiavi.'
+        : 'Salvataggio fallito.')
+    } finally { setBusy(false) }
+  }
+
+  if (!providers.length) {
+    return (
+      <div className="card p-6 bg-[hsl(var(--secondary)/0.3)]">
+        <div className="flex items-center gap-3">
+          <KeyRound size={20} className="text-cyan-400" />
+          <h3 className="text-lg font-bold text-white">Integrations & API Keys</h3>
+        </div>
+        <p className="text-sm text-[hsl(var(--muted-foreground))] mt-3">
+          Nessun provider configurato oppure backend non raggiungibile.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card p-6 space-y-5 bg-[hsl(var(--secondary)/0.3)]">
+      <div className="flex items-center justify-between border-b border-[hsl(var(--border))] pb-4">
+        <div className="flex items-center gap-3">
+          <KeyRound size={20} className="text-cyan-400" />
+          <h3 className="text-lg font-bold text-white">Integrations & API Keys</h3>
+        </div>
+        <button onClick={load} className="btn btn-ghost btn-sm flex items-center gap-1.5">
+          <RefreshCw size={13} /> Reload
+        </button>
+      </div>
+
+      {msg && <p className="text-xs text-cyan-300">{msg}</p>}
+
+      {providers.map(p => (
+        <div key={p.key} className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] font-bold text-[hsl(var(--muted-foreground))] uppercase tracking-widest">
+              {p.label}
+              {p.active && <span className={cn('ml-2 px-1.5 py-0.5 rounded text-[9px] normal-case',
+                p.source === 'env' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20')}>
+                {p.source === 'env' ? `da env (${p.masked})` : `da dashboard (${p.masked})`}
+              </span>}
+              {!p.active && <span className="ml-2 text-[9px] text-[hsl(var(--muted-foreground))] normal-case">non configurata</span>}
+            </label>
+            <a href={p.docs_url} target="_blank" rel="noreferrer"
+               className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
+              ottieni chiave <ExternalLink size={10} />
+            </a>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              autoComplete="off"
+              disabled={!p.overridable && p.source === 'env'}
+              placeholder={p.source === 'env' ? 'Gestita da .env (override non possibile)' : 'Inserisci API key...'}
+              value={drafts[p.key] ?? ''}
+              onChange={e => setDrafts(d => ({ ...d, [p.key]: e.target.value }))}
+              className="input w-full bg-[hsl(var(--background))] font-mono text-sm"
+            />
+            <button onClick={() => save(p)} disabled={busy}
+              className="btn btn-primary bg-cyan-600 hover:bg-cyan-500 border-cyan-500 px-4 text-xs">
+              Salva
+            </button>
+          </div>
+          <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+            {p.help_text}
+            {p.source === 'database' && ' · Salvata cifrata nel database (override attivo).'}
+          </p>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function SettingCard({ icon: Icon, title, description, enabled, onChange, highlight = false }: any) {
   return (
@@ -85,6 +204,8 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-6">
+          <ApiKeysSection />
+
           <div className="card p-6 space-y-6 bg-[hsl(var(--secondary)/0.3)]">
             <div className="flex items-center gap-3 border-b border-[hsl(var(--border))] pb-4">
               <Lock size={20} className="text-cyan-400" />

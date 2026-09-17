@@ -350,8 +350,22 @@ def main() -> int:
     check("sorgenti registrate", sources_listed)
     check("campi filtrabili", search_fields)
     check("agenti endpoint", agents_reporting)
+    def bootstrap_path_exists():
+        # Zero-config: il primo admin si ottiene da una CLI fuori dal processo
+        # HTTP (privilegio da shell, non da API esposta). Qui si verifica solo
+        # che il percorso esista nel repo: il check non importa l'app e non
+        # tocca il DB, quindi non dipende da env o stato.
+        from pathlib import Path
+        admin_py = Path(__file__).resolve().parents[1] / "aegis-brain" / "app" / "admin.py"
+        assert admin_py.exists(), "app/admin.py assente: percorso di bootstrap rotto"
+        text = admin_py.read_text(encoding="utf-8")
+        assert '"bootstrap"' in text and "user_bootstrap" in text, \
+            "il comando bootstrap non esiste più: nessun modo di ottenere il primo admin"
+        return "app.admin: bootstrap + set-role (privilegio da shell, audit registrato)"
+
     check("RBAC coerente col ruolo", rbac_matches_role)
     check("RBAC nega l'anonimo", rbac_anonymous_denied)
+    check("Percorso bootstrap del primo admin", bootstrap_path_exists)
 
     return _report(base, args)
 

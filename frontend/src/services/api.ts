@@ -55,6 +55,13 @@ export const dryRunAPI = {
     apiClient.post(`/soar/playbooks/${id}/dry-run`, { alert_id: alertId }),
 }
 
+// ─── Integrazioni (chiavi API provider, es. OSINT) ─────────────────────
+export const integrationsAPI = {
+  status: () => apiClient.get('/integrations/settings'),
+  setKey: (provider: string, value: string) =>
+    apiClient.put('/integrations/settings', { provider, value }),
+}
+
 // ─── Device PKI M6 ───────────────────────────────────────────────────────
 export const pkiAPI = {
   caCert: () => apiClient.get('/enroll/ca.crt'),
