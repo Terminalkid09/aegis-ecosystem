@@ -223,13 +223,23 @@ if exist "%ROOT%aegis-guard\install\windows\bin\yara64.exe" (
     echo  %YELLOW%  [i] yara64.exe non trovato: scansioni YARA disabilitate%RESET%
 )
 
-:: Detect bundled JRE (check jre-new first, then jre, then system java)
+:: Detect runtime Java: JRE minimale (jlink) > JDK 21+ installato > java di PATH.
+:: MAI il primo "java" di PATH alla cieca: e' spesso un JRE 8 e Guard muore con
+:: NoClassDefFoundError: jdk/net/Sockets (HttpClient 5 richiede Java 11+).
 set "JAVA_CMD="
 if exist "%ROOT%aegis-guard\jre-new\bin\java.exe" set "JAVA_CMD=%ROOT%aegis-guard\jre-new\bin\java.exe"
 if not defined JAVA_CMD if exist "%ROOT%aegis-guard\jre\bin\java.exe" set "JAVA_CMD=%ROOT%aegis-guard\jre\bin\java.exe"
+if not defined JAVA_CMD (
+    for /d %%d in ("%ProgramFiles%\Eclipse Adoptium\*" "%ProgramFiles%\Java\jdk*" "%ProgramFiles%\Microsoft\jdk*") do (
+        if exist "%%d\bin\java.exe" if exist "%%d\bin\javac.exe" set "JAVA_CMD=%%d\bin\java.exe"
+    )
+)
 if not defined JAVA_CMD set "JAVA_CMD=java"
+echo  %YELLOW%  [i] Java runtime per Guard: %JAVA_CMD%%RESET%
 
-start "Aegis-Guard Agent" /B cmd /c "cd /d "%ROOT%aegis-guard" && set "AEGIS_SCAN_INTERVAL_MS=10000" && set "AEGIS_ETW_ENABLED=!AEGIS_ETW_ENABLED!" && "!JAVA_CMD!" -jar target\aegis-guard.jar > "%ROOT%logs\guard.txt" 2>&1"
+pushd "%ROOT%aegis-guard"
+start "Aegis-Guard Agent" /B "!JAVA_CMD!" -jar target\aegis-guard.jar > "%ROOT%logs\guard.txt" 2>&1
+popd
 echo  %GREEN%  [+] Aegis-Guard Agent started (log: logs\guard.txt)%RESET%
 echo.
 

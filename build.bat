@@ -7,6 +7,36 @@ set "ROOT=%~dp0"
 echo ====== Building Aegis Agents ======
 echo.
 
+:: ---- Step 0: trova un JDK (javac) PRIMA di Maven ----
+:: Il `java` di PATH e' spesso un JRE (Adoptium installa entrambi): Maven
+:: morirebbe con "No compiler is provided". Il JDK che serve a Maven e'
+:: lo stesso che serve a jlink (Step 3): lo cerco qui e lo riuso.
+set "JDK_HOME="
+if exist "!JAVA_HOME!\bin\javac.exe" set "JDK_HOME=!JAVA_HOME!"
+if not defined JDK_HOME (
+    for /d %%d in ("%ProgramFiles%\Eclipse Adoptium\*") do (
+        if exist "%%d\bin\javac.exe" set "JDK_HOME=%%d"
+    )
+)
+if not defined JDK_HOME (
+    for /d %%d in ("%ProgramFiles%\Java\*") do (
+        if exist "%%d\bin\javac.exe" set "JDK_HOME=%%d"
+    )
+)
+if not defined JDK_HOME (
+    for /d %%d in ("%ProgramFiles%\Microsoft*") do (
+        if exist "%%d\bin\javac.exe" set "JDK_HOME=%%d"
+    )
+)
+if not defined JDK_HOME (
+    echo [!] No JDK found: install JDK 21+ or set JAVA_HOME to a JDK.
+    exit /b 1
+)
+echo [+] JDK found: !JDK_HOME!
+set "JAVA_HOME=!JDK_HOME!"
+set "PATH=!JDK_HOME!\bin;!PATH!"
+echo.
+
 :: ---- Step 1: NodeTrace (PyInstaller) ----
 echo [*] Step 1/3: Building NodeTrace Agent (PyInstaller)...
 cd /d "%ROOT%NodeTrace\agents\python"
@@ -18,7 +48,8 @@ if !errorlevel! neq 0 (
 )
 
 pip install pyinstaller -q 2>&1 | findstr /V "already satisfied"
-pyinstaller --onedir --name nodetrace-agent --add-data "config.json;." agent.py >nul 2>&1
+:: -y: senza, il secondo build fallisce perche' dist/ esiste gia' (non idempotente)
+pyinstaller --onedir -y --noconfirm --name nodetrace-agent --add-data "config.json;." agent.py
 if !errorlevel! neq 0 (
     echo [!] PyInstaller build failed.
     exit /b 1
@@ -58,37 +89,13 @@ echo.
 :: ---- Step 3: Minimal JRE (jlink) ----
 echo [*] Step 3/4: Creating minimal JRE via jlink...
 
+:: JDK_HOME e' stato individuato allo Step 0 (javac): un JDK con javac ha
+:: sempre jmods, quindi niente seconda ricerca.
 set "JLINK="
 set "JMODS="
-
-:: Find JDK with jmods (needed for jlink)
-if exist "!JAVA_HOME!\bin\jlink.exe" if exist "!JAVA_HOME!\jmods" (
-    set "JLINK=!JAVA_HOME!\bin\jlink.exe"
-    set "JMODS=!JAVA_HOME!\jmods"
-)
-if not defined JLINK (
-    for /d %%d in ("%ProgramFiles%\Eclipse Adoptium\*") do (
-        if exist "%%d\bin\jlink.exe" if exist "%%d\jmods" (
-            set "JLINK=%%d\bin\jlink.exe"
-            set "JMODS=%%d\jmods"
-        )
-    )
-)
-if not defined JLINK (
-    for /d %%d in ("%ProgramFiles%\Java\*") do (
-        if exist "%%d\bin\jlink.exe" if exist "%%d\jmods" (
-            set "JLINK=%%d\bin\jlink.exe"
-            set "JMODS=%%d\jmods"
-        )
-    )
-)
-if not defined JLINK (
-    for /d %%d in ("%ProgramFiles%\Microsoft*\*") do (
-        if exist "%%d\bin\jlink.exe" if exist "%%d\jmods" (
-            set "JLINK=%%d\bin\jlink.exe"
-            set "JMODS=%%d\jmods"
-        )
-    )
+if defined JDK_HOME if exist "!JDK_HOME!\bin\jlink.exe" if exist "!JDK_HOME!\jmods" (
+    set "JLINK=!JDK_HOME!\bin\jlink.exe"
+    set "JMODS=!JDK_HOME!\jmods"
 )
 
 if not defined JLINK (
