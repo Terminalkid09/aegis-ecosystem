@@ -22,6 +22,7 @@ aegis-guard/secret.json
 # identità e lo spool contiene telemetria bufferizzata, nessuno dei due va
 # versionato. Senza queste righe un `git add -A` li committa.
 aegis-guard/device.crt
+device.crt
 aegis-guard/device.pem
 aegis-guard/spool/
 
