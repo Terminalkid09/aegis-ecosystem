@@ -62,6 +62,22 @@ export const integrationsAPI = {
     apiClient.put('/integrations/settings', { provider, value }),
 }
 
+// ─── YARA & FIM ─────────────────────────────────────────────────────────────
+export const yaraAPI = {
+  list: () => apiClient.get('/yara/rules'),
+  create: (data: { name: string; content: string; is_active: boolean }) => apiClient.post('/yara/rules', data),
+  update: (id: number, data: { name?: string; content?: string; is_active?: boolean }) => apiClient.put(`/yara/rules/${id}`, data),
+  remove: (id: number) => apiClient.delete(`/yara/rules/${id}`),
+  scan: (agentId: string, targets: string[]) => apiClient.post(`/yara/agents/${agentId}/scan`, { targets }),
+}
+
+export const fimAPI = {
+  get: (agentId: string) => apiClient.get(`/fim/agents/${agentId}/fim-watchlist`),
+  set: (agentId: string, paths: string[], recursive: boolean) =>
+    apiClient.put(`/fim/agents/${agentId}/fim-watchlist`, { paths, recursive }),
+  reset: (agentId: string) => apiClient.delete(`/fim/agents/${agentId}/fim-watchlist`),
+}
+
 // ─── Device PKI M6 ───────────────────────────────────────────────────────
 export const pkiAPI = {
   caCert: () => apiClient.get('/enroll/ca.crt'),

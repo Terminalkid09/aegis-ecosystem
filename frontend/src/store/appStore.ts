@@ -18,6 +18,7 @@ export type Page =
   | 'syslog'
   | 'logsources'
   | 'search'
+  | 'yara'
   | 'settings'
 
 interface User {

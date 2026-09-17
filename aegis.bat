@@ -213,6 +213,16 @@ if exist "%ROOT%aegis-ebpf\aegis-etw.exe" (
     echo  %YELLOW%  [i] aegis-etw.exe non trovato: Guard parte senza telemetria kernel ETW%RESET%
 )
 
+:: YARA: se il binario ufficiale e' in install\windows\bin\, viene copiato
+:: nel workdir Guard (bin\) per il comando YARA_SCAN (scansioni on-demand).
+if exist "%ROOT%aegis-guard\install\windows\bin\yara64.exe" (
+    if not exist "%ROOT%aegis-guard\bin" mkdir "%ROOT%aegis-guard\bin" >nul 2>&1
+    copy /y "%ROOT%aegis-guard\install\windows\bin\yara64.exe" "%ROOT%aegis-guard\bin\yara64.exe" >nul
+    echo  %GREEN%  [+] YARA engine deployed for Guard%RESET%
+) else (
+    echo  %YELLOW%  [i] yara64.exe non trovato: scansioni YARA disabilitate%RESET%
+)
+
 :: Detect bundled JRE (check jre-new first, then jre, then system java)
 set "JAVA_CMD="
 if exist "%ROOT%aegis-guard\jre-new\bin\java.exe" set "JAVA_CMD=%ROOT%aegis-guard\jre-new\bin\java.exe"

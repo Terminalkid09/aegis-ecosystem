@@ -181,6 +181,18 @@ if (Test-Path $etwSource) {
     Write-Host "  [i] aegis-etw.exe non trovato (aegis-ebpf): Guard girera' senza telemetria kernel ETW" -ForegroundColor Yellow
 }
 
+# YARA (sandbox statica on-demand sull'endpoint): il binario ufficiale yara64.exe
+# va in <install>\bin\ e Guard lo spawn-a per il comando YARA_SCAN. Se manca, le
+# scansioni falliscono con ack esplicito (mai "sembra andata").
+$yaraSource = Join-Path $scriptPath "bin\yara64.exe"
+if (Test-Path $yaraSource) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $installDir "bin") | Out-Null
+    Copy-Item $yaraSource -Destination (Join-Path $installDir "bin\yara64.exe") -Force
+    Write-Host "  [OK] YARA engine deployed (bin/yara64.exe)" -ForegroundColor Green
+} else {
+    Write-Host "  [i] yara64.exe non trovato in install\windows\bin\: scansioni YARA disabilitate su questo endpoint" -ForegroundColor Yellow
+}
+
 # === CONFIGURATION ===
 Write-Host "`n[5/6] Configuring service..." -ForegroundColor Cyan
 

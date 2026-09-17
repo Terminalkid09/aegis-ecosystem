@@ -22,7 +22,8 @@ const Incidents      = lazy(() => import('@/components/pages/Incidents'))
 const AuditLogViewer = lazy(() => import('@/components/pages/AuditLogViewer'))
 const SyslogViewer   = lazy(() => import('@/components/pages/SyslogViewer'))
 const LogSources     = lazy(() => import('@/components/pages/LogSources'))
-const Search         = lazy(() => import('@/components/pages/Search'))
+const Search       = lazy(() => import('@/components/pages/Search'))
+const YaraManager   = lazy(() => import('@/components/pages/YaraManager'))
 const SettingsPage   = lazy(() => import('@/components/pages/SettingsPage'))
 
 const queryClient = new QueryClient({
@@ -110,6 +111,7 @@ function AppShell() {
     syslog:     <SyslogViewer />,
     logsources: <LogSources />,
     search:     <Search />,
+    yara:       <YaraManager />,
     settings:   <SettingsPage />,
   }
 

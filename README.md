@@ -248,6 +248,12 @@ mai conoscere le dashboard, e le dashboard non parlano mai agli agenti.
 - **Custom rules**: AND/OR multi-condition rules, whitelist (hostname/IP exclusions), auto-remediation actions
 - **Rule testing**: `POST /api/v1/rules/test` to test rules against sample event data
 
+### YARA & FIM (Static Sandboxing + File Integrity Monitoring)
+- **YARA rules managed from the dashboard**: create/enable/disable SOC signatures (admin/analyst); scans run on-demand on any endpoint via the official `yara64.exe` (deployed by the installer into `bin/`), every match becomes a HIGH alert and a searchable event
+- **YARA in Aegis Total**: uploaded samples are scanned with the active SOC signatures (yara-python); a match raises the score by fact, not heuristics — the report shows the matched rule and strings
+- **File Integrity Monitoring in-process**: configure a per-agent watchlist (Run keys, Tasks, services, hosts, cron, systemd...) from the dashboard; Guard (WatchService + SHA256 baseline) reports every change as an OCSF File Activity event with MITRE mapping (T1543/T1547 for persistence paths)
+- **Honest limits, declared**: FIM is user-mode telemetry (not a minifilter driver); hashing is capped at 8 MB per file; missing `yara64.exe` degrades scans with an explicit ack, never a silent "looks fine"
+
 ### OSINT + AI Automation
 - **Auto-enrichment**: When an alert fires, IPs/domains in the alert context are automatically looked up via VirusTotal, Shodan, AbuseIPDB
 - **AI threat reports**: Ollama generates structured threat analysis with confidence score and recommended actions

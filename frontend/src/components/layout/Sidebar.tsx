@@ -22,6 +22,7 @@ import {
   Zap,
   Database,
   SearchCode,
+  Binary,
 } from 'lucide-react'
 import { type Page, useAppStore } from '@/store/appStore'
 import { cn } from '@/lib/utils'
@@ -38,6 +39,7 @@ const NAV_ITEMS: { id: Page; label: string; icon: React.ElementType; section?: s
   { id: 'ai',         label: 'AI Chat',         icon: Bot },
   { id: 'search',     label: 'Log Search',      icon: SearchCode,      section: 'SIEM' },
   { id: 'logsources', label: 'Log Sources',     icon: Database },
+  { id: 'yara',       label: 'YARA & FIM',      icon: Binary },
   { id: 'deploy',     label: 'Deploy',          icon: Rocket,          section: 'MANAGE' },
   { id: 'playbooks',  label: 'Playbooks',       icon: BookOpen },
   { id: 'rules',      label: 'Rules',           icon: BookMarked },
