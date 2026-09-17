@@ -297,6 +297,23 @@ class IntegrationSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class YaraRule(Base):
+    """Regola YARA gestita dal SOC, spedita agli agenti su scansione.
+
+    Perché in DB e non su filesystem: la regola deve viaggiare sul canale
+    comandi (brain -> agente) e vuole ciclo di vita (attiva/disattiva,
+    audit, chi l'ha creata) — il DB lo dà gratis.
+    """
+    __tablename__ = "yara_rules"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class SyslogEvent(Base):
     __tablename__ = "syslog_events"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

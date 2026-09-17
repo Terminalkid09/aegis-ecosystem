@@ -44,10 +44,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import log_audit
 from app.core.config import settings
 from app.core.deps import get_current_user
+from app.core.logging import get_logger
 from app.database.connection import get_db
 from app.database.models import AEGIS_TOTAL_DISCLAIMER, TotalReport
 
 router = APIRouter(tags=["Aegis Total"])
+logger = get_logger(__name__)
 
 # ─── Static signatures ────────────────────────────────────────────────────────
 
@@ -1300,6 +1302,33 @@ async def upload_analyze(
                       "note": "Crack/keygen pattern — full code viewer disabled by policy. Verdict only."}]
         total_score = 85
 
+    # ── YARA (firme del SOC, tabella yara_rules) ─────────────────────────
+    # La sandbox statica non e' solo euristica: le firme curate dal SOC
+    # alzano lo score per FATTO. Fail-soft: senza yara-python o senza
+    # regole, il report lo dichiara invece di fingere.
+    yara_section: Dict[str, Any] = {"enabled": False, "matches": []}
+    try:
+        from app.database.models import YaraRule
+        from app.services import yara_engine
+        rules_res = await db.execute(select(YaraRule).where(YaraRule.is_active == True))  # noqa: E712
+        active_rules = rules_res.scalars().all()
+        if active_rules:
+            compiled, cerrs = yara_engine.compile_rules([(r.name, r.content) for r in active_rules])
+            if compiled:
+                yara_section = yara_engine.scan_bytes(raw, compiled)
+                err_list = yara_section.get("errors") or cerrs
+                if err_list:
+                    yara_section["errors"] = err_list[:10]
+                if yara_section.get("matches"):
+                    total_score, yfindings = yara_engine.score_impact(yara_section, total_score)
+                    for f in files_out:
+                        f.setdefault("findings", []).extend(yfindings)
+        else:
+            yara_section = {"enabled": True, "matches": [], "note": "nessuna regola attiva"}
+    except Exception as exc:
+        logger.warning(f"YARA scan su upload fallita (fail-soft): {exc}")
+        yara_section = {"enabled": False, "matches": [], "error": str(exc)[:200]}
+
     verdict = "clean" if total_score < 20 else ("suspicious" if total_score < 60 else "malicious")
 
     engines = {
@@ -1314,11 +1343,12 @@ async def upload_analyze(
             f.get("kind") == "archive" for f in files_out)},
         "strings_scan": {"enabled": True},
         "secret_scan": {"enabled": True, "patterns": len(SECRET_PATTERNS)},
+        "yara": yara_section,
         "iocs_found": all_iocs,
         "suspicious_imports": all_imports_suspicious[:20],
         "detected_format": fmt,
         "members_analyzed": total_members or None,
-        "note": "Phase 2: YARA / ClamAV / capa / Ghidra / sandbox — same schema, plug in worker.",
+        "note": "Static sandbox complete: PE/ELF/Mach-O/Office/PDF + entropy + imports + secrets + IOC + YARA (SOC signatures).",
     }
 
     rec = TotalReport(
