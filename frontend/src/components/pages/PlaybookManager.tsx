@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Play, Trash2, Plus, Activity, BookOpen, AlertCircle, CheckCircle2, XCircle } from 'lucide-react'
 import { playbookAPI } from '@/services/api'
+import { PermissionGate } from '@/components/common/PermissionGate'
 import { cn } from '@/lib/utils'
 
 const ACTION_TYPES = ['webhook', 'block_ip', 'kill_process', 'isolate_host', 'script']
@@ -65,12 +66,14 @@ export default function PlaybookManager() {
           </h1>
           <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">Automated incident response and remediation.</p>
         </div>
-        <button 
-          onClick={() => setShowForm(!showForm)} 
-          className={cn("btn btn-primary px-4 py-2", showForm ? "bg-[hsl(var(--secondary))] hover:bg-[hsl(var(--secondary)/0.8)] border-[hsl(var(--border))]" : "bg-purple-600 hover:bg-purple-500 border-purple-500 shadow-purple-500/20 text-white")}
-        >
-          {showForm ? 'Cancel' : <><Plus size={16} /> New Playbook</>}
-        </button>
+        <PermissionGate perms={['rules']}>
+          <button 
+            onClick={() => setShowForm(!showForm)} 
+            className={cn("btn btn-primary px-4 py-2", showForm ? "bg-[hsl(var(--secondary))] hover:bg-[hsl(var(--secondary)/0.8)] border-[hsl(var(--border))]" : "bg-purple-600 hover:bg-purple-500 border-purple-500 shadow-purple-500/20 text-white")}
+          >
+            {showForm ? 'Cancel' : <><Plus size={16} /> New Playbook</>}
+          </button>
+        </PermissionGate>
       </div>
 
       {showForm && (
@@ -165,7 +168,9 @@ export default function PlaybookManager() {
                       </div>
                       {p.description && <p className="text-sm text-[hsl(var(--muted-foreground))]">{p.description}</p>}
                     </div>
-                    <button onClick={() => handleDelete(p.id)} className="text-[hsl(var(--muted-foreground))] hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded hover:bg-red-500/10"><Trash2 size={16} /></button>
+                    <PermissionGate perms={['rules']}>
+                      <button onClick={() => handleDelete(p.id)} className="text-[hsl(var(--muted-foreground))] hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded hover:bg-red-500/10"><Trash2 size={16} /></button>
+                    </PermissionGate>
                   </div>
                   
                   <div className="flex flex-wrap gap-2 mt-4">

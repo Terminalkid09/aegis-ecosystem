@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ShieldAlert, Plus, Trash2, CheckCircle, XCircle, Beaker, Swords, Filter, Eye, EyeOff, Activity, Loader2 } from 'lucide-react'
 import { apiClient } from '@/services/api'
+import { PermissionGate } from '@/components/common/PermissionGate'
 import { cn, asArray } from '@/lib/utils'
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -209,10 +210,12 @@ export default function RulesManager() {
                 </div>
 
                 <div className="pt-2 flex justify-end">
-                  <button type="submit" disabled={createMut.isPending} className="btn btn-primary bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20 px-6 py-2">
-                    {createMut.isPending ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />} 
-                    Save Rule
-                  </button>
+                  <PermissionGate perms={['rules']}>
+                    <button type="submit" disabled={createMut.isPending} className="btn btn-primary bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20 px-6 py-2">
+                      {createMut.isPending ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />} 
+                      Save Rule
+                    </button>
+                  </PermissionGate>
                 </div>
               </form>
             </div>
@@ -286,14 +289,18 @@ export default function RulesManager() {
                           {rule.last_triggered && <div className="text-[9px] text-[hsl(var(--muted-foreground))] mt-1 font-mono">{new Date(rule.last_triggered).toLocaleTimeString()}</div>}
                         </td>
                         <td className="p-4 text-center">
-                          <button onClick={() => toggleMut.mutate(rule)} className={cn('p-1.5 rounded transition-colors', rule.is_active ? 'text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20' : 'text-[hsl(var(--muted-foreground))] bg-[hsl(var(--secondary))] hover:bg-[hsl(var(--border))]')}>
-                            {rule.is_active ? <Eye size={16} /> : <EyeOff size={16} />}
-                          </button>
+                          <PermissionGate perms={['rules']}>
+                            <button onClick={() => toggleMut.mutate(rule)} className={cn('p-1.5 rounded transition-colors', rule.is_active ? 'text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20' : 'text-[hsl(var(--muted-foreground))] bg-[hsl(var(--secondary))] hover:bg-[hsl(var(--border))]')}>
+                              {rule.is_active ? <Eye size={16} /> : <EyeOff size={16} />}
+                            </button>
+                          </PermissionGate>
                         </td>
                         <td className="p-4 text-center">
-                          <button onClick={() => { if(confirm("Delete rule?")) deleteMut.mutate(rule.id) }} className="p-1.5 text-[hsl(var(--muted-foreground))] hover:text-red-400 hover:bg-red-500/10 rounded transition-colors" title="Delete Rule">
-                            <Trash2 size={16} />
-                          </button>
+                          <PermissionGate perms={['rules']}>
+                            <button onClick={() => { if(confirm("Delete rule?")) deleteMut.mutate(rule.id) }} className="p-1.5 text-[hsl(var(--muted-foreground))] hover:text-red-400 hover:bg-red-500/10 rounded transition-colors" title="Delete Rule">
+                              <Trash2 size={16} />
+                            </button>
+                          </PermissionGate>
                         </td>
                       </tr>
                     ))}
@@ -354,6 +361,7 @@ export default function RulesManager() {
               onChange={e => setTestEvent(e.target.value)} 
               className="input h-[300px] font-mono text-[10px] sm:text-xs text-emerald-400 resize-none bg-[hsl(var(--background))]" 
             />
+            <PermissionGate perms={['rules']}>
             <button 
               onClick={() => {
                 try { JSON.parse(testEvent); testMut.mutate(JSON.parse(testEvent)) } catch { alert("Invalid JSON") }
@@ -364,6 +372,7 @@ export default function RulesManager() {
               {testMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <Beaker size={16} />}
               {testMut.isPending ? 'Testing...' : 'Run Against All Rules'}
             </button>
+            </PermissionGate>
           </div>
           
           <div className="card p-5 h-fit">

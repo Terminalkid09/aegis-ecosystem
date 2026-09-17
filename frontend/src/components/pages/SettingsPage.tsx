@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Bell, Lock, Zap, Shield, HelpCircle, Network, KeyRound, ExternalLink, RefreshCw } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import { integrationsAPI } from '@/services/api'
+import { PermissionGate } from '@/components/common/PermissionGate'
 import { cn } from '@/lib/utils'
 
 interface ProviderSetting {
@@ -106,10 +107,12 @@ function ApiKeysSection() {
               onChange={e => setDrafts(d => ({ ...d, [p.key]: e.target.value }))}
               className="input w-full bg-[hsl(var(--background))] font-mono text-sm"
             />
-            <button onClick={() => save(p)} disabled={busy}
-              className="btn btn-primary bg-cyan-600 hover:bg-cyan-500 border-cyan-500 px-4 text-xs">
-              Salva
-            </button>
+            <PermissionGate perms={['manage']}>
+              <button onClick={() => save(p)} disabled={busy}
+                className="btn btn-primary bg-cyan-600 hover:bg-cyan-500 border-cyan-500 px-4 text-xs">
+                Salva
+              </button>
+            </PermissionGate>
           </div>
           <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
             {p.help_text}

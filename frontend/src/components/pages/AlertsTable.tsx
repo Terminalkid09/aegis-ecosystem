@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, Filter, Trash2, RefreshCw, ChevronDown, ChevronUp, Search } from 'lucide-react'
 import { alertsAPI } from '@/services/api'
+import { PermissionGate } from '@/components/common/PermissionGate'
 import { cn, severityBadge, timeAgo } from '@/lib/utils'
 
 export default function AlertsTable() {
@@ -71,18 +72,22 @@ export default function AlertsTable() {
           >
             <RefreshCw size={14} />
           </button>
-          <button
-            onClick={() => { if (confirm('Resolve all unresolved alerts?')) resolveAllMut.mutate() }}
-            className="btn btn-ghost"
-          >
-            <CheckCircle2 size={14} /> Resolve All
-          </button>
-          <button
-            onClick={() => { if (confirm('Delete ALL alerts? This is irreversible.')) deleteAllMut.mutate() }}
-            className="btn btn-danger"
-          >
-            <Trash2 size={14} /> Clear
-          </button>
+          <PermissionGate perms={['triage', 'rules']} mode="hide">
+            <button
+              onClick={() => { if (confirm('Resolve all unresolved alerts?')) resolveAllMut.mutate() }}
+              className="btn btn-ghost"
+            >
+              <CheckCircle2 size={14} /> Resolve All
+            </button>
+          </PermissionGate>
+          <PermissionGate perms={['manage']} mode="hide">
+            <button
+              onClick={() => { if (confirm('Delete ALL alerts? This is irreversible.')) deleteAllMut.mutate() }}
+              className="btn btn-danger"
+            >
+              <Trash2 size={14} /> Clear
+            </button>
+          </PermissionGate>
         </div>
       </div>
 
@@ -182,18 +187,20 @@ export default function AlertsTable() {
 
                   {/* Actions */}
                   <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={e => { e.stopPropagation(); resolveMut.mutate({ id: alert.id, resolved: !alert.is_resolved }) }}
-                      className={cn(
-                        'p-1.5 rounded text-xs transition-colors',
-                        alert.is_resolved
-                          ? 'text-[hsl(var(--muted-foreground))] hover:text-white hover:bg-[hsl(var(--secondary))]'
-                          : 'text-emerald-400 hover:bg-emerald-400/10'
-                      )}
-                      title={alert.is_resolved ? 'Re-open' : 'Resolve'}
-                    >
-                      <CheckCircle2 size={14} />
-                    </button>
+                    <PermissionGate perms={['triage', 'respond']} mode="disable">
+                      <button
+                        onClick={e => { e.stopPropagation(); resolveMut.mutate({ id: alert.id, resolved: !alert.is_resolved }) }}
+                        className={cn(
+                          'p-1.5 rounded text-xs transition-colors',
+                          alert.is_resolved
+                            ? 'text-[hsl(var(--muted-foreground))] hover:text-white hover:bg-[hsl(var(--secondary))]'
+                            : 'text-emerald-400 hover:bg-emerald-400/10'
+                        )}
+                        title={alert.is_resolved ? 'Re-open' : 'Resolve'}
+                      >
+                        <CheckCircle2 size={14} />
+                      </button>
+                    </PermissionGate>
                   </div>
                   {expandedId === alert.id ? <ChevronUp size={14} className="text-[hsl(var(--muted-foreground))] shrink-0" /> : <ChevronDown size={14} className="text-[hsl(var(--muted-foreground))] shrink-0" />}
                 </div>

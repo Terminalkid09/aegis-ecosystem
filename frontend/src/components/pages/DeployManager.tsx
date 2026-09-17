@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Rocket, KeyRound, Package, ClipboardCopy, RefreshCcw, Play, Ban, CheckCircle2, XCircle, Clock, Server, HelpCircle } from 'lucide-react'
 import { deployAPI } from '@/services/api'
 import { useAppStore } from '@/store/appStore'
+import { PermissionGate } from '@/components/common/PermissionGate'
 import { cn } from '@/lib/utils'
 
 function copyText(t: string, done?: () => void) {
@@ -142,9 +143,11 @@ export default function DeployManager() {
               <option value="unified">Unified (Guard + NodeTrace)</option>
             </select>
           </div>
-          <button onClick={() => createTokenMut.mutate()} disabled={createTokenMut.isPending} className="btn btn-primary w-full">
-            {createTokenMut.isPending ? 'Generating...' : 'Generate 15m Token'}
-          </button>
+          <PermissionGate perms={['deploy']}>
+            <button onClick={() => createTokenMut.mutate()} disabled={createTokenMut.isPending} className="btn btn-primary w-full">
+              {createTokenMut.isPending ? 'Generating...' : 'Generate 15m Token'}
+            </button>
+          </PermissionGate>
           
           {lastToken && (
             <div className="space-y-3 text-xs bg-[hsl(var(--secondary))] p-3 rounded-lg border border-[hsl(var(--border))] animate-fade-in">
@@ -168,7 +171,9 @@ export default function DeployManager() {
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-white">#{t.id} {t.label || '(no label)'}</span>
                   {!t.revoked && !t.used_at && (
-                    <button onClick={() => revokeTokenMut.mutate(t.id)} className="text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors"><Ban size={12} /> Revoke</button>
+                    <PermissionGate perms={['deploy']}>
+                      <button onClick={() => revokeTokenMut.mutate(t.id)} className="text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors"><Ban size={12} /> Revoke</button>
+                    </PermissionGate>
                   )}
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-[hsl(var(--muted-foreground))]">
@@ -221,9 +226,11 @@ export default function DeployManager() {
             <p className="text-[10px] text-cyan-400 leading-tight">Remote password execution is disabled. Generate a short-lived enrollment token above and run the signed installer on the target host.</p>
           )}
           
-          <button onClick={handleCreateJob} disabled={createJobMut.isPending} className="btn btn-primary w-full bg-purple-600 hover:bg-purple-500 border-purple-500 text-white shadow-purple-500/20">
-            {createJobMut.isPending ? 'Queuing...' : 'Start Rollout'}
-          </button>
+          <PermissionGate perms={['deploy']}>
+            <button onClick={handleCreateJob} disabled={createJobMut.isPending} className="btn btn-primary w-full bg-purple-600 hover:bg-purple-500 border-purple-500 text-white shadow-purple-500/20">
+              {createJobMut.isPending ? 'Queuing...' : 'Start Rollout'}
+            </button>
+          </PermissionGate>
           
           <button onClick={() => setCurrentPage('discovery')} className="w-full text-xs text-[hsl(var(--muted-foreground))] hover:text-white transition-colors flex items-center justify-center gap-1">
             <Server size={12} /> Select hosts from Discovery instead

@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Monitor, Shield, Search, RefreshCw, Ban, CheckCircle2, AlertTriangle, Server } from 'lucide-react'
 import { statsAPI, fleetAPI, pkiAPI } from '@/services/api'
+import { PermissionGate } from '@/components/common/PermissionGate'
 import { cn, timeAgo, asArray } from '@/lib/utils'
 
 const STATUS_STYLE: Record<string, string> = {
@@ -122,11 +123,17 @@ export default function AgentsList() {
                 <div className="flex flex-wrap gap-1 shrink-0">
                   {a.site !== 'hq' && <button onClick={() => siteMut.mutate({ id: a.agent_id, site: 'hq' })} className="btn btn-ghost text-xs py-1 px-2">→ hq</button>}
                   {a.isolated ? (
-                    <button onClick={() => releaseMut.mutate(a.agent_id)} className="btn btn-ghost text-xs py-1 px-2 text-emerald-400"><CheckCircle2 size={12} /> Release</button>
+                    <PermissionGate perms={['respond']}>
+                      <button onClick={() => releaseMut.mutate(a.agent_id)} className="btn btn-ghost text-xs py-1 px-2 text-emerald-400"><CheckCircle2 size={12} /> Release</button>
+                    </PermissionGate>
                   ) : (
-                    <button onClick={() => { const r = prompt('Reason for isolate?') || 'SOC contain'; isolateMut.mutate({ id: a.agent_id, reason: r }) }} className="btn btn-ghost text-xs py-1 px-2 text-orange-400"><Ban size={12} /> Isolate</button>
+                    <PermissionGate perms={['respond']}>
+                      <button onClick={() => { const r = prompt('Reason for isolate?') || 'SOC contain'; isolateMut.mutate({ id: a.agent_id, reason: r }) }} className="btn btn-ghost text-xs py-1 px-2 text-orange-400"><Ban size={12} /> Isolate</button>
+                    </PermissionGate>
                   )}
-                  <button onClick={() => { if (confirm(`Revoke cert for ${a.hostname}?`)) revokeMut.mutate(a.agent_id) }} className="btn btn-ghost text-xs py-1 px-2 text-red-400" title="Revoke mTLS cert"><AlertTriangle size={12} /> Revoke</button>
+                  <PermissionGate perms={['triage', 'deploy']}>
+                    <button onClick={() => { if (confirm(`Revoke cert for ${a.hostname}?`)) revokeMut.mutate(a.agent_id) }} className="btn btn-ghost text-xs py-1 px-2 text-red-400" title="Revoke mTLS cert"><AlertTriangle size={12} /> Revoke</button>
+                  </PermissionGate>
                 </div>
                 <div className="w-full text-[10px] text-[hsl(var(--muted-foreground))]">coverage: {a.capabilities?.sensor_mode || a.provenance || '—'} {a.quality ? `· ${a.quality}` : ''} · cert: {a.capabilities?.device_cert_sha256 ? 'bound' : 'none'}</div>
               </div>

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Siren, UserCheck, RefreshCcw, Plus, ChevronDown, ChevronRight, CheckCircle2, ShieldAlert } from 'lucide-react'
 import { incidentsAPI } from '@/services/api'
 import { cn } from '@/lib/utils'
+import { PermissionGate } from '@/components/common/PermissionGate'
 
 const STATUS_COLOR: Record<string, string> = {
   open: 'bg-red-500/10 text-red-400 border-red-500/20',
@@ -79,9 +80,11 @@ export default function Incidents() {
             <option value="resolved">Resolved</option>
             <option value="closed">Closed</option>
           </select>
-          <button onClick={() => autoGroupMut.mutate()} disabled={autoGroupMut.isPending} className="btn btn-primary bg-purple-600 hover:bg-purple-500 border-purple-500 shadow-purple-500/20 py-1.5 px-3">
-            Auto-group Orphans
-          </button>
+          <PermissionGate perms={['triage', 'rules']}>
+            <button onClick={() => autoGroupMut.mutate()} disabled={autoGroupMut.isPending} className="btn btn-primary bg-purple-600 hover:bg-purple-500 border-purple-500 shadow-purple-500/20 py-1.5 px-3">
+              Auto-group Orphans
+            </button>
+          </PermissionGate>
           <button onClick={() => qc.invalidateQueries({ queryKey: ['incidents'] })} className="btn btn-ghost py-1.5 px-3 border border-[hsl(var(--border))]">
             <RefreshCcw size={14} /> Refresh
           </button>
@@ -142,14 +145,15 @@ export default function Incidents() {
                   Change Status:
                   <div className="flex flex-wrap gap-2">
                     {['open', 'investigating', 'contained', 'resolved', 'closed'].map(s => (
+                      <PermissionGate perms={['triage', 'rules']} key={s} mode="disable">
                       <button 
-                        key={s} 
                         disabled={inc.status === s || updateStatusMut.isPending} 
                         onClick={() => updateStatusMut.mutate({ id: inc.id, status: s })} 
                         className={cn("rounded-md border px-3 py-1.5 transition-colors", inc.status === s ? "bg-[hsl(var(--secondary))] border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] opacity-50 cursor-not-allowed" : "border-[hsl(var(--border))] text-white hover:border-[hsl(var(--primary)/0.5)] hover:bg-[hsl(var(--primary)/0.1)] hover:text-cyan-400")}
                       >
                         → {s}
                       </button>
+                      </PermissionGate>
                     ))}
                   </div>
                 </div>
