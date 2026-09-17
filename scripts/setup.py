@@ -145,8 +145,22 @@ def build_agents() -> int:
 
 # ------------------------------------------------------------------- pilot
 
-def compose_up(profile: str = "ollama") -> int:
-    r = run(["docker", "compose", "--profile", profile, "up", "-d"], timeout=600)
+def ai_profile_requested() -> bool:
+    """AI locale (profilo ollama) solo su richiesta esplicita.
+
+    L'LLM a riposo costa ~850MB di RAM e picchi su tutti i core, per una
+    feature di sola sintesi: la detection non ne ha bisogno. Il vecchio
+    default avviava Ollama per tutti, anche a chi non lo voleva.
+    """
+    return os.environ.get("AEGIS_WITH_AI", "").strip() == "1"
+
+
+def compose_up(profile: str = "light") -> int:
+    cmd = ["docker", "compose"]
+    if profile == "ollama":
+        cmd += ["--profile", "ollama"]
+    cmd += ["up", "-d"]
+    r = run(cmd, timeout=600)
     if r.returncode != 0:
         log(f"compose up fallito:\n{(r.stderr or r.stdout or '')[-800:]}", "!")
         return 1
@@ -314,7 +328,9 @@ def cmd_update(args) -> int:
             timeout=1800)
     if b.returncode != 0:
         return die(f"build immagini fallita:\n{(b.stderr or '')[-800:]}")
-    if compose_up() != 0:
+    if ai_profile_requested():
+        log("profilo AI locale attivo (AEGIS_WITH_AI=1): avvio anche ollama")
+    if compose_up("ollama" if ai_profile_requested() else "light") != 0:
         return 1
     if wait_ready("http://127.0.0.1:8000", args.wait) != 0:
         return 1
@@ -376,7 +392,11 @@ def main() -> int:
         if build_agents() != 0:
             return 1
 
-    if compose_up() != 0:
+    if ai_profile_requested():
+        log("profilo AI locale attivo (AEGIS_WITH_AI=1): avvio anche ollama")
+    else:
+        log("avvio leggero: ollama non parte (AI locale con AEGIS_WITH_AI=1)")
+    if compose_up("ollama" if ai_profile_requested() else "light") != 0:
         return 1
     if wait_ready("http://127.0.0.1:8000", 180) != 0:
         return 1

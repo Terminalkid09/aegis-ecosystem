@@ -24,6 +24,37 @@ Aegis-Link  ---> Redis queue/cache ---> Aegis-Brain ---> PostgreSQL
 
 ## Quick Start
 
+### Da zero (clone) a piattaforma funzionante: un comando
+
+Serve **Docker Desktop in esecuzione** e **Python 3.10+**. Nient'altro per
+partire: il `.env` (con segreti casuali), la build degli agenti se mancano,
+l'avvio dello stack, il bootstrap dell'admin e lo smoke di verifica sono
+guidati dallo stesso comando.
+
+```cmd
+git clone <repo> && cd aegis-ecosystem
+python scripts/setup.py
+```
+
+Al termine stampa credenziali admin, URL della dashboard e i passi per
+l'aggiornamento (`python scripts/setup.py update`, che **non tocca il
+database**).
+
+Note oneste sui requisiti:
+
+| Serve | Quando |
+|---|---|
+| Docker Desktop (avviato) + Python 3.10+ | sempre (preflight di `setup.py`: se manca, si ferma e lo dice) |
+| JDK 21+ e Maven, pip/PyInstaller | **solo** se gli artefatti agenti non esistono e vanno compilati (su Windows il setup invoca `build.bat` da sé) |
+| `nssm.exe` | **solo** per installare gli agenti come servizi Windows (l'installer lo chiede; senza, resta il fallback senza admin) |
+| `yara64.exe` | **solo** per le scansioni YARA sull'endpoint (senza, le scansioni dichiarano di essere non disponibili) |
+
+I file `.bat` **non** sono un passaggio obbligatorio: `aegis.bat` è il menu
+di comodo per start/stop/log/build in sviluppo. L'AI locale non parte di
+default: `set AEGIS_WITH_AI=1` prima di `setup.py` per attivare ollama.
+
+### Installazione manuale (senza lo script)
+
 1. Copy the example environment file:
 
 ```cmd
