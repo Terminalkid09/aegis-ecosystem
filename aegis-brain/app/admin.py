@@ -10,14 +10,16 @@ esposta**, si concede da una shell sull'host, e resta tracciato nell'audit.
 Conseguenza pratica: su un deployment nuovo il primo utente registrato è
 `user`, e senza questo comando le funzioni privilegiate (isolamento host,
 approvazione deploy, cancellazione regole/alert, assegnazione site) sono
-irraggiungibili. Operatore: esegui `set-role` una volta, poi lavora da UI.
+irraggiungibili. Il percorso zero-config è `bootstrap` (registra se serve e
+promuove in un colpo solo); `set-role` serve per cambi ruoli successivi.
 
 Il ruolo è riletto dal DB a ogni richiesta (`core.deps._validate_token`), quindi
 il cambio ha effetto immediato: **nessun re-login necessario**.
 
 Uso (dentro il container):
     docker exec aegis-brain python -m app.admin list
-    docker exec aegis-brain python -m app.admin set-role <email> admin
+    docker exec aegis-brain python -m app.admin bootstrap <email> <password>
+    docker exec aegis-brain python -m app.admin set-role <email> analyst
 
 `set-role` rifiuta di togliere l'ultimo admin rimasto (usa `--force` per
 forzare, consapevolmente).
@@ -32,7 +34,7 @@ from sqlalchemy import select
 
 from app.core.audit import log_audit
 from app.core.deps import KNOWN_ROLES
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password
 from app.database.connection import AsyncSessionLocal, engine
 from app.database.models import User
 
@@ -124,6 +126,52 @@ async def _create_user(username: str, email: str, password: str, role: str) -> i
         return 0
 
 
+async def _bootstrap(email: str, password: str) -> int:
+    """Percorso zero-config: l'utente diventa admin in un solo comando.
+
+    Risolve il chicken-and-egg del deployment fresco (con ALLOW_OPEN_REGISTRATION
+    attivo l'utente puo' registrarsi dalla UI, ma nasce `user`): un solo comando
+    lo registra (se serve) e lo promuove. Idempotente: se l'utente esiste gia'
+    verifica solo la password e promuove. Se password errata -> rifiuta (non e'
+    un reset di credenziali: per quello c'e' set-role su un account noto).
+    """
+    if len(password) < 8:
+        print("password troppo corta (minimo 8 caratteri)", file=sys.stderr)
+        return 2
+    async with AsyncSessionLocal() as db:
+        user = (await db.execute(
+            select(User).where(User.email == email))).scalars().first()
+        if user:
+            if not verify_password(password, user.password_hash):
+                print(f"rifiutato: esiste un account con email {email} ma la "
+                      "password non corrisponde. Usa set-role su un account di "
+                      "cui conosci le credenziali.", file=sys.stderr)
+                return 1
+            created = False
+        else:
+            username = email.split("@")[0][:150]
+            user = User(username=username, email=email,
+                        password_hash=hash_password(password), role="user",
+                        active=True)
+            db.add(user)
+            await db.flush()
+            created = True
+
+        previous = user.role or "user"
+        user.role = "admin"
+        await log_audit(
+            db, action="user_bootstrap", resource="user",
+            resource_id=str(user.id), username=ACTOR,
+            details={"email": email, "created": created,
+                     "from": previous, "to": "admin", "via": "cli"},
+        )
+        await db.commit()
+        verb = "creato e promosso" if created else "promosso"
+        print(f"[ok] {email}: {verb} ad admin (audit registrato). "
+              "Accedi dalla UI con questa email.")
+        return 0
+
+
 async def _run(args) -> int:
     try:
         if args.command == "list":
@@ -133,6 +181,8 @@ async def _run(args) -> int:
         if args.command == "create-user":
             return await _create_user(
                 args.username, args.email, args.password, args.role)
+        if args.command == "bootstrap":
+            return await _bootstrap(args.email, args.password)
     finally:
         await engine.dispose()
     print("comando non riconosciuto", file=sys.stderr)
@@ -159,6 +209,12 @@ def main(argv=None) -> int:
     p_create.add_argument("email")
     p_create.add_argument("password")
     p_create.add_argument("--role", default="user", help=f"uno di: {', '.join(ROLES)}")
+
+    p_boot = sub.add_parser(
+        "bootstrap",
+        help="percorso zero-config: registra (se serve) e promuove ad admin")
+    p_boot.add_argument("email")
+    p_boot.add_argument("password")
 
     args = parser.parse_args(argv)
     return asyncio.run(_run(args))

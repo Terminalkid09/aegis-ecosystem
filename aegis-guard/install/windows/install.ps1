@@ -164,6 +164,23 @@ if (-not (Test-Path $jarSource)) {
 Copy-Item $jarSource -Destination $jarPath -Force
 Write-Host "  [OK] JAR deployed" -ForegroundColor Green
 
+# Telemetria kernel ETW (opzionale ma automatica): se il collector e' stato
+# compilato (build.bat step 4 o `make aegis-etw.exe` in aegis-ebpf), viene
+# deployato accanto al JAR e la flag accesa. Guard (EtwPipeSource) lo spawna e
+# ne legge lo stdout: consumer ETW user-mode, nessun driver, nessuna firma.
+# Il servizio gira come LocalSystem, quindi il collector eredita l'elevazione:
+# niente UAC, niente passaggi manuali. Se il binario manca, Guard degrada al
+# polling Toolhelp32 senza errori: capacita' in meno, non un guasto.
+$etwSource = Join-Path $scriptPath "..\..\aegis-ebpf\aegis-etw.exe"
+$etwEnabled = "false"
+if (Test-Path $etwSource) {
+    Copy-Item $etwSource -Destination (Join-Path $installDir "aegis-etw.exe") -Force
+    $etwEnabled = "true"
+    Write-Host "  [OK] Kernel telemetry (ETW) deployed and enabled" -ForegroundColor Green
+} else {
+    Write-Host "  [i] aegis-etw.exe non trovato (aegis-ebpf): Guard girera' senza telemetria kernel ETW" -ForegroundColor Yellow
+}
+
 # === CONFIGURATION ===
 Write-Host "`n[5/6] Configuring service..." -ForegroundColor Cyan
 
@@ -234,7 +251,7 @@ if (-not $enrollKey) { $enrollKey = $envVars['AEGIS_ENROLL_KEY'] }
 # `secret.json` esiste già; il token di enrollment ha scadenza breve ed è
 # monouso, quindi il valore esposto non è una credenziale device.
 & $nssmPath set AegisGuard AppEnvironmentExtra `
-    "AEGIS_GATEWAY_URL=$gatewayUrl`nAEGIS_BRAIN_URL=$brainUrl`nAEGIS_GUARD_API_KEY=$apiKey`nAEGIS_ENROLL_KEY=$enrollKey`nAEGIS_AGENT_ID=$agentId`nAEGIS_SCAN_INTERVAL_MS=$scanInterval"
+    "AEGIS_GATEWAY_URL=$gatewayUrl`nAEGIS_BRAIN_URL=$brainUrl`nAEGIS_GUARD_API_KEY=$apiKey`nAEGIS_ENROLL_KEY=$enrollKey`nAEGIS_AGENT_ID=$agentId`nAEGIS_SCAN_INTERVAL_MS=$scanInterval`nAEGIS_ETW_ENABLED=$etwEnabled"
 
 # Set service recovery
 & $nssmPath set AegisGuard AppExit Default Restart

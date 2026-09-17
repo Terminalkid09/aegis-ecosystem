@@ -56,7 +56,7 @@ echo [+] Aegis-Guard built: target\aegis-guard.jar (!JAR_SIZE! bytes)
 echo.
 
 :: ---- Step 3: Minimal JRE (jlink) ----
-echo [*] Step 3/3: Creating minimal JRE via jlink...
+echo [*] Step 3/4: Creating minimal JRE via jlink...
 
 set "JLINK="
 set "JMODS="
@@ -129,12 +129,38 @@ if !errorlevel! neq 0 (
 for /f %%s in ('dir /s /-c "!JRE_OUT!" ^| findstr /B /C:"  File(s)"') do set "JRE_SIZE=%%s"
 echo [+] Minimal JRE created: !JRE_OUT! (!JRE_SIZE!)
 
+:: ---- Step 4: ETW kernel collector (MinGW, best-effort) ----
+:: Telemetria kernel Windows (Kernel-Process / Kernel-Network). Nessun driver:
+:: consumer ETW user-mode, zero firme. Se il compilatore manca, la build NON
+:: fallisce: Guard degrada da solo (EtwPipeSource) e resta il polling Toolhelp32.
+echo [*] Step 4/4: Building ETW collector (aegis-etw.exe)...
+set "GCC_EXE="
+for /d %%d in ("%USERPROFILE%\Downloads\x86_64-*-mingw64" "%ProgramFiles%\mingw64" "C:\mingw64" "C:\msys64\mingw64") do (
+    if exist "%%d\bin\gcc.exe" set "GCC_EXE=%%d\bin\gcc.exe"
+)
+where gcc >nul 2>&1 && set "GCC_EXE=gcc"
+if defined GCC_EXE (
+    cd /d "%ROOT%aegis-ebpf"
+    "!GCC_EXE!" -O2 -Wall aegis_etw.c -o aegis-etw.exe -ladvapi32 -ltdh -lws2_32
+    if !errorlevel! neq 0 (
+        echo [!] ETW collector build failed (non bloccante: Guard resta operativo).
+    ) else (
+        echo [+] ETW collector built: aegis-ebpf\aegis-etw.exe
+    )
+    cd /d "%ROOT%"
+) else (
+    echo [!] gcc (MinGW-w64) non trovato: ETW collector non compilato.
+    echo     Guard funzionera' senza telemetria kernel ETW (degrada a polling).
+    echo     Installa MinGW-w64 per abilitarla.
+)
+
 :skip_jlink
 echo.
 echo ====== Build Complete ======
 echo.
 echo Summary:
 echo   NodeTrace: %ROOT%NodeTrace\agents\python\dist\nodetrace-agent\nodetrace-agent.exe
+if exist "%ROOT%aegis-ebpf\aegis-etw.exe" echo   ETW:        %ROOT%aegis-ebpf\aegis-etw.exe
 if exist "%ROOT%aegis-guard\jre"        echo   Guard JRE:  %ROOT%aegis-guard\jre\bin\java.exe
 if exist "%ROOT%aegis-guard\jre-new"    echo   Guard JRE:  %ROOT%aegis-guard\jre-new\bin\java.exe
 echo   Guard JAR:  %ROOT%aegis-guard\target\aegis-guard.jar

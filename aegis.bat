@@ -199,13 +199,27 @@ if not exist "!GUARD_JAR!" (
 
 echo  %YELLOW%[*] Starting Aegis-Guard (Java) EDR Agent...%RESET%
 
+:: Telemetria kernel ETW: se il binario e' stato compilato da build.bat, viene
+:: copiato nel workdir di Guard e la flag accesa. Guard (EtwPipeSource) spawna
+:: il collector e ne legge lo stdout: consumer user-mode, nessun driver, nessuna
+:: firma. Se il binario manca, Guard degrada a polling senza rumore: la mancanza
+:: non e' un errore, e' una capacita' in meno dichiarata nel log.
+set "AEGIS_ETW_ENABLED="
+if exist "%ROOT%aegis-ebpf\aegis-etw.exe" (
+    copy /y "%ROOT%aegis-ebpf\aegis-etw.exe" "%ROOT%aegis-guard\aegis-etw.exe" >nul
+    set "AEGIS_ETW_ENABLED=true"
+    echo  %GREEN%  [+] Kernel telemetry (ETW) enabled for Guard%RESET%
+) else (
+    echo  %YELLOW%  [i] aegis-etw.exe non trovato: Guard parte senza telemetria kernel ETW%RESET%
+)
+
 :: Detect bundled JRE (check jre-new first, then jre, then system java)
 set "JAVA_CMD="
 if exist "%ROOT%aegis-guard\jre-new\bin\java.exe" set "JAVA_CMD=%ROOT%aegis-guard\jre-new\bin\java.exe"
 if not defined JAVA_CMD if exist "%ROOT%aegis-guard\jre\bin\java.exe" set "JAVA_CMD=%ROOT%aegis-guard\jre\bin\java.exe"
 if not defined JAVA_CMD set "JAVA_CMD=java"
 
-start "Aegis-Guard Agent" /B cmd /c "cd /d "%ROOT%aegis-guard" && set "AEGIS_SCAN_INTERVAL_MS=10000" && "!JAVA_CMD!" -jar target\aegis-guard.jar > "%ROOT%logs\guard.txt" 2>&1"
+start "Aegis-Guard Agent" /B cmd /c "cd /d "%ROOT%aegis-guard" && set "AEGIS_SCAN_INTERVAL_MS=10000" && set "AEGIS_ETW_ENABLED=!AEGIS_ETW_ENABLED!" && "!JAVA_CMD!" -jar target\aegis-guard.jar > "%ROOT%logs\guard.txt" 2>&1"
 echo  %GREEN%  [+] Aegis-Guard Agent started (log: logs\guard.txt)%RESET%
 echo.
 

@@ -127,12 +127,29 @@ def start_agents():
     return True, "nodetrace lanciato; java non trovato per guard"
 
 
+def read_env_file() -> dict:
+    """Legge il .env del repo (chiavi piatte)."""
+    out = {}
+    try:
+        with open(os.path.join(REPO, ".env"), encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    out[k.strip()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-agents", action="store_true")
     ap.add_argument("--wait", type=int, default=120)
     ap.add_argument("--compose-profile", default="ollama")
     ap.add_argument("--base", default=BRAIN)
+    ap.add_argument("--email", help="credenziali per lo smoke autenticato (default: dal .env)")
+    ap.add_argument("--password")
     args = ap.parse_args()
 
     log("AEGIS PILOT: platform + agents + verify")
@@ -156,10 +173,23 @@ def main() -> int:
         procs = procs_running()
         log(f"processi agenti: nodetrace={procs['nodetrace']} guard-jvm={procs['guard']}")
     log("smoke API...")
-    r = run([sys.executable, os.path.join(REPO, "scripts", "api_smoke.py"),
-             "--base", args.base])
+    # Audit: lo smoke senza credenziali esce 2 (run incompleto) e prima il pilot
+    # lo trattava come fallimento: PILOT UP era irraggiungibile senza passare
+    # --email/--password a mano. Ora le prende dal .env (bootstrap di setup.py
+    # le scrive lì) e in assenza dichiara il run incompleto invece di fallire.
+    email = args.email or read_env_file().get("AEGIS_ADMIN_EMAIL") \
+        or os.environ.get("AEGIS_SMOKE_EMAIL")
+    password = args.password or read_env_file().get("AEGIS_ADMIN_PASSWORD") \
+        or os.environ.get("AEGIS_SMOKE_PASSWORD")
+    smoke_cmd = [sys.executable, os.path.join(REPO, "scripts", "api_smoke.py"),
+                 "--base", args.base]
+    if email and password:
+        smoke_cmd += ["--email", email, "--password", password]
+    r = run(smoke_cmd)
     print(r.stdout[-1500:])
-    if r.returncode != 0:
+    if r.returncode == 2:
+        log("smoke incompleto: credenziali non disponibili (solo controlli pubblici)", "!")
+    elif r.returncode != 0:
         log("API smoke FAILED", "!")
         return 1
     print("=== PILOT UP ===")
