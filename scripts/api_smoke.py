@@ -223,7 +223,11 @@ def main() -> int:
 
     def ingest_e2e():
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        state["source"] = f"smoke-e2e-{stamp}"
+        # Sorgente dal nome STABILE, non unica per run: un nome nuovo a ogni
+        # esecuzione lasciava dietro una sorgente e un pseudo-agente (16 agenti
+        # "smoke-e2e-..." nella flotta dopo qualche giorno, visibili in UI).
+        # L'unicita' che serve al test vive nell'event_id, che resta per-run.
+        state["source"] = "smoke-e2e"
         state["event_id"] = f"smoke-{stamp}-1"
         # La riga si conserva identica: l'idempotenza si prova rispedendo **lo
         # stesso byte**, non una riga riscritta con un timestamp nuovo.
@@ -318,8 +322,9 @@ def main() -> int:
         """
         role = (state["user"].get("role") or "user").lower()
         privileged = {"admin", "analyst"}
-        body = {"name": f"smoke-rbac-{datetime.now(timezone.utc).strftime('%H%M%S')}",
-                "parser": "syslog"}
+        # Nome stabile: qui si verifica il PERMESSO, e un nome nuovo a ogni run
+        # lasciava una sorgente dietro (la stessa ragione di ingest_e2e).
+        body = {"name": "smoke-rbac", "parser": "syslog"}
         try:
             status, _ = call(base, "POST", "/api/v1/ingest/sources", body, token=token)
             if role not in privileged:
