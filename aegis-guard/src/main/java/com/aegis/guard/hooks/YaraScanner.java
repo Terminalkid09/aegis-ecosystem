@@ -118,17 +118,19 @@ public final class YaraScanner {
         }
     }
 
-    /** Output ufficiale: "rule_name namespace hash path" (hash/path opzionali). */
+    /**
+     * Output reale di yara64 senza flag di listing: "rule_name path".
+     * yara64 NON quotta i percorsi: uno con spazi ("Start Menu") produce
+     * token extra. Parse sicuro: split con limit 2 — TUTTO cio' che segue il
+     * nome regola e' il percorso, spazi compresi. (Le forme "rule ns path" /
+     * "rule ns hash path" esistono solo con -s/-g/--print-*: non le usiamo.)
+     */
     static List<Match> parse(List<String> lines) {
         List<Match> out = new ArrayList<>();
         for (String line : lines) {
-            String[] parts = line.trim().split("\\s+", 4);
-            if (parts.length >= 4) {
-                out.add(new Match(parts[0], parts[1], parts[2], parts[3]));
-            } else if (parts.length == 3) {
-                out.add(new Match(parts[0], parts[1], null, parts[2]));
-            } else if (parts.length == 2) {
-                out.add(new Match(parts[0], parts[1], null, null));
+            String[] parts = line.trim().split("\\s+", 2);
+            if (parts.length == 2) {
+                out.add(new Match(parts[0], null, null, parts[1]));
             }
             // righe non conformi: log/warning di yara, scartate
         }

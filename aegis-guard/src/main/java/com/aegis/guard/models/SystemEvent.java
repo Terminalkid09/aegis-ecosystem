@@ -64,6 +64,11 @@ public class SystemEvent {
     @SerializedName("agentVersion")
     private String agentVersion;
 
+    // Matrice feature dichiarata dal'agente (fleet management): il brain la
+    // salva su Agent.capabilities e la UI la mostra nella pagina Agents.
+    @SerializedName("capabilities")
+    private com.google.gson.JsonElement capabilities;
+
     @SerializedName("commandLine")
     private String commandLine;
 
@@ -205,6 +210,7 @@ public class SystemEvent {
 
     public String getAgentVersion() { return agentVersion; }
     public void setAgentVersion(String v) { this.agentVersion = v; }
+    public void setCapabilities(com.google.gson.JsonElement c) { this.capabilities = c; }
 
     public String getCommandLine() { return commandLine; }
     public void setCommandLine(String commandLine) { this.commandLine = commandLine; }

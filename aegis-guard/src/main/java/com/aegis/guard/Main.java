@@ -125,6 +125,19 @@ public class Main {
                     SystemEvent hb = new SystemEvent(finalAgentId, 0, 0, "", "aegis-guard", "", "", System.getProperty("os.name"), "AGENT_HEARTBEAT");
                     hb.setHostname(SystemInfoCollector.getHostname());
                     hb.setAgentVersion(Config.AGENT_VERSION);
+                    // Matrice feature DICHIRARATA (niente promesse): ogni flag
+                    // riflette uno stato reale verificato all'avvio.
+                    boolean etw = Boolean.parseBoolean(System.getenv().getOrDefault("AEGIS_ETW_ENABLED", "false"))
+                            && java.nio.file.Files.isRegularFile(java.nio.file.Paths.get("aegis-etw.exe"));
+                    boolean yara = java.nio.file.Files.isRegularFile(java.nio.file.Paths.get("bin/yara64.exe"));
+                    com.google.gson.JsonObject caps = new com.google.gson.JsonObject();
+                    caps.addProperty("fim", true);
+                    caps.addProperty("yara_scan", yara);
+                    caps.addProperty("etw_kernel_telemetry", etw);
+                    caps.addProperty("process_monitor", true);
+                    caps.addProperty("response_actions", true);
+                    caps.addProperty("device_identity_mtls", true);
+                    hb.setCapabilities(caps);
                     client.sendEvent(hb);
                     Thread.sleep(HEARTBEAT_INTERVAL_SEC * 1000);
                 } catch (Exception e) {
@@ -696,12 +709,17 @@ public class Main {
         }
         // Ogni match diventa un evento sulla pipeline standard (ricercabile,
         // alertable, playbook-able), non un canale parallelo.
+        com.aegis.guard.utils.HashCalculator hasher = new com.aegis.guard.utils.HashCalculator();
         for (com.aegis.guard.hooks.YaraScanner.Match m : res.matches) {
+            String sha = m.fileSha256;
+            if ((sha == null || sha.isBlank()) && m.filePath != null) {
+                sha = hasher.calculateHash(m.filePath); // prova forense: hash del file matched
+            }
             SystemEvent ev = new SystemEvent(agentId, 0, 0, "",
                     m.rule, "YARA", System.getProperty("user.name"),
                     System.getProperty("os.name"), "YARA_MATCH");
             ev.setProcessPath("YARA");
-            ev.setFileHash(m.fileSha256);
+            ev.setFileHash(sha);
             ev.setCommandLine("[YARA] " + m.rule + " -> "
                     + (m.filePath != null ? m.filePath : "?"));
             client.sendEvent(ev);
