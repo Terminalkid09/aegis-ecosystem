@@ -7,6 +7,105 @@ os.environ.setdefault("JWT_SECRET", "test_jwt_secret_for_testing_only_32_chars_m
 os.environ.setdefault("AGENT_ENROLL_KEY", "test_enrollment_token_16_chars_min")
 os.environ.setdefault("MASTER_KEY_B64", "Q/wCZ5reU82bQpZppUc6Qq80sybBPz4Q276NbMBF97Q=")
 
+# ------------------------------------------------------------------ Redis
+# La suite deve funzionare anche dove `settings.REDIS_URL` non e' raggiungibile
+# dall'host di test (es. `aegis-redis` in compose: risolvibile solo dentro la
+# rete docker). I client Redis nascono in due modi: module-level
+# (security.redis_client) e FRESH per richiesta (redis.from_url(...) negli
+# endpoint) — un solo stub non copre entrambi, e alcuni percorsi sono
+# fail-closed (blacklist -> "Token revoked", rate limit AI -> 429).
+# Soluzione: verificare la raggiungibilità PRIMA degli import dell'app e,
+# se l'URL configurato non risponde, riscrivere os.environ["REDIS_URL"]
+# verso un endpoint raggiungibile (porta host-mappata dal compose, poi
+# localhost:6379 come in CI). Se nulla risponde, si lascia com'è: i test
+# che richiedono Redis falliranno con l'errore vero, non con 401 a cascata.
+
+def _redis_ok(url: str) -> bool:
+    try:
+        import redis as _r
+        _r.from_url(url, socket_connect_timeout=2, socket_timeout=2).ping()
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_reachable_redis_url() -> None:
+    original = os.getenv("REDIS_URL", "")
+    if original and _redis_ok(original):
+        return
+    candidates = []
+    # Porta host-mappata dal compose (REDIS_PORT_EXTERNAL), stessa password.
+    try:
+        from urllib.parse import urlparse
+        ext_port = os.getenv("REDIS_PORT_EXTERNAL", "")
+        parsed = urlparse(original) if original else None
+        if ext_port.isdigit() and parsed and parsed.password:
+            candidates.append(f"redis://:{parsed.password}@127.0.0.1:{ext_port}/0")
+    except Exception:
+        pass
+    candidates.append("redis://127.0.0.1:6379/0")   # CI / redis locale
+    candidates.append("redis://localhost:6379/0")
+    for cand in candidates:
+        if _redis_ok(cand):
+            os.environ["REDIS_URL"] = cand
+            print(f"conftest: REDIS_URL non raggiungibile, uso {cand}")
+            return
+
+
+try:
+    _resolve_reachable_redis_url()
+except Exception:
+    pass
+
+# ----------------------------------------------------------------- Database
+# Stesso problema della sezione Redis, stessa cura: se `DATABASE_URL` punta a
+# un hostname non risolvibile dall'host di test (es. `aegis-postgres` di
+# compose, presente nel .env o nell'env della shell), l'engine module-level di
+# `app.database.connection` nasce morto e i test che NON passano da `client`
+# (es. listener syslog -> siem_pipeline) falliscono con `getaddrinfo failed`.
+# Riscrittura verso un DATABASE **di test** raggiungibile (mai il DB live:
+# il fallback mantiene il nome con /aegis_test).
+
+def _pg_ok(url: str) -> bool:
+    try:
+        import asyncio
+        import asyncpg
+
+        dsn = url.replace("postgresql+asyncpg://", "postgresql://")
+
+        async def _probe():
+            conn = await asyncpg.connect(dsn, timeout=3)
+            await conn.close()
+
+        asyncio.run(_probe())
+        return True
+    except Exception:
+        return False
+
+
+_du = os.getenv("DATABASE_URL", "")
+if _du and not _pg_ok(_du):
+    _fallback = os.getenv("TEST_DATABASE_URL", "")
+    if not _fallback and "@" in _du and "/" in _du:
+        # Conserva credenziali e nome DB (/aegis_test: mai il DB live) ma
+        # sostituisce l'HOSTNAME: i nomi di servizio compose (`aegis-postgres`)
+        # non sono risolvibili dall'host di test. Prova prima la stessa porta,
+        # poi le porte pubblicate tipiche su localhost.
+        _creds = _du.rsplit("@", 1)[0] + "@"
+        _hostport = _du.rsplit("@", 1)[1].rsplit("/", 1)[0]
+        _port = _hostport.rsplit(":", 1)[1] if ":" in _hostport else "5432"
+        # 127.0.0.1 esplicito, MAI `localhost`: su Windows `localhost` risolve
+        # prima in ::1 (IPv6) dove Docker non pub­blica, e la connect pende in
+        # timeout invece di fallire veloce. Ordine: porta del DSN, poi le
+        # porte pubblicate tipiche di compose.
+        for c in (_creds + "127.0.0.1:" + _port, _creds + "127.0.0.1:5444", _creds + "127.0.0.1:5432"):
+            if _pg_ok(c + "/aegis_test"):
+                _fallback = c + "/aegis_test"
+                break
+    if _fallback and _pg_ok(_fallback):
+        os.environ["DATABASE_URL"] = _fallback
+        print(f"conftest: DATABASE_URL non raggiungibile, uso {_fallback.rsplit('@', 1)[-1]}")
+
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
@@ -115,7 +214,8 @@ def pytest_runtest_setup(item):
     # Quando la CI dichiara REQUIRE_INTEGRATION=1, nessun test di integrazione
     # può essere skippato silenziosamente per "Database not available".
     if _require_integration and not _db_available:
-        pytest.fail("REQUIRE_INTEGRATION=1 ma DB/Redis non disponibili: i test di integrazione non possono essere skippati")
+        pytest.fail("REQUIRE_INTEGRATION=1 ma DB/Redis non disponibili: "
+                    "i test di integrazione non possono essere skippati")
 
 
 def pytest_collection_modifyitems(config, items):
@@ -248,6 +348,6 @@ def admin_auth_headers(admin_user):
 @pytest.fixture
 def agent_auth_headers(test_agent):
     return {
-        "Authorization": f"Bearer agent-secret",
+        "Authorization": "Bearer agent-secret",
         "X-Agent-Id": str(test_agent.agent_id)
     }
