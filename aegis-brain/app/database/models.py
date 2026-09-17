@@ -297,6 +297,22 @@ class IntegrationSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class AppSetting(Base):
+    """Impostazioni di deployment NON segrete, modificabili dalla UI.
+
+    Perché non in `integration_settings`: quella è cifrata ed esiste per le
+    chiavi API. Provider AI, modello o simili non sono segreti, e tenerli
+    cifrati renderebbe illeggibile il DB per debug e la UI incapace di
+    mostrarli. Qui vivono solo valori leggibili, con la precedenza dichiarata
+    dal servizio (`app_settings.py`): env esplicito > DB > default.
+    """
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    updated_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class YaraRule(Base):
     """Regola YARA gestita dal SOC, spedita agli agenti su scansione.
 

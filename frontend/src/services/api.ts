@@ -147,6 +147,10 @@ export const totalAPI = {
 }
 
 export const aiAPI = {
+  status: () => apiClient.get('/ai/status'),
+  getSettings: () => apiClient.get('/ai/settings'),
+  setSettings: (data: { provider?: string; model?: string; automatic_enrich?: boolean }) =>
+    apiClient.put('/ai/settings', data),
   chat: (prompt: string, model?: string | undefined, threadId?: string | number | null) =>
     apiClient.post('/ai/chat', { prompt, model, thread_id: threadId }, { timeout: 300000 }),
   getThreads: () => apiClient.get('/ai/threads'),

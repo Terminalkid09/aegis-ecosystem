@@ -80,15 +80,42 @@ async def _ollama_reachable() -> bool:
         return False
 
 
+async def _ai_config() -> Dict[str, Any]:
+    """Configurazione AI effettiva: dashboard (`app_settings`) + env.
+
+    La precedenza è dichiarata in `app_settings.resolve_ai`: l'env vince dove
+    esprime una scelta esplicita, la dashboard dove l'env è solo un default
+    (AI_PROVIDER=auto). Mai eccezioni: se il DB non risponde si ricade sui
+    valori d'ambiente, cioè il comportamento precedente alla UI.
+    """
+    try:
+        from app.database.connection import AsyncSessionLocal
+        from app.services.app_settings import resolve_ai
+
+        async with AsyncSessionLocal() as db:
+            return await resolve_ai(db)
+    except Exception:
+        logger.debug("Lettura impostazioni AI da dashboard fallita, uso env")
+        return {
+            "provider": (settings.AI_PROVIDER or "auto").strip().lower(),
+            "model": (settings.AI_MODEL or "").strip(),
+            "automatic_enrich": bool(settings.AI_AUTOMATIC_ENRICH),
+            "provider_source": "env", "model_source": "env",
+            "automatic_source": "env", "cloud": False, "local": False,
+        }
+
+
 async def resolve_provider() -> Dict[str, Any]:
     """Provider effettivo + modello + chiave. Mai eccezioni.
 
-    `auto` sceglie in ordine: ollama configurato, gemini con chiave, openai
-    con chiave, altrimenti disabled — cosi' chi non configura nulla non paga
-    nulla e non vede errori a raffica: vede 'AI disattivata'.
+    `auto` sceglie in ordine: ollama che risponde davvero, gemini con chiave,
+    openai con chiave, altrimenti disabled — cosi' chi non configura nulla non
+    paga nulla e non vede errori a raffica: vede 'AI disattivata'.
     """
-    requested = (settings.AI_PROVIDER or "auto").strip().lower()
-    model_override = (settings.AI_MODEL or "").strip()
+    cfg = await _ai_config()
+    requested = cfg["provider"] or "auto"
+    model_override = cfg["model"]
+    automatic = bool(cfg["automatic_enrich"])
 
     if requested == "disabled":
         return {"provider": "disabled", "model": "", "key": "", "reason": "disabled by configuration"}
@@ -114,8 +141,16 @@ async def resolve_provider() -> Dict[str, Any]:
 
     if chosen == "ollama":
         model = model_override or (settings.OLLAMA_DEFAULT_MODEL or "llama3")
+        # Una scelta esplicita si rispetta (l'operatore ha selezionato ollama),
+        # ma se il server non risponde lo stato lo DICE: senza questo la
+        # dashboard mostrerebbe "ollama · qwen2.5" mentre ogni chat fallisce.
+        reachable = await _ollama_reachable()
+        reason = ("local" if reachable else
+                  f"ollama selected but not reachable at {settings.OLLAMA_URL or 'OLLAMA_URL unset'}")
+        # Locale = nessun dato esce dalla rete: l'arricchimento automatico non
+        # richiede consenso (il consenso vale per i provider cloud).
         return {"provider": "ollama", "model": model, "key": "",
-                "reason": "local", "automatic": bool(settings.AI_AUTOMATIC_ENRICH)}
+                "reason": reason, "reachable": reachable, "automatic": True}
 
     key = await _provider_key(chosen)
     if not key:
@@ -123,7 +158,7 @@ async def resolve_provider() -> Dict[str, Any]:
                 "reason": f"{chosen} selected but no API key configured"}
     default_model = settings.GEMINI_MODEL if chosen == "gemini" else settings.OPENAI_MODEL
     return {"provider": chosen, "model": model_override or default_model, "key": key,
-            "reason": "cloud", "automatic": bool(settings.AI_AUTOMATIC_ENRICH)}
+            "reason": "cloud", "automatic": automatic}
 
 
 async def provider_summary() -> Dict[str, Any]:
@@ -133,9 +168,13 @@ async def provider_summary() -> Dict[str, Any]:
         "provider": info["provider"],
         "model": info.get("model") or "",
         "local": info["provider"] in _LOCAL_PROVIDERS,
-        "automatic_enrichment": bool(info.get("automatic")) if info["provider"] in _LOCAL_PROVIDERS
-        else bool(info.get("automatic")) and bool(settings.AI_AUTOMATIC_ENRICH),
+        # `automatic` è già la decisione risolta (dashboard > env): non si
+        # ricalcola qui, altrimenti due fonti di verità che divergono.
+        "automatic_enrichment": bool(info.get("automatic")),
         "reason": info.get("reason", ""),
+        # None quando non ha senso (provider cloud o disattivata): la UI
+        # distingue "non applicabile" da "raggiungibile/non raggiungibile".
+        "reachable": info.get("reachable"),
     }
 
 
@@ -265,7 +304,7 @@ async def call_llm(prompt: str, model: Optional[str] = None,
             return {"answer": f"[AI fallback] {msg}", "raw": "", "model": ""}
         return {"error": "ai_disabled", "message": msg}
 
-    if respect_automatic and info["provider"] not in _LOCAL_PROVIDERS and not settings.AI_AUTOMATIC_ENRICH:
+    if respect_automatic and info["provider"] not in _LOCAL_PROVIDERS and not info.get("automatic", False):
         return {"error": "ai_cloud_requires_optin",
                 "message": "cloud provider in use: automatic enrichment disabled, ask on-demand"}
 

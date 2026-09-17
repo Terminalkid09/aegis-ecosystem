@@ -363,6 +363,34 @@ def main() -> int:
             "il comando bootstrap non esiste più: nessun modo di ottenere il primo admin"
         return "app.admin: bootstrap + set-role (privilegio da shell, audit registrato)"
 
+    def ai_settings():
+        """Impostazioni AI dalla dashboard: catalogo, validazione, RBAC.
+
+        Volutamente senza scritture che restano: si verifica che un provider
+        inesistente sia RESPINTO (400) e che l'anonimo non possa scrivere
+        (401). Un test che cambia la configurazione dell'utente non e' un
+        test, e' un effetto collaterale.
+        """
+        status, data = call(base, "GET", "/api/v1/ai/settings", token=token)
+        assert status == 200, f"HTTP {status}"
+        values = {p["value"] for p in data.get("providers", [])}
+        assert {"auto", "disabled", "ollama", "gemini", "openai"} <= values, values
+        current = data.get("current", {})
+        assert current.get("provider") in values, current
+        assert current.get("provider_source") in {"env", "database", "default"}, current
+        assert isinstance(data.get("default_models"), dict), data.keys()
+        assert "status" in data, "manca lo stato live del provider"
+
+        expect_status(lambda: call(base, "PUT", "/api/v1/ai/settings",
+                                   {"provider": "not-a-provider"}, token=token),
+                      400, label="provider AI inesistente")
+        expect_status(lambda: call(base, "PUT", "/api/v1/ai/settings",
+                                   {"provider": "disabled"}),
+                      401, label="scrittura AI anonima")
+        return (f"{len(values)} opzioni, provider effettivo={data['status']['provider']} "
+                f"(origine {current.get('provider_source')}), 400/401 verificati")
+
+    check("impostazioni AI dalla dashboard", ai_settings)
     check("RBAC coerente col ruolo", rbac_matches_role)
     check("RBAC nega l'anonimo", rbac_anonymous_denied)
     check("Percorso bootstrap del primo admin", bootstrap_path_exists)

@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     OSINT_CACHE_TTL: int = 86400  # 24 hours
 
     # AI Config
+    # Versione della piattaforma: una sola fonte per OpenAPI, endpoint root e
+    # dashboard (prima era scritta a mano in due punti e la UI mostrava una
+    # versione diversa da quella vera). Si alza qui, in un posto solo.
+    APP_VERSION: str = "3.0.0"
     OLLAMA_URL: Optional[str] = None
     OLLAMA_DEFAULT_MODEL: str = "aegis-default"
     # Audit: allowlist modelli caricabili via API (niente pull arbitrari).
@@ -58,9 +62,13 @@ class Settings(BaseSettings):
     AI_PROVIDER: str = "auto"
     # Vuoto = default del provider (OLLAMA_DEFAULT_MODEL / GEMINI_MODEL / ...)
     AI_MODEL: str = ""
-    # Arricchimento automatico degli alert: default solo per provider LOCALI
-    # (nessun dato esce dalla rete). Gli esterni si usano on-demand.
-    AI_AUTOMATIC_ENRICH: bool = True
+    # Consenso all'arricchimento automatico degli alert con provider CLOUD.
+    # false = con Gemini/OpenAI il contenuto (anonimizzato) esce SOLO su
+    # richiesta dell'operatore; i provider locali (ollama) sono sempre
+    # automatici perche' nulla lascia la rete. Prima era true, che con una
+    # chiave cloud configurata significava esfiltrazione senza opt-in:
+    # impostabile anche dalla dashboard (app_settings.ai.automatic_enrich).
+    AI_AUTOMATIC_ENRICH: bool = False
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.0-flash"
     OPENAI_API_KEY: str = ""

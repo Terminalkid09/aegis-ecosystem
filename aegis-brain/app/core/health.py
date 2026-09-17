@@ -178,6 +178,7 @@ async def liveness_check() -> Dict[str, Any]:
     return {
         "status": "alive",
         "service": "aegis-brain",
+        "version": settings.APP_VERSION,
         "uptime_s": round(time.monotonic() - _START_MONO, 1),
     }
 

@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.deps import get_current_user
-from app.services import ai_service
+from app.core.deps import get_current_user, has_perm
+from app.core.audit import log_audit
+from app.services import ai_service, app_settings
 from app.database.connection import get_db
 from app.database.models import AIMessage, AIThread, User
 from pydantic import BaseModel, Field
@@ -45,6 +46,86 @@ async def ai_status(user: User = Depends(get_current_user)):
     raffica, si vede lo stato con il motivo (e come attivarla).
     """
     return await ai_service.provider_summary()
+
+
+class AISettingsRequest(BaseModel):
+    """Campi opzionali: `None` = non toccare, `""` = torna al default/env."""
+    provider: Optional[str] = Field(None, max_length=32)
+    model: Optional[str] = Field(None, max_length=200)
+    automatic_enrich: Optional[bool] = None
+
+
+@router.get("/settings")
+async def get_ai_settings(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Impostazioni AI per la UI: valori correnti, origine e opzioni.
+
+    Include lo stato live (`status`) cosi' la dashboard mostra in un colpo
+    solo cosa e' configurato e cosa sta rispondendo davvero.
+    """
+    payload = await app_settings.settings_payload(db)
+    payload["status"] = await ai_service.provider_summary()
+    return payload
+
+
+@router.put("/settings")
+async def set_ai_settings(
+    payload: AISettingsRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Scrive le impostazioni AI (provider, modello, arricchimento automatico).
+
+    Scrittura riservata a `manage`: e' una scelta di postura (decide se il
+    contenuto degli alert puo' uscire dalla rete), non una preferenza utente.
+    La chiave API resta in `integration_settings`.
+    """
+    if not has_perm(user.role, "manage"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Insufficient permissions")
+
+    changed = {}
+    if payload.provider is not None:
+        value = payload.provider.strip().lower()
+        if value and not app_settings.validate_provider(value):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown provider: {value}. "
+                       f"Allowed: {', '.join(app_settings.AI_PROVIDERS)}",
+            )
+        # `auto` E' il default: salvarlo come riga non aggiunge nulla e farebbe
+        # dire alla UI "origine: dashboard" su un valore che e' il default della
+        # piattaforma. Sceglierlo pulisce l'override e basta.
+        stored = "" if value in ("", "auto") else value
+        await app_settings.set_value(db, app_settings.KEY_PROVIDER, stored, user.id)
+        changed["provider"] = value or "default"
+
+    if payload.model is not None:
+        await app_settings.set_value(db, app_settings.KEY_MODEL,
+                                     payload.model.strip(), user.id)
+        changed["model"] = payload.model.strip() or "default"
+
+    if payload.automatic_enrich is not None:
+        await app_settings.set_value(db, app_settings.KEY_AUTOMATIC,
+                                     "true" if payload.automatic_enrich else "false",
+                                     user.id)
+        changed["automatic_enrich"] = payload.automatic_enrich
+
+    if changed:
+        await log_audit(
+            db, action="ai_settings_set", resource="ai", resource_id="settings",
+            details=changed, user_id=user.id, username=user.username,
+            ip_address=request.client.host if request else None,
+        )
+    await db.commit()
+
+    result = await app_settings.settings_payload(db)
+    result["status"] = await ai_service.provider_summary()
+    result["changed"] = changed
+    return result
 
 
 @router.get("/threads")
