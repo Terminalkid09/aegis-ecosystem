@@ -7,29 +7,34 @@ Installazione (da repo appena clonata):
 Fa tutto, nell'ordine:
   1. preflight dipendenze (docker, compose, python) con messaggi chiari
   2. .env: se manca, lo GENERA con segreti casuali forti (nessun placeholder)
-  3. build artefatti agenti se assenti (PyInstaller + Maven + JRE + ETW)
-  4. avvio piattaforma (compose) + attesa readiness + agenti host + smoke API
-  5. bootstrap admin: crea/promuove l'utente admin e stampa le credenziali
+  3. binari vendor (nssm, yara64) scaricati con SHA-256 pinnato, se assenti
+  4. build artefatti agenti se assenti (PyInstaller + Maven + JRE + ETW)
+  5. avvio piattaforma (compose) + attesa readiness + agenti host + smoke API
+  6. bootstrap admin: crea/promuove l'utente admin e stampa le credenziali
 
 Aggiornamento (dopo un git pull, o direttamente):
     python scripts/setup.py update
 
 Fa: verifica repo pulita -> git pull -> rebuild immagini -> riavvio ->
 smoke. NON tocca il volume del database: i dati (eventi, alert, utenti,
-agenti) sopravvivono all'aggiornamento. Lo schema e' auto-creato
-all'avvio (create_all), quindi nessuna migrazione manuale.
+agenti) sopravvivono all'aggiornamento. Le migrazioni (Alembic) girano da
+sole all'avvio del brain, quindi nessun passo manuale sullo schema.
 
 Idempotente: rilanciabile quante volte si vuole.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import secrets
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
+import zipfile
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 IS_NT = os.name == "nt"
@@ -155,6 +160,144 @@ def build_agents() -> int:
         log(f"build.bat fallito:\n{(r.stdout or '')[-800:]}\n{(r.stderr or '')[-800:]}", "!")
         return 1
     return 0
+
+
+# ---------------------------------------------------------------- binaries
+# Due binari Windows che servono a due feature precise:
+#   nssm    -> registra gli agenti come servizi (autostart al boot)
+#   yara64  -> scansioni YARA on-demand sull'endpoint
+# Prima andavano scaricati a mano: meta' installazione si fermava con un
+# "copy nssm.exe here" scoperto a installazione avviata. Ora si scaricano da
+# soli, con SHA-256 PINNATO: l'hash e' il controllo che il binario e' quello
+# atteso (niente fiducia cieca sul CDN) e viene verificato DUE volte —
+# sull'archivio e sul singolo eseguibile estratto. Se la rete manca o l'hash
+# non torna non si installa nulla: si dice cosa mettere a mano e dove.
+#
+# Gli .exe sono in .gitignore: chi clona non li prende dal repo, li prende da
+# qui (o a mano). Vedi README, "optional extras".
+VENDOR_BINARIES: dict[str, dict] = {
+    "nssm": {
+        "url": "https://nssm.cc/release/nssm-2.24.zip",
+        "sha256": "727d1e42275c605e0f04aba98095c38a8e1e46def453cdffce42869428aa6743",
+        "member": "nssm-2.24/win64/nssm.exe",
+        "exe_sha256": "f689ee9af94b00e9e3f0bb072b34caaf207f32dcb4f5782fc9ca351df9a06c97",
+        "targets": [os.path.join(REPO, "aegis-guard", "install", "windows", "nssm.exe")],
+        "why": "servizi Windows per Guard e NodeTrace (autostart al boot)",
+        "manual": ("scarica https://nssm.cc/download, prendi win64/nssm.exe "
+                   "e copialo in aegis-guard/install/windows/"),
+    },
+    "yara64": {
+        "url": ("https://github.com/VirusTotal/yara/releases/download/v4.5.5/"
+                "yara-4.5.5-2368-win64.zip"),
+        "sha256": "352396c8a3d9b31b157a4820abd3b9347fc934a2314cdda8a4f566a5570163e4",
+        "member": "yara64.exe",
+        "exe_sha256": "1c45eb279d820aba81fd41c22384428ebe44037cf5793be4b52a9d3b3df62b33",
+        # Sorgente per l'installer + copia nel workdir di Guard gia' in uso.
+        "targets": [
+            os.path.join(REPO, "aegis-guard", "install", "windows", "bin", "yara64.exe"),
+            os.path.join(REPO, "aegis-guard", "bin", "yara64.exe"),
+        ],
+        "why": "scansioni YARA on-demand sugli endpoint",
+        "manual": ("scarica yara64.exe (win64, 4.5.x) da "
+                   "https://github.com/VirusTotal/yara/releases e mettilo in "
+                   "aegis-guard/install/windows/bin/"),
+    },
+}
+
+
+def _sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _download(url: str, dest: str, timeout: int = 180) -> None:
+    req = urllib.request.Request(url, headers={"User-Agent": "aegis-setup"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as out:
+        shutil.copyfileobj(resp, out)
+
+
+def ensure_binary(name: str, force: bool = False) -> bool:
+    """Installa un binario vendor se manca. True = presente e integro.
+
+    Non alza eccezioni: qualunque problema diventa un messaggio con la via
+    manuale, perche' l'installazione della piattaforma non deve morire per
+    un binario opzionale (le feature che lo usano degradano, e lo dicono).
+    """
+    spec = VENDOR_BINARIES[name]
+    if not IS_NT:
+        # Gli agenti endpoint sono Windows-only: altrove il binario non serve.
+        log(f"{name}: host non-Windows, salto (serve agli agenti Windows)")
+        return True
+
+    targets = spec["targets"]
+    if not force and all(os.path.isfile(t) for t in targets):
+        log(f"{name}: gia' presente")
+        return True
+
+    log(f"{name}: scarico {spec['url'].rsplit('/', 1)[-1]}...")
+    tmpdir = tempfile.mkdtemp(prefix=f"aegis-{name}-")
+    try:
+        pkg = os.path.join(tmpdir, "pkg.zip")
+        try:
+            _download(spec["url"], pkg)
+        except Exception as exc:  # rete assente, 404, timeout...
+            log(f"{name}: download non riuscito ({exc}).", "!")
+            log(f"    serve per: {spec['why']}", "!")
+            log(f"    a mano: {spec['manual']}", "!")
+            return False
+
+        got = _sha256(pkg)
+        if got.lower() != spec["sha256"].lower():
+            log(f"{name}: SHA-256 dell'archivio NON corrisponde: scartato.", "!")
+            log(f"    atteso:  {spec['sha256']}", "!")
+            log(f"    trovato: {got}", "!")
+            log(f"    a mano: {spec['manual']}", "!")
+            return False
+
+        try:
+            with zipfile.ZipFile(pkg) as zf:
+                member = next((n for n in zf.namelist()
+                               if n.replace("\\", "/") == spec["member"]), None)
+                if member is None:
+                    log(f"{name}: {spec['member']} non presente nell'archivio", "!")
+                    return False
+                extracted = os.path.join(tmpdir, os.path.basename(member))
+                with zf.open(member) as src, open(extracted, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        except zipfile.BadZipFile:
+            log(f"{name}: archivio illeggibile (download interrotto?)", "!")
+            return False
+
+        exe_hash = _sha256(extracted)
+        if exe_hash.lower() != spec["exe_sha256"].lower():
+            log(f"{name}: hash dell'eseguibile non corrisponde: non installo.", "!")
+            log(f"    atteso:  {spec['exe_sha256']}\n    trovato: {exe_hash}", "!")
+            return False
+
+        for target in targets:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copyfile(extracted, target)
+        log(f"{name}: installato e verificato ({spec['exe_sha256'][:12]}...) "
+            f"per {spec['why']}", "+")
+        return True
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def ensure_binaries(force: bool = False) -> int:
+    """Binari vendor mancanti. 0 = tutti a posto, 1 = qualcosa manca.
+
+    Non e' fatale: senza nssm gli agenti girano in modalita' dev, senza yara64
+    le scansioni YARA dichiarano di essere disattivate. Il chiamante avvisa e
+    prosegue, perche' la piattaforma non dipende da questi due binari.
+    """
+    ok = True
+    for name in VENDOR_BINARIES:
+        ok = ensure_binary(name, force=force) and ok
+    return 0 if ok else 1
 
 
 # ------------------------------------------------------------------- pilot
@@ -349,7 +492,10 @@ def cmd_update(args) -> int:
     if wait_ready("http://127.0.0.1:8000", args.wait) != 0:
         return 1
     log("aggiornamento completato: dati preservati (volume DB intatto, "
-        "schema auto-creato all'avvio).")
+        "migrazioni applicate all'avvio).")
+
+    # Il pull puo' aver portato una versione nuova dei binari vendor.
+    ensure_binaries()
 
     if args.rebuild_agents and IS_NT:
         if build_agents() != 0:
@@ -385,6 +531,8 @@ def main() -> int:
                     help="non registrare gli agenti come servizi Windows (solo avvio dev)")
     ap.add_argument("--force-build", action="store_true", help="ricompila gli artefatti anche se presenti")
     ap.add_argument("--skip-build", action="store_true", help="salta la build degli artefatti")
+    ap.add_argument("--skip-binaries", action="store_true",
+                    help="non scaricare nssm/yara64 (offline o li metti a mano)")
     args = ap.parse_args()
 
     if args.command == "update":
@@ -401,6 +549,15 @@ def main() -> int:
                    "Completa le chiavi manualmente o cancella .env per rigenerarlo.")
     if status == "created":
         log(".env creato con segreti casuali.", "+")
+
+    # Prima della build: l'installer di Guard deploya yara64.exe se lo trova,
+    # quindi scaricarlo adesso significa che l'agente parte con YARA attivo e
+    # con i servizi registrabili (nssm).
+    if not args.skip_binaries:
+        if ensure_binaries() != 0:
+            log("binari vendor incompleti: la piattaforma parte comunque, "
+                "ma servizi Windows e scansioni YARA restano disattivati "
+                "finche' non li metti a mano (istruzioni sopra).", "!")
 
     if not args.skip_build:
         if build_agents() != 0:

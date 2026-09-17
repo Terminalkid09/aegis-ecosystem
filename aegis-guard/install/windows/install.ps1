@@ -16,7 +16,9 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "`n[1/6] Checking prerequisites..." -ForegroundColor Cyan
 
 if (-not (Test-Path $nssmPath)) {
-    Write-Error "[X] nssm.exe not found at $nssmPath. Please copy nssm.exe here."
+    Write-Error ("[X] nssm.exe non trovato in $nssmPath. " +
+        "Scaricalo con `python scripts/setup.py` (lo prende e ne verifica l'hash) " +
+        "oppure copia nssm.exe (win64) da https://nssm.cc/download in questa cartella.")
     exit 1
 }
 Write-Host "  [OK] nssm.exe found" -ForegroundColor Green

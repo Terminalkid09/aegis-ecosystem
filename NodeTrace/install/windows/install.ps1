@@ -44,7 +44,8 @@ if (-not (Test-Path $nssmPath)) {
     if (Test-Path $sharedNssm) { $nssmPath = $sharedNssm }
 }
 if (-not (Test-Path $nssmPath)) {
-    Write-Error "[X] nssm.exe non trovato. Scarica NSSM da https://nssm.cc/download e copialo in `"$scriptPath`"."
+    Write-Error ("[X] nssm.exe non trovato. Esegui `python scripts/setup.py` (lo scarica e ne verifica " +
+        "l'hash SHA-256) oppure copia nssm.exe da https://nssm.cc/download in `"$scriptPath`".")
     exit 1
 }
 Write-Host "  [OK] nssm.exe: $nssmPath" -ForegroundColor Green
