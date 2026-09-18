@@ -19,6 +19,9 @@ export default function AegisTotal() {
   const [selectedReport, setSelectedReport] = useState<any>(null)
   const [activePath, setActivePath] = useState('')
   const [msg, setMsg] = useState('')
+  // Disassembler: la vista mostra 120 istruzioni, quindi serve un filtro per
+  // arrivare subito alle call annotate senza leggere tutto il prologo.
+  const [disOnlyFlagged, setDisOnlyFlagged] = useState(false)
 
   const { data: disclaimer = '' } = useQuery({
     queryKey: ['aegis-total-disclaimer'],
@@ -317,6 +320,110 @@ export default function AegisTotal() {
                       </div>
                     </div>
                   )}
+
+                  {/* Disassembly at the entry point (capstone) */}
+                  {activeFile.disasm && (
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <h4 className="text-[10px] uppercase font-bold tracking-widest text-[hsl(var(--muted-foreground))]">
+                          Code Disassembly — entry point
+                        </h4>
+                        {activeFile.disasm.enabled && (
+                          <button
+                            onClick={() => setDisOnlyFlagged(v => !v)}
+                            className={cn('px-2 py-1 rounded border text-[10px] font-bold uppercase tracking-wide transition-colors',
+                              disOnlyFlagged ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' : 'bg-[hsl(var(--secondary))] text-[hsl(var(--muted-foreground))] border-[hsl(var(--border))] hover:text-white')}
+                          >
+                            Only flagged calls ({(activeFile.disasm.suspicious_calls || []).length})
+                          </button>
+                        )}
+                      </div>
+
+                      {!activeFile.disasm.enabled ? (
+                        // Fail-soft dichiarato: il motivo sta in chiaro, perché
+                        // "nessuna istruzione" e "non ho potuto decodificare"
+                        // sono due cose diverse.
+                        <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 px-3 py-2.5 text-xs text-yellow-300">
+                          <span className="font-bold uppercase tracking-wide">Disassembly unavailable</span>
+                          <span className="block mt-1 font-mono text-[11px] opacity-90">{activeFile.disasm.reason || 'engine reported no reason'}</span>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div className="bg-[hsl(var(--secondary))] p-2.5 rounded border border-[hsl(var(--border))] text-center">
+                              <div className="text-[10px] uppercase font-bold text-[hsl(var(--muted-foreground))]">Entry point</div>
+                              <div className="font-mono text-xs text-white mt-1">{activeFile.disasm.entrypoint}</div>
+                            </div>
+                            <div className="bg-[hsl(var(--secondary))] p-2.5 rounded border border-[hsl(var(--border))] text-center">
+                              <div className="text-[10px] uppercase font-bold text-[hsl(var(--muted-foreground))]">Arch</div>
+                              <div className="font-mono text-xs text-white mt-1">{activeFile.disasm.arch}</div>
+                            </div>
+                            <div className="bg-[hsl(var(--secondary))] p-2.5 rounded border border-[hsl(var(--border))] text-center">
+                              <div className="text-[10px] uppercase font-bold text-[hsl(var(--muted-foreground))]">Instructions</div>
+                              <div className="font-mono text-xs text-white mt-1">
+                                {activeFile.disasm.instructions_analyzed}{activeFile.disasm.truncated ? ' (truncated)' : ''}
+                              </div>
+                            </div>
+                            <div className="bg-[hsl(var(--secondary))] p-2.5 rounded border border-[hsl(var(--border))] text-center">
+                              <div className="text-[10px] uppercase font-bold text-[hsl(var(--muted-foreground))]">Imports resolved</div>
+                              <div className="font-mono text-xs text-white mt-1">{activeFile.disasm.imports_resolved}</div>
+                            </div>
+                          </div>
+
+                          {(activeFile.disasm.suspicious_calls || []).length > 0 && (
+                            <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-3">
+                              <div className="text-[10px] uppercase font-bold tracking-widest text-red-400 mb-2">
+                                Flagged API calls ({activeFile.disasm.suspicious_calls.length})
+                              </div>
+                              <div className="space-y-1.5">
+                                {activeFile.disasm.suspicious_calls.map((c: any, i: number) => (
+                                  <div key={i} className="flex flex-wrap items-baseline gap-2 text-xs font-mono">
+                                    <span className="text-red-300 font-bold">{c.api}</span>
+                                    <span className="text-[hsl(var(--muted-foreground))]">@ {c.address}</span>
+                                    <span className="text-red-400/80 text-[10px] uppercase tracking-wide">{c.reason}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="rounded-lg bg-[hsl(var(--secondary))] border border-[hsl(var(--border))] overflow-hidden">
+                            <div className="max-h-[440px] overflow-auto">
+                              <table className="w-full font-mono text-xs border-collapse">
+                                <tbody>
+                                  {(activeFile.disasm.instructions || [])
+                                    .filter((ins: any) => !disOnlyFlagged || ins.flag)
+                                    .map((ins: any, i: number) => (
+                                    <tr key={i} className={cn('border-b border-[hsl(var(--border))]/40 last:border-0', ins.flag ? 'bg-red-500/10' : 'hover:bg-white/5')}>
+                                      <td className="px-3 py-0.5 text-slate-500 whitespace-nowrap w-28 align-top">{ins.address}</td>
+                                      <td className="px-2 py-0.5 text-cyan-500/70 whitespace-nowrap hidden sm:table-cell align-top">{ins.bytes}</td>
+                                      <td className={cn('px-3 py-0.5 whitespace-pre-wrap break-all', ins.flag ? 'text-red-300 font-semibold' : 'text-slate-200')}>
+                                        {ins.text}
+                                        {ins.target?.import && <span className="text-cyan-400">  ; {ins.target.import}</span>}
+                                        {!ins.target?.import && ins.target?.section && <span className="text-[hsl(var(--muted-foreground))]">  ; {ins.target.section}</span>}
+                                        {ins.flag && <span className="text-red-400/80">  → {ins.flag}</span>}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  {(activeFile.disasm.instructions || []).filter((ins: any) => !disOnlyFlagged || ins.flag).length === 0 && (
+                                    <tr><td className="px-3 py-4 text-center text-[hsl(var(--muted-foreground))] italic" colSpan={3}>
+                                      No flagged calls in the analyzed window.
+                                    </td></tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          <p className="text-[10px] text-[hsl(var(--muted-foreground))] italic">
+                            Linear sweep from the entry point over the first {Math.round((activeFile.disasm.window_bytes || 0) / 1024)} KB, calls annotated with resolved imports.
+                            {activeFile.disasm.truncated && ' Window ended before a return: the listing is partial by design.'}
+                            {' '}Static view only — no execution, no unpacking, control flow is not followed.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -379,6 +486,11 @@ export default function AegisTotal() {
               <span className={cn(selectedReport.engines.pdf_parser?.enabled ? 'text-cyan-400' : '')}>[PDF: {selectedReport.engines.pdf_parser?.enabled ? 'ON' : 'OFF'}]</span>
               <span className={cn(selectedReport.engines.archive_parser?.enabled ? 'text-cyan-400' : '')}>[ARCH: {selectedReport.engines.archive_parser?.enabled ? 'ON' : 'OFF'}]</span>
               <span className={cn(selectedReport.engines.strings_scan?.enabled ? 'text-cyan-400' : '')}>[STR: ON]</span>
+              {selectedReport.engines.disasm && (
+                <span className={cn(selectedReport.engines.disasm.enabled ? 'text-cyan-400' : 'text-yellow-400')}>
+                  [DISASM: {selectedReport.engines.disasm.enabled ? 'ON' : 'OFF'}]
+                </span>
+              )}
               <span className={cn(selectedReport.engines.secret_scan?.enabled ? 'text-cyan-400' : '')}>[SECRETS: {selectedReport.engines.secret_scan?.patterns || 0}]</span>
               {selectedReport.engines.iocs_found && Object.keys(selectedReport.engines.iocs_found).length > 0 && (
                  <span className="text-yellow-400 font-bold">[IOCs: FOUND]</span>

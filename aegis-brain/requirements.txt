@@ -31,6 +31,8 @@ slowapi==0.1.9
 python-json-logger==2.0.7
 # Circuit breaker
 pybreaker==0.8.0
+# Disassembler PE per Aegis Total (motore fail-soft: se manca, lo dichiara).
+capstone>=5.0.1,<6.0.0
 # Linting and testing
 ruff==0.6.8
 bandit==1.7.5

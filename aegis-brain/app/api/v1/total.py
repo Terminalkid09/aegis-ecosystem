@@ -47,6 +47,7 @@ from app.core.deps import get_current_user
 from app.core.logging import get_logger
 from app.database.connection import get_db
 from app.database.models import AEGIS_TOTAL_DISCLAIMER, TotalReport
+from app.services import disasm
 
 router = APIRouter(tags=["Aegis Total"])
 logger = get_logger(__name__)
@@ -278,6 +279,10 @@ def _engine_signature() -> str:
     parts += [f"{k}:{v.pattern}" for k, v in sorted(IOC_PATTERNS.items())]
     parts += [f"cap={IMPORT_SCORE_CAP}", f"ver={VERSIONLIKE_IPV4.pattern}"]
     parts += [m.decode() for m in POWERSHELL_EXEC_MARKERS]
+    # Il disassemblaggio non cambia il punteggio ma cambia il CONTENUTO del
+    # report: se entra o esce (o cambia versione di capstone) i report in cache
+    # non sono piu' completi.
+    parts.append(f"disasm={disasm.engine_fingerprint()}")
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12]
 
 
@@ -1172,6 +1177,9 @@ def _analyze_bytes(raw: bytes, name: str, *, allow_nested: bool, nested_depth: i
         detail.update({"kind": "binary", "size": len(raw), "format": "PE",
                        "score": detail.pop("score_contribution", 0),
                        "note": "PE: sezioni/entropia, import, .NET, firma, IOC."})
+        # Disassemblaggio informativo dell'entry point: non incide sul verdetto,
+        # e se capstone manca lo dichiara invece di restituire una lista vuota.
+        detail["disasm"] = disasm.disassemble_pe(raw)
         return detail
     if fmt == "elf":
         detail = _analyze_elf(raw)
@@ -1471,6 +1479,12 @@ async def upload_analyze(
 
     verdict = "clean" if total_score < 20 else ("suspicious" if total_score < 60 else "malicious")
 
+    # Stato del disassembler per la barra "Engines": se è spento, il motivo
+    # deve essere visibile quanto quello di YARA, non nascosto nel dettaglio.
+    disasm_files = [f["disasm"] for f in files_out if isinstance(f.get("disasm"), dict)]
+    disasm_on = any(d.get("enabled") for d in disasm_files)
+    disasm_reason = next((d.get("reason") for d in disasm_files if not d.get("enabled")), None)
+
     engines = {
         "static_lite": {"score": total_score, "version": engine_signature,
                         "engine": ENGINE_VERSION},
@@ -1485,11 +1499,13 @@ async def upload_analyze(
         "strings_scan": {"enabled": True},
         "secret_scan": {"enabled": True, "patterns": len(SECRET_PATTERNS)},
         "yara": yara_section,
+        "disasm": {"enabled": disasm_on, "reason": disasm_reason,
+                   "engine": disasm.engine_fingerprint()},
         "iocs_found": all_iocs,
         "suspicious_imports": all_imports_suspicious[:20],
         "detected_format": fmt,
         "members_analyzed": total_members or None,
-        "note": "Static sandbox complete: PE/ELF/Mach-O/Office/PDF + entropy + imports + secrets + IOC + YARA (SOC signatures).",
+        "note": "Static sandbox complete: PE/ELF/Mach-O/Office/PDF + entropy + imports + secrets + IOC + YARA (SOC signatures) + entry-point disassembly.",
     }
 
     rec = TotalReport(
