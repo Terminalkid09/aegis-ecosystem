@@ -38,6 +38,7 @@ public class AegisClient {
     private final Gson                gson;
     private CloseableHttpClient httpClient;
     private final String              reportUrl;
+    private final String              batchUrl;
     private final String              commandUrl;
     private String agentSecret;
     private String lastAgentId;
@@ -49,7 +50,9 @@ public class AegisClient {
 
     public AegisClient() {
         this.reportUrl = Config.GATEWAY_URL;
+        this.batchUrl = deriveBatchUrl(this.reportUrl);
         this.commandUrl = Config.BRAIN_URL + "/telemetry/commands";
+        logEndpoints();
 
         this.gson = new GsonBuilder()
                 .registerTypeAdapter(Instant.class, (JsonSerializer<Instant>) (src, typeOfSrc, context) ->
@@ -289,15 +292,58 @@ public class AegisClient {
     }
 
     /**
+     * Deriva l'endpoint batch dal report URL, una volta sola e in modo visibile.
+     *
+     * Perché non un semplice {@code replace}: se il report URL non contiene
+     * "/telemetry/report" — caso reale, una {@code AEGIS_GATEWAY_URL} rimasta
+     * dall'architettura precedente ({@code http://aegis-link:8080/api/v1/events},
+     * tier che non esiste più) — il replace non cambiava NULLA e i batch
+     * venivano spediti al path del singolo evento, in silenzio. Il sensore
+     * restava quindi cieco accumulando spool e nessuno se ne accorgeva.
+     */
+    static String deriveBatchUrl(String gatewayUrl) {
+        if (gatewayUrl == null) return null;
+        String expected = "/telemetry/report";
+        if (gatewayUrl.endsWith(expected)) {
+            return gatewayUrl + "/batch";
+        }
+        if (gatewayUrl.contains(expected)) {
+            return gatewayUrl.replace(expected, expected + "/batch");
+        }
+        // Non è un endpoint di telemetria: si restituisce invariato e il
+        // problema viene gridato da logEndpoints, invece di essere nascosto.
+        return gatewayUrl;
+    }
+
+    /**
+     * Logga gli endpoint risolti al primo costruttore: una configurazione
+     * sbagliata si vede subito nella console dell'agente invece di manifestarsi
+     * solo come spool che cresce e nessun alert nel SIEM.
+     */
+    private static void logEndpoints() {
+        log.info("Telemetry -> {}", Config.GATEWAY_URL);
+        if (Config.GATEWAY_URL == null || !Config.GATEWAY_URL.contains("/telemetry/report")) {
+            log.error("[CONFIG] AEGIS_GATEWAY_URL non e' un endpoint di telemetria: '{}'. "
+                    + "Atteso qualcosa come http://<brain>/api/v1/telemetry/report. "
+                    + "Con questo valore la telemetria NON arriva al brain.",
+                    Config.GATEWAY_URL);
+        }
+    }
+
+    public String getBatchUrl() {
+        return batchUrl;
+    }
+
+    /**
      * Invia un batch a POST /telemetry/report/batch. Lancia
      * BatchUnsupportedException se il server non ha il batch endpoint
-     * (brain vecchio → l'outbox cade in per-evento) o IOException per
-     * errori transitori (→ spool persistente).
+     * (brain vecchio → l'outbox cade in per-evento), PermanentRejectException
+     * se il server respinge il contenuto (ritentare non può riuscire) oppure
+     * IOException per errori transitori (→ spool persistente).
      */
     public void sendEventsBatch(java.util.List<SystemEvent> events) throws IOException {
         if (events == null || events.isEmpty()) return;
         String json = gson.toJson(events);
-        String batchUrl = this.reportUrl.replace("/telemetry/report", "/telemetry/report/batch");
         HttpPost request = new HttpPost(batchUrl);
         request.setEntity(new StringEntity(json, ContentType.APPLICATION_JSON));
         request.setHeader("X-Agent-Id", events.get(0).getAgentId());
@@ -312,6 +358,22 @@ public class AegisClient {
             }
             if (status < 200 || status >= 300) {
                 warnCertProblem(status);
+                // 4xx di contenuto = permanente: ritentare lo stesso payload
+                // non puo' riuscire, e in spool resterebbe in testa alla coda
+                // bloccando per sempre anche gli eventi sani che seguono.
+                if (status == 400 || status == 413 || status == 415 || status == 422) {
+                    String body = "";
+                    try {
+                        if (response.getEntity() != null) {
+                            body = org.apache.hc.core5.http.io.entity.EntityUtils
+                                    .toString(response.getEntity());
+                        }
+                    } catch (Exception ignored) {
+                        // corpo non leggibile: si scarta il batch senza indici
+                    }
+                    throw new PermanentRejectException(
+                            "Batch permanently rejected with HTTP " + status, body);
+                }
                 throw new IOException("Batch rejected with HTTP " + status);
             }
             log.debug("[OK] Batch of {} events sent", events.size());
