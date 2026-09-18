@@ -91,7 +91,7 @@ class PidLock:
 # ---------- Agent Class ----------
 
 class Agent:
-    AGENT_VERSION = os.getenv("NODETRACE_VERSION", "3.0.0")
+    AGENT_VERSION = os.getenv("NODETRACE_VERSION", "4.0.0")
     CAPABILITIES = {"telemetry": True, "network_scan": True, "update": True}
 
     def __init__(self):

@@ -9,7 +9,7 @@ async def test_root():
         r = await client.get("/")
         assert r.status_code == 200
         assert r.json()["status"] == "ok"
-        assert r.json()["version"] == "3.0.0"
+        assert r.json()["version"] == "4.0.0"
 
 @pytest.mark.asyncio
 async def test_get_alerts_unauthorized():

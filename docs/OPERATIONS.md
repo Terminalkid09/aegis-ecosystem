@@ -116,7 +116,7 @@ incident, playbook) sono CASCADE/SET NULL: la purge non orfana righe.
 - **Non previsto in pilot**: in pilot Prometheus/Grafana sono off, le metriche SI
   raccolgono via `scripts/benchmark.py` e `/metrics` del brain (nessun export).
 
-## 8. Aggiornare a runtime non-root (v3.x)
+## 8. Aggiornare a runtime non-root (v4.x)
 
 Le immagini aegis-brain girano ora come utente `aegis` (non-root, `USER aegis`
 nel Dockerfile). Se si proviene da una versione precedente con volumi

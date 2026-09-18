@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # Versione della piattaforma: una sola fonte per OpenAPI, endpoint root e
     # dashboard (prima era scritta a mano in due punti e la UI mostrava una
     # versione diversa da quella vera). Si alza qui, in un posto solo.
-    APP_VERSION: str = "3.0.0"
+    APP_VERSION: str = "4.0.0"
     OLLAMA_URL: Optional[str] = None
     OLLAMA_DEFAULT_MODEL: str = "aegis-default"
     # Audit: allowlist modelli caricabili via API (niente pull arbitrari).
@@ -208,7 +208,7 @@ class Settings(BaseSettings):
                     raise ValueError
             except Exception as exc:
                 raise ValueError("MASTER_KEY_B64 must decode to exactly 32 bytes") from exc
-            insecure_markers = ("change-me", "replace-with", "password", "for_v3.0.0")
+            insecure_markers = ("change-me", "replace-with", "password", "for_v4.0.0")
             for name in ("JWT_SECRET", "AGENT_ENROLL_KEY", "AEGIS_API_KEY", "REDIS_PASSWORD"):
                 value = getattr(self, name, None)
                 if value and any(marker in value.lower() for marker in insecure_markers):
