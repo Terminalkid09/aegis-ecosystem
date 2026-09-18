@@ -43,6 +43,27 @@ public class EventOutbox {
     /** Eventi spool rigiocati per flush: evita di inchiodare il loop. */
     static final int SPOOL_REPLAY_MAX = 100;
 
+    /**
+     * Troncatura difensiva dei campi a lunghezza variabile, allineata ai
+     * limiti del contratto di ingestion del brain.
+     *
+     * <p>Perché troncare anche lato agente, se il brain già tronca: senza,
+     * un processo che si rilancia con un JSON di 12 KB in argv (caso reale:
+     * l'agente NodeTrace che chiama curl) veniva spedito per intero a ogni
+     * flush, lo spool si gonfiava di payload che nessuno avrebbe accettato e
+     * la redazione lato brain era l'unica rete di sicurezza.
+     */
+    static final java.util.Map<String, Integer> TRANSPORT_LIMITS;
+    static {
+        java.util.Map<String, Integer> m = new java.util.LinkedHashMap<>();
+        m.put("commandLine", 4096);
+        m.put("processPath", 1024);
+        m.put("cgroup", 512);
+        m.put("signature", 256);
+        m.put("publisher", 256);
+        TRANSPORT_LIMITS = java.util.Collections.unmodifiableMap(m);
+    }
+
     private final AegisClient client;
     private final Sender sender;
     private final BatchBuffer buffer = new BatchBuffer(MAX_BATCH);
@@ -58,6 +79,8 @@ public class EventOutbox {
     private final AtomicLong spoolReplayed = new AtomicLong();
     private final AtomicLong spoolCorrupt = new AtomicLong();
     private final AtomicLong sendFailed = new AtomicLong();
+    /** Eventi scartati perché il server li ha respinti per contenuto (4xx). */
+    private final AtomicLong rejectedPermanent = new AtomicLong();
 
     // Spool lazy: la chiave deriva dal device secret, noto solo dopo enroll.
     private volatile FileSpool spool;
@@ -140,6 +163,7 @@ public class EventOutbox {
     /** Accoda con bound: oltre MAX_BUFFER scarta i più vecchi CONTANDOLI. */
     public void add(SystemEvent event) {
         if (event == null) return;
+        clampForTransport(event);
         received.incrementAndGet();
         boolean full;
         synchronized (buffer) {
@@ -202,6 +226,15 @@ public class EventOutbox {
                             failed.addAll(sendSingles(batch));
                             if (!failed.isEmpty()) requeueToSpool(sp, failed, new ArrayList<>());
                             return;
+                        } catch (PermanentRejectException e) {
+                            // Il brain respinge per CONTENUTO: gli elementi
+                            // colpevoli non passeranno mai e, restando in testa
+                            // allo spool, impedivano per sempre la consegna
+                            // anche degli eventi sani che venivano dopo.
+                            List<SystemEvent> survivors =
+                                    dropRejected(replayed, e.getOffendingIndexes());
+                            requeueToSpool(sp, survivors, batch);
+                            return;
                         } catch (Exception e) {
                             requeueToSpool(sp, replayed, batch);
                             return;
@@ -221,6 +254,12 @@ public class EventOutbox {
             List<SystemEvent> failed = sendSingles(batch);
             if (!failed.isEmpty() && !saveToSpool(sp, failed)) {
                 log.warn("Eventi persi senza spool: {} (server irraggiungibile)", failed.size());
+            }
+        } catch (PermanentRejectException e) {
+            // Ritentare identico non puo' riuscire: si conservano solo i sani.
+            List<SystemEvent> survivors = dropRejected(batch, e.getOffendingIndexes());
+            if (!survivors.isEmpty() && !saveToSpool(sp, survivors)) {
+                sendFailed.addAndGet(survivors.size());
             }
         } catch (Exception e) {
             log.warn("Batch send failed: {}", e.getMessage());
@@ -245,7 +284,8 @@ public class EventOutbox {
                 + " spooled=" + spooled.get()
                 + " spoolReplayed=" + spoolReplayed.get()
                 + " spoolCorrupt=" + spoolCorrupt.get()
-                + " sendFailed=" + sendFailed.get();
+                + " sendFailed=" + sendFailed.get()
+                + " rejectedPermanent=" + rejectedPermanent.get();
     }
 
     public long getReceived() { return received.get(); }
@@ -255,6 +295,7 @@ public class EventOutbox {
     public long getSpoolReplayed() { return spoolReplayed.get(); }
     public long getSpoolCorrupt() { return spoolCorrupt.get(); }
     public long getSendFailed() { return sendFailed.get(); }
+    public long getRejectedPermanent() { return rejectedPermanent.get(); }
     public int getBuffered() {
         synchronized (buffer) {
             return buffer.size();
@@ -323,6 +364,73 @@ public class EventOutbox {
         if (!saveToSpool(sp, all)) {
             sendFailed.addAndGet(all.size());
         }
+    }
+
+    /**
+     * Tronca i campi a lunghezza variabile oltre i limiti del contratto di
+     * ingestion, dichiarandolo in {@code quality}.
+     *
+     * <p>Non è cosmetico: un solo campo troppo lungo faceva rispondere 422
+     * all'intero batch e, dato che l'outbox rigioca il batch respinto, la
+     * telemetria del sensore smetteva di arrivare del tutto.
+     */
+    static void clampForTransport(SystemEvent e) {
+        StringBuilder marks = new StringBuilder();
+        String commandLine = e.getCommandLine();
+        if (commandLine != null) {
+            Integer limit = TRANSPORT_LIMITS.get("commandLine");
+            if (limit != null && commandLine.length() > limit) {
+                e.setCommandLine(commandLine.substring(0, limit));
+                marks.append("commandLine");
+            }
+        }
+        String processPath = e.getProcessPath();
+        if (processPath != null) {
+            Integer limit = TRANSPORT_LIMITS.get("processPath");
+            if (limit != null && processPath.length() > limit) {
+                e.setProcessPath(processPath.substring(0, limit));
+                if (marks.length() > 0) marks.append(",");
+                marks.append("processPath");
+            }
+        }
+        if (marks.length() == 0) return;
+        String existing = e.getQuality();
+        String marker = "truncated:" + marks;
+        e.setQuality(existing == null || existing.isBlank()
+                ? marker : existing + ";" + marker);
+    }
+
+    /**
+     * Rimuove dal payload gli elementi che il server ha indicato come respinti.
+     *
+     * <p>Indici vuoti = corpo del 422 illeggibile: non sapendo quali siano i
+     * colpevoli si scarta l'intero payload e lo si CONTA (`rejectedPermanent`),
+     * perché il contrario — riaccodare tutto — era il ciclo infinito che
+     * azzerava la telemetria. La perdita è visibile in {@link #stats()}.
+     */
+    private List<SystemEvent> dropRejected(List<SystemEvent> payload,
+                                           List<Integer> offendingIndexes) {
+        if (payload == null || payload.isEmpty()) return new ArrayList<>();
+        if (offendingIndexes == null || offendingIndexes.isEmpty()) {
+            rejectedPermanent.addAndGet(payload.size());
+            log.warn("Brain ha respinto {} eventi per contenuto; indici non "
+                    + "deducibili dal corpo: scartati e contati", payload.size());
+            return new ArrayList<>();
+        }
+        List<SystemEvent> survivors = new ArrayList<>(payload.size());
+        Integer firstBadPid = null;
+        for (int i = 0; i < payload.size(); i++) {
+            if (offendingIndexes.contains(i)) {
+                if (firstBadPid == null) firstBadPid = (int) payload.get(i).getPid();
+                continue;
+            }
+            survivors.add(payload.get(i));
+        }
+        long dropped = payload.size() - survivors.size();
+        rejectedPermanent.addAndGet(dropped);
+        log.warn("Brain ha respinto {} eventi per contenuto (es. pid={}); i {} "
+                + "sani restano in coda", dropped, firstBadPid, survivors.size());
+        return survivors;
     }
 
     private List<String> serializeAll(List<SystemEvent> events) {

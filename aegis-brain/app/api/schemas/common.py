@@ -1,7 +1,12 @@
-from pydantic import BaseModel, ConfigDict, Field, alias_generators, BeforeValidator
+from annotated_types import MaxLen
+from pydantic import (BaseModel, ConfigDict, Field, alias_generators,
+                      BeforeValidator, model_validator)
 from typing import Optional, List, Dict, Any, Annotated
 from datetime import datetime
 from uuid import UUID
+
+# Marcatore di troncatura: finisce in `quality` (es. 'truncated:command_line').
+TRUNCATION_TAG = "truncated"
 
 # Helper to ensure UUIDs are treated as strings in responses
 UUIDStr = Annotated[UUID, BeforeValidator(lambda v: str(v) if isinstance(v, UUID) else v)]
@@ -145,6 +150,62 @@ class EventSchema(BaseModel):
     quality: Optional[str] = Field(None, max_length=64)
     sampling: Optional[str] = Field(None, max_length=32)
     drop_reason: Optional[str] = Field(None, max_length=128, alias="dropReason")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _clamp_oversized_strings(cls, data: Any) -> Any:
+        """Tronca i campi stringa oltre il limite dichiarato invece di
+        rifiutare l'evento.
+
+        Perché: con la validazione stretta bastava UNA command line lunga —
+        un processo che si rilancia con un JSON di 12 KB in argv, esattamente
+        ciò che fa l'agente NodeTrace con curl — per far fallire con 422
+        l'INTERO batch. L'outbox dell'agente rigioca il batch, quindi falliva
+        per sempre: la telemetria di quell'endpoint non arrivava più al brain,
+        nessun processo, nessun alert, in silenzio.
+
+        La redazione a valle (`redact_text`) tronca già a 4096, ma gira DOPO
+        la validazione: non proteggeva nulla. Qui si applica prima, ai limiti
+        dichiarati dai campi stessi (quindi anche ai campi futuri, senza
+        doverli elencare) e lo si dichiara in `quality`, stessa convenzione di
+        'degraded:etw-disabled'. La telemetria non si butta: si tronca, e la
+        perdita è visibile.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        # Limite per ciascun campo, indicizzato sia col nome sia con l'alias
+        # accettato dall'agente (camelCase).
+        limits: dict[str, tuple[str, int]] = {}
+        for name, info in cls.model_fields.items():
+            max_len = next((meta.max_length for meta in info.metadata
+                            if isinstance(meta, MaxLen)), None)
+            if not max_len:
+                continue
+            limits[name] = (name, max_len)
+            if info.alias:
+                limits[info.alias] = (name, max_len)
+
+        clean = dict(data)
+        truncated: list[str] = []
+        for key, value in data.items():
+            entry = limits.get(key)
+            if entry is None or not isinstance(value, str):
+                continue
+            field_name, max_len = entry
+            if len(value) > max_len:
+                clean[key] = value[:max_len]
+                if field_name != "quality":
+                    truncated.append(field_name)
+
+        if truncated:
+            marker = TRUNCATION_TAG + ":" + ",".join(sorted(set(truncated)))
+            existing = clean.get("quality")
+            merged = f"{existing};{marker}" if existing else marker
+            q_limit = limits["quality"][1]
+            clean["quality"] = merged[:q_limit]
+
+        return clean
 
 class StatsResponse(BaseModel):
     total_alerts: int

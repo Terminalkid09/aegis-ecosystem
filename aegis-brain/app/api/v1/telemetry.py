@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime, timezone, timedelta
 from app.database.connection import get_db
 from app.database.models import Alert, Agent, Telemetry, ThreatReport, RemediationAction
@@ -15,7 +15,7 @@ from app.core.logging import get_logger
 from app.core.metrics import inc, observe_hist, set_gauge
 from app.core.rate_guard import ingest_rate_guard
 from app.core.redaction import sanitize_event
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 router = APIRouter(tags=["Telemetry"])
 logger = get_logger(__name__)
@@ -400,13 +400,21 @@ async def agent_report(request: Request, payload: EventSchema, db: AsyncSession 
 @router.post("/report/batch")
 async def agent_report_batch(
     request: Request,
-    payload: List[EventSchema], db: AsyncSession = Depends(get_db),
+    payload: List[Any], db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
     """Ingestion batch: N eventi in un round-trip (storm di exec senza intasare).
 
     Stesse regole del singolo report, un commit per evento ma senza
     enrichment sincrono (è async fuori request path). Max 100/batch.
+
+    La validazione è **per evento**, non per batch: il body arriva come lista
+    grezza e ogni elemento è convalidato da solo. Con `List[EventSchema]`
+    FastAPI convalidava la lista in blocco e UN elemento fuori schema faceva
+    rispondere 422 all'intera richiesta, prima ancora di entrare qui — quindi
+    24 eventi sani venivano persi per colpa di 1. Peggio: l'outbox
+    dell'agente rigioca il batch respinto, quindi restava bloccato per sempre.
+    Ora l'evento fuori schema è contato in `rejected` e gli altri passano.
     """
     if len(payload) > 100:
         raise HTTPException(status_code=413, detail="Max 100 events per batch")
@@ -416,7 +424,15 @@ async def agent_report_batch(
     if not await ingest_rate_guard.allow_async(str(agent.agent_id), len(payload)):
         inc("aegis_events_dropped_total", len(payload), f'reason="rate_limited",agent="{agent.agent_id}"')
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="rate exceeded")
-    for item in payload:
+    for raw in payload:
+        try:
+            item = EventSchema.model_validate(raw)
+        except ValidationError as exc:
+            rejected += 1
+            inc("aegis_events_dropped_total", 1, f'reason="schema",agent="{agent.agent_id}"')
+            logger.warning("Evento fuori schema scartato nel batch (agent=%s): %s",
+                           agent.agent_id, exc.errors()[:2])
+            continue
         if str(agent.agent_id) != item.agent_id:
             rejected += 1
             continue
