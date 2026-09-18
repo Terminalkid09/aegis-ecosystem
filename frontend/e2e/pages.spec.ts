@@ -64,7 +64,19 @@ test.describe('page rendering', () => {
       await page.locator(`#nav-${id}`).click();
       // Il boundary è keyed su currentPage: cambiare pagina lo azzera, quindi
       // ogni iterazione parte pulita.
-      await page.waitForTimeout(1200);
+      //
+      // Attesa DETERMINISTICA, non un waitForTimeout fisso: le pagine sono chunk
+      // lazy e con più worker in parallelo 1,2s misurava la velocità del disco,
+      // non il render (falliva a rotazione su pagine diverse, sempre passando se
+      // eseguita da sola). Qui si attende che <main> abbia contenuto, con un
+      // tetto: se non arriva, la pagina è davvero vuota e viene segnalata.
+      try {
+        await expect
+          .poll(async () => (await page.locator('main').innerText()).trim().length, { timeout: 15000 })
+          .toBeGreaterThan(40);
+      } catch {
+        // propaga sotto come pagina non renderizzata, con la lunghezza misurata
+      }
       const crashed = await page.getByText(ERROR_BOUNDARY).count();
       const text = (await page.locator('main').innerText()).trim();
       if (crashed > 0 || text.length <= 40) {

@@ -16,7 +16,11 @@ def _ev(**kw):
 
 def test_registry_ids_unique_and_versioned():
     ids = [s.rule_id for s in STATIC_RULES]
-    assert len(ids) == len(set(ids)) == 15
+    # Invariante: unicità + copertura, non un numero fisso (aggiungere una regola
+    # al registry non è una regressione). Il minimo resta perché scendere sotto
+    # il baseline validato dal corpus toglierebbe copertura senza segnalarlo.
+    assert len(ids) == len(set(ids))
+    assert len(ids) >= 15
     assert all(i.startswith("AEGIS-S") for i in ids)
     assert all(s.version == "1.0" for s in STATIC_RULES)
     assert {s.confidence for s in STATIC_RULES} <= {"high", "medium", "low"}
@@ -75,7 +79,7 @@ def test_corpus_scores_clean():
     assert rep["benign_lines"] == 12 and rep["suspicious_lines"] == 12
     assert rep["malformed_lines"] == 6
     assert rep["malformed_invalid"] >= 4  # righe indubbiamente malformate
-    assert rep["rules"] == 15
+    assert rep["rules"] == len(STATIC_RULES)
     assert rep["dataset_version"] is not None
 
 
