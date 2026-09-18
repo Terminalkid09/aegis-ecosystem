@@ -88,12 +88,25 @@ class TestVersionNumbersAreNotIOCs:
 
 
 class TestScoringCannotCallAFriendlyBinaryMalicious:
-    def test_dual_use_imports_alone_stay_below_malicious(self):
-        """notepad.exe importa tre API comuni: da sole non bastano."""
+    def test_dual_use_imports_do_not_score_at_all(self):
+        """notepad.exe importa tre API comuni: un file sano deve chiudere a 0,
+        altrimenti "score 15" su un binario di sistema si legge come un
+        ritrovamento. Restano nel report come contesto, senza pesare."""
+        from app.api.v1.total import IMPORT_WEIGHT_DUAL_USE
+        assert IMPORT_WEIGHT_DUAL_USE == 0
         assert IMPORT_SCORE_CAP < MALICIOUS_THRESHOLD
         dual = [f for f in ("CreateProcessW", "ShellExecute", "RegSetValueEx")
                 if f in DUAL_USE_IMPORTS]
         assert len(dual) == 3, "le tre API del caso notepad.exe devono restare dual-use"
+
+    def test_specific_apis_still_push_a_verdict(self):
+        """Le API che da sole indicano iniezione devono continuare a pesare."""
+        from app.api.v1.total import IMPORT_WEIGHT_SPECIFIC
+        assert IMPORT_WEIGHT_SPECIFIC == 15
+        # Due API specifiche raggiungono il tetto: "suspicious", mai "malicious"
+        # senza corroborazione (stringhe, YARA, entropia).
+        assert min(2 * IMPORT_WEIGHT_SPECIFIC, IMPORT_SCORE_CAP) >= 20
+        assert min(2 * IMPORT_WEIGHT_SPECIFIC, IMPORT_SCORE_CAP) < MALICIOUS_THRESHOLD
 
     def test_import_catalogue_is_split_and_coherent(self):
         """Ogni dual-use deve esistere in catalogo, e il catalogo non deve
@@ -149,13 +162,39 @@ class TestMalformedContainerIsNotSkipped:
         d = _analyze_bytes(raw, "sample.bin", allow_nested=False)
         assert "203.0.113.77" in (d.get("iocs") or {}).get("ipv4", [])
 
-    def test_engine_version_is_declared_and_used_for_the_cache(self):
-        """Il verdetto dipende dall'engine: la cache deve poterlo invalidare."""
+    def test_cache_is_invalidated_by_the_rules_themselves(self):
+        """Il verdetto dipende da regole e pesi: cambiarli deve invalidare i
+        report in cache senza dover alzare una versione a mano (l'ho
+        dimenticato davvero, e i file gia' analizzati hanno continuato a
+        mostrare il punteggio precedente)."""
         import inspect
         from app.api.v1 import total as mod
         src = inspect.getsource(mod.upload_analyze)
-        assert "ENGINE_VERSION" in src, "la cache non considera la versione dell'engine"
+        assert "_engine_signature()" in src, "la cache non e' legata alle regole"
         assert ENGINE_VERSION
+
+    def test_signature_changes_when_a_rule_changes(self):
+        """L'impronta deve essere sensibile a pesi e pattern, non solo al nome."""
+        from app.api.v1 import total as mod
+        base = mod._engine_signature()
+        assert len(base) == 12
+        original = mod.SUSPICIOUS_IMPORTS["CreateRemoteThread"]
+        try:
+            mod.SUSPICIOUS_IMPORTS["CreateRemoteThread"] = ("Changed", "T1055")
+            assert mod._engine_signature() != base, "un cambio di regola non cambia l'impronta"
+        finally:
+            mod.SUSPICIOUS_IMPORTS["CreateRemoteThread"] = original
+        assert mod._engine_signature() == base
+
+    def test_signature_changes_when_a_weight_changes(self):
+        from app.api.v1 import total as mod
+        base = mod._engine_signature()
+        original = mod.IMPORT_WEIGHT_SPECIFIC
+        try:
+            mod.IMPORT_WEIGHT_SPECIFIC = original + 1
+            assert mod._engine_signature() != base
+        finally:
+            mod.IMPORT_WEIGHT_SPECIFIC = original
 
 
 class TestStrictPrefixesDoNotWeakenDetection:

@@ -54,7 +54,7 @@ logger = get_logger(__name__)
 # Versione del motore di analisi. Cambiare le regole o i pesi di punteggio puo'
 # cambiare un verdetto, quindi entra nella chiave della cache: i report salvati
 # da una versione precedente vengono rigenerati invece di essere riproposti.
-ENGINE_VERSION = "3.1"
+ENGINE_VERSION = "3.2"
 
 # ─── Static signatures ────────────────────────────────────────────────────────
 
@@ -169,8 +169,12 @@ DUAL_USE_IMPORTS = frozenset({
     "CreateProcessW", "WinHttpOpen", "InternetOpenUrl", "CryptEncrypt",
     "GetAsyncKeyState", "SetWindowsHookEx", "NtQueryInformationProcess",
 })
+# Le API dual-use valgono 0 punti: sono nel report come contesto, ma il
+# punteggio deve significare "indizi di malevolenza", non "quante API nota una
+# pagella". Con peso 5 un binario sano mostrava comunque 15 e sembrava che
+# qualcosa fosse stato trovato; con peso 0 un file pulito chiude a 0.
 IMPORT_WEIGHT_SPECIFIC = 15
-IMPORT_WEIGHT_DUAL_USE = 5
+IMPORT_WEIGHT_DUAL_USE = 0
 IMPORT_SCORE_CAP = 30  # sotto la soglia "malicious" (60)
 
 # Macro/shell markers usati dall'analisi Office (OLE + OOXML + .rtf)
@@ -253,6 +257,28 @@ def _extract_strings(data: bytes, min_len: int = 6, limit: int = 4000) -> List[s
     for w in wide[:400]:
         result.append(w.decode("utf-16-le", errors="ignore").strip())
     return result[:limit]
+
+
+def _engine_signature() -> str:
+    """Impronta di regole e pesi, per la validita' della cache.
+
+    Il verdetto dipende dai pattern e dai pesi: se cambiano, un report in cache
+    non vale piu'. Legare l'invalidazione a una versione scritta a mano non
+    funziona — l'ho verificato: ho cambiato i pesi senza alzare la versione e i
+    file gia' analizzati hanno continuato a mostrare il punteggio precedente.
+    Qui l'impronta si ricalcola dalle regole stesse, quindi non c'e' nulla da
+    ricordare.
+    """
+    parts = [ENGINE_VERSION]
+    parts += [p.pattern for p in SUSPICIOUS_STRINGS]
+    for fn in sorted(SUSPICIOUS_IMPORTS):
+        cap, tid = SUSPICIOUS_IMPORTS[fn]
+        weight = IMPORT_WEIGHT_DUAL_USE if fn in DUAL_USE_IMPORTS else IMPORT_WEIGHT_SPECIFIC
+        parts.append(f"{fn}:{cap}:{tid}:{weight}")
+    parts += [f"{k}:{v.pattern}" for k, v in sorted(IOC_PATTERNS.items())]
+    parts += [f"cap={IMPORT_SCORE_CAP}", f"ver={VERSIONLIKE_IPV4.pattern}"]
+    parts += [m.decode() for m in POWERSHELL_EXEC_MARKERS]
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12]
 
 
 def _iocs_from(text: str, limit: int = 15) -> Dict[str, List[str]]:
@@ -1295,6 +1321,10 @@ async def upload_analyze(
     if not accept_disclaimer:
         raise HTTPException(status_code=400, detail="Disclaimer must be accepted (accept_disclaimer=true)")
 
+    # Calcolata dalle regole correnti: un cambio di pattern o di peso invalida
+    # i report in cache senza che nessuno debba ricordarsene.
+    engine_signature = _engine_signature()
+
     raw = await file.read()
     max_single = settings.TOTAL_MAX_FILE_MB * 1024 * 1024
     max_zip = settings.TOTAL_MAX_ZIP_MB * 1024 * 1024
@@ -1324,11 +1354,11 @@ async def upload_analyze(
     cached = existing.scalars().first()
     if cached:
         cached_engine = (cached.engines or {}).get("static_lite", {}).get("version")
-        if cached_engine == ENGINE_VERSION:
+        if cached_engine == engine_signature:
             return {"sha256": sha256, "cached": True, "score": cached.score,
                     "verdict": cached.verdict, "report_id": cached.id}
         logger.info("total: report %s rigenerato (engine %s -> %s)",
-                    sha256[:12], cached_engine, ENGINE_VERSION)
+                    sha256[:12], cached_engine, engine_signature)
         await db.delete(cached)
         await db.flush()
 
@@ -1442,7 +1472,8 @@ async def upload_analyze(
     verdict = "clean" if total_score < 20 else ("suspicious" if total_score < 60 else "malicious")
 
     engines = {
-        "static_lite": {"score": total_score, "version": ENGINE_VERSION},
+        "static_lite": {"score": total_score, "version": engine_signature,
+                        "engine": ENGINE_VERSION},
         "pe_parser": {"enabled": any(f.get("format") == "PE" for f in files_out)},
         "elf_parser": {"enabled": any(f.get("format") == "ELF" for f in files_out)},
         "macho_parser": {"enabled": any(f.get("format") == "Mach-O" for f in files_out)},
