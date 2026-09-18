@@ -762,8 +762,16 @@ def rule_persistence_autorun(event: EventSchema) -> RuleResult:
     # Audit: varianti a 1 carattere (svch0sts.exe) aggiravano il set esatto.
     # Scatta solo fuori dai path di sistema: il vero svchost.exe di System32
     # (distanza 1 da svch0st) non deve mai alertare.
+    #
+    # Il path deve essere NOTO: `_in_standard_path("")` e' False, quindi con
+    # path vuoto il ramo fuzzy concludeva "fuori dai path di sistema" e
+    # segnalava il svchost.exe LEGITTIMO di Windows. Non e' teorico: il
+    # sensore non riesce a leggere il path dei processi di sistema (svchost
+    # gira come SYSTEM in un'altra sessione) e l'alert scattava ogni ora su
+    # ogni macchina Windows, una volta scaduta la soppressione. Il ramo fuzzy
+    # e' un'euristica su un'euristica: senza il dato del path non si accende.
     stem = _stem(name)
-    if not _in_standard_path(event.process_path):
+    if event.process_path and not _in_standard_path(event.process_path):
         for bad in {_stem(b) for b in persistence_names} | {"svchost", "scvhosts"}:
             if _lev(stem, bad) <= 1:
                 return RuleResult(

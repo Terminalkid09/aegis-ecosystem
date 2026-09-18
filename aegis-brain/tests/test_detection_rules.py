@@ -545,6 +545,36 @@ class TestAuditAutorunFuzzy:
             "svchost.exe", process_path=r"C:\Windows\System32\svchost.exe"))
         assert not r.triggered
 
+    def test_real_svchost_with_unreadable_path_is_silent(self):
+        """Falso positivo reale, ricorrente ogni ora.
+
+        Il sensore non riesce a leggere il path dei processi di sistema
+        (svchost gira come SYSTEM in un'altra sessione) e lo lascia vuoto.
+        Con path vuoto il ramo fuzzy concludeva "fuori dai path di sistema"
+        e segnalava il svchost.exe LEGITTIMO: osservato dal vivo con parent
+        services.exe e path vuoto, una volta per ora su una macchina Windows.
+        Path ignoto = dato mancante, non evidenza.
+        """
+        r = rule_persistence_autorun(make_event("svchost.exe", process_path=""))
+        assert not r.triggered
+
+    def test_real_svchost_with_missing_path_field_is_silent(self):
+        r = rule_persistence_autorun(make_event("svchost.exe"))
+        assert not r.triggered
+
+    def test_masquerading_svchost_in_temp_still_flagged(self):
+        """Il path noto e non di sistema deve continuare a scattare."""
+        r = rule_persistence_autorun(make_event(
+            "svchost.exe",
+            process_path=r"C:\Users\vic\AppData\Local\Temp\svchost.exe"))
+        assert r.triggered and r.severity == "HIGH"
+
+    def test_exact_typosquat_name_still_flagged_without_path(self):
+        """Il set esatto resta una regola forte a prescindere dal path."""
+        for name in ("svch0st.exe", "scvhost.exe", "mssecsvc.exe"):
+            assert rule_persistence_autorun(
+                make_event(name, process_path="")).triggered, name
+
 
 @pytest.mark.asyncio
 async def test_engine_stamps_rule_ids_live(engine):
