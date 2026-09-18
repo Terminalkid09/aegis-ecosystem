@@ -783,6 +783,126 @@ def rule_persistence_autorun(event: EventSchema) -> RuleResult:
     return RuleResult(triggered=False)
 
 
+# ── Persistenza e discovery viste dalla COMMAND LINE ────────────────────
+# Perché servivano: la persistenza era coperta solo dallo snapshot read-only
+# all'avvio (evidenza, non alert) e dal match sul NOME del processo. Un Run key
+# scritto a runtime, o una scheduled task creata, non generavano nulla — e sono
+# i due modi piu' comuni di restare sulla macchina. L'azione sta negli
+# argomenti, non nel nome del binario: `reg.exe` e `schtasks.exe` sono binari di
+# sistema legittimi.
+
+_RUN_KEY_PATHS = (
+    "\\currentversion\\run",
+    "\\currentversion\\runonce",
+    "\\currentversion\\policies\\explorer\\run",
+)
+# Solo verbi che SCRIVONO: `reg query` (lettura) non deve scattare.
+_REG_WRITE_MARKERS = (
+    " add ", "set-itemproperty", "new-itemproperty", "reg import", "reg copy",
+)
+_TASK_WRITE_MARKERS = ("/create", "-create", "/change")
+# Azione della task che esegue codice invece di un programma: peggio.
+_TASK_SCRIPT_ACTIONS = (
+    "powershell", "pwsh", "cmd.exe", "cmd /c", "wscript", "cscript",
+    "mshta", "rundll32", "regsvr32", ".ps1", ".vbs", ".js",
+)
+# (sottostringa normalizzata, id tecnica, nome tecnica). Gli id sono espliciti
+# e non derivati dal nome: "Account Discovery" e' T1087, non T1069.
+_DISCOVERY_COMMANDS = (
+    ("whoami /all", "T1033", "System Owner/User Discovery"),
+    ("whoami /priv", "T1069", "Permission Groups Discovery"),
+    ("whoami /groups", "T1069", "Permission Groups Discovery"),
+    ("net user", "T1087", "Account Discovery"),
+    ("net group", "T1069", "Permission Groups Discovery"),
+    ("net localgroup", "T1069", "Permission Groups Discovery"),
+    ("net accounts", "T1087", "Account Discovery"),
+    ("quser", "T1033", "System Owner/User Discovery"),
+    ("query user", "T1033", "System Owner/User Discovery"),
+)
+
+
+def rule_autorun_registry_write(event: EventSchema) -> RuleResult:
+    """Scrittura di una chiave Run/RunOnce (persistenza a ogni logon).
+
+    La lettura (`reg query`) e gli altri usi del registro non scattano: serve
+    insieme la chiave di autorun E un verbo di scrittura. Gli installer
+    legittimi che scrivono un Run key sono elencati tra le eccezioni della
+    regola, perche' e' l'unico caso in cui questa detection fa rumore.
+    """
+    cmd = (event.command_line or "").lower()
+    if not cmd:
+        return RuleResult(triggered=False)
+    if not any(k in cmd for k in _RUN_KEY_PATHS):
+        return RuleResult(triggered=False)
+    if not any(w in cmd for w in _REG_WRITE_MARKERS):
+        return RuleResult(triggered=False)
+    return RuleResult(
+        triggered=True, severity="HIGH",
+        description=(f"Autorun registry key written by '{event.process_name}': "
+                     f"'{event.command_line[:200]}'."),
+        mitre_tactic_id="TA0003", mitre_tactic="Persistence",
+        mitre_technique="Registry Run Keys / Startup Folder",
+        mitre_technique_id="T1547.001",
+    )
+
+
+def rule_scheduled_task_creation(event: EventSchema) -> RuleResult:
+    """Creazione di una scheduled task: persistenza che non richiede riavvii.
+
+    `schtasks /query` (lettura) non scatta. Se l'azione lancia un interprete di
+    script o un LOLBin invece di un programma, la severity sale: una task che
+    esegue PowerShell e' il modo piu' diretto per sopravvivere alla chiusura
+    della sessione.
+    """
+    cmd = (event.command_line or "").lower()
+    if not cmd or not any(m in cmd for m in _TASK_WRITE_MARKERS):
+        return RuleResult(triggered=False)
+    script_action = any(a in cmd for a in _TASK_SCRIPT_ACTIONS)
+    return RuleResult(
+        triggered=True,
+        severity="CRITICAL" if script_action else "HIGH",
+        description=(f"Scheduled task created by '{event.process_name}'"
+                     f"{' running a script interpreter' if script_action else ''}: "
+                     f"'{event.command_line[:200]}'."),
+        mitre_tactic_id="TA0003", mitre_tactic="Persistence",
+        mitre_technique="Scheduled Task/Job",
+        mitre_technique_id="T1053.005",
+    )
+
+
+def rule_discovery_commands(event: EventSchema) -> RuleResult:
+    """Recon locale: enumerazione di utenti, gruppi e privilegi.
+
+    Da sola e' una ricognizione (MEDIUM): nel contesto di una catena di attacco
+    e' il passo che precede l'escalation. Un `whoami` nudo non scatta — lo
+    usano ovunque build e installer — servono le forme di enumerazione
+    (`/all`, `/priv`, `net user` senza argomenti).
+    """
+    # Normalizzazione: gli argomenti arrivano con l'estensione (`whoami.exe
+    # /all`), quindi senza toglierla nessun confronto scritto in modo naturale
+    # (`whoami /all`) matchava mai. Il collasso degli spazi copre gli attacchi
+    # di spaziatura banali (`whoami    /all`).
+    cmd = " ".join((event.command_line or "").lower().split())
+    cmd = re.sub(r"\.exe\b", "", cmd)
+    if not cmd:
+        return RuleResult(triggered=False)
+    name = (event.process_name or "").lower()
+    if name not in ("whoami.exe", "whoami", "net.exe", "net1.exe", "net",
+                    "quser.exe", "query.exe", "query"):
+        return RuleResult(triggered=False)
+    for needle, technique_id, technique in _DISCOVERY_COMMANDS:
+        if needle in cmd:
+            return RuleResult(
+                triggered=True, severity="MEDIUM",
+                description=(f"Reconnaissance command '{needle}' executed by "
+                             f"'{event.process_name}': '{event.command_line[:200]}'."),
+                mitre_tactic_id="TA0007", mitre_tactic="Discovery",
+                mitre_technique=technique,
+                mitre_technique_id=technique_id,
+            )
+    return RuleResult(triggered=False)
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  HELPERS
 # ═══════════════════════════════════════════════════════════════════
@@ -881,6 +1001,21 @@ STATIC_RULES = [
                description="Process name mimics common persistence or masquerades as legitimate software.",
                mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Boot or Logon Autostart Execution",
                mitre_technique_id="T1547", fn=rule_persistence_autorun),
+    StaticRule(rule_id="AEGIS-S016", version="1.0", confidence="high",
+               name="Autorun Registry Write", severity="HIGH",
+               description="Run/RunOnce registry key written (runtime persistence, invisible to the startup snapshot).",
+               mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Registry Run Keys / Startup Folder",
+               mitre_technique_id="T1547.001", fn=rule_autorun_registry_write),
+    StaticRule(rule_id="AEGIS-S017", version="1.0", confidence="high",
+               name="Scheduled Task Creation", severity="HIGH",
+               description="Scheduled task created; CRITICAL when the action runs a script interpreter or LOLBin.",
+               mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Scheduled Task/Job",
+               mitre_technique_id="T1053.005", fn=rule_scheduled_task_creation),
+    StaticRule(rule_id="AEGIS-S018", version="1.0", confidence="medium",
+               name="Discovery Commands", severity="MEDIUM",
+               description="Local account/group/privilege enumeration (whoami /all, net user, net localgroup, quser).",
+               mitre_tactic_id="TA0007", mitre_tactic="Discovery", mitre_technique="System Owner/User Discovery",
+               mitre_technique_id="T1033", fn=rule_discovery_commands),
 ]
 
 ALL_RULES = [s.fn for s in STATIC_RULES]
@@ -986,6 +1121,24 @@ RULE_NOTES: dict[str, dict] = {
         "exceptions": ("Software updates/telemetry toward known public IPs",
                        "Browsers with routine HTTPS connections"),
         "allowlist": ("Domains/IPs for approved software updates (from inventory)"),
+    },
+    "AEGIS-S016": {
+        "exceptions": ("Signed installers and updaters that legitimately register an autostart entry",
+                       "Corporate software deployment that pins a Run key as part of the package"),
+        "allowlist": ("Change-management record for the Run key (owner, software, date)",
+                      "Publisher/signature of the writing process, when the sensor can resolve it"),
+    },
+    "AEGIS-S017": {
+        "exceptions": ("Task Scheduler actions configured by IT maintenance windows",
+                       "Backup/patch jobs created by signed management agents"),
+        "allowlist": ("Task names under the company's naming convention",
+                      "Signed management agent as the task creator"),
+    },
+    "AEGIS-S018": {
+        "exceptions": ("Help desk and support scripts that enumerate local users as part of triage",
+                       "Login scripts and monitoring agents"),
+        "allowlist": ("Approved administrative scripts versioned by the SOC",
+                      "Interactive operator sessions covered by a canary rule"),
     },
     "AEGIS-S015": {
         "exceptions": ("Vendors using similar names (e.g. legitimate 'GoogleUpdate')"),

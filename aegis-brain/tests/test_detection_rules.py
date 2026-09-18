@@ -9,6 +9,8 @@ from app.rules.rule_definitions import (
     rule_suspicious_parent_child, rule_malware_family,
     rule_persistence_path, rule_dll_hijack_path, rule_lolbin_usage,
     rule_high_thread_count, rule_network_beacon, rule_persistence_autorun,
+    rule_autorun_registry_write, rule_scheduled_task_creation,
+    rule_discovery_commands,
     CREDENTIAL_TOOLS, SCANNER_TOOLS, EXPLOIT_TOOLS, POST_EXPLOIT_TOOLS,
     RAT_TOOLS, RANSOMWARE, EVASION_TOOLS, INFO_STEALERS,
     SUSPICIOUS_PATHS, SCRIPT_INTERPRETERS, SUSPICIOUS_PARENT_CHILD,
@@ -574,6 +576,123 @@ class TestAuditAutorunFuzzy:
         for name in ("svch0st.exe", "scvhost.exe", "mssecsvc.exe"):
             assert rule_persistence_autorun(
                 make_event(name, process_path="")).triggered, name
+
+
+class TestRuleAutorunRegistryWrite:
+    """Persistenza a runtime vista dalla command line.
+
+    Prima non esisteva: il Run key era coperto solo dallo snapshot read-only
+    all'avvio (evidenza, non alert), quindi scriverne uno a runtime non
+    generava nulla.
+    """
+
+    def test_reg_add_run_key_flagged(self):
+        r = rule_autorun_registry_write(make_event(
+            "reg.exe",
+            command_line=r"reg.exe add HKCU\Software\Microsoft\Windows\CurrentVersion\Run "
+                         r"/v Updater /t REG_SZ /d C:\Users\v\AppData\Local\Temp\x.exe /f"))
+        assert r.triggered and r.severity == "HIGH"
+        assert r.mitre_technique_id == "T1547.001"
+
+    def test_powershell_new_itemproperty_on_run_key_flagged(self):
+        r = rule_autorun_registry_write(make_event(
+            "powershell.exe",
+            command_line=r"powershell -c New-ItemProperty -Path 'HKCU:\Software\Microsoft"
+                         r"\Windows\CurrentVersion\Run' -Name X -Value C:\Temp\x.exe"))
+        assert r.triggered
+
+    def test_runonce_and_policy_run_flagged(self):
+        for key in ("RunOnce", "Policies\\Explorer\\Run"):
+            assert rule_autorun_registry_write(make_event(
+                "reg.exe",
+                command_line=f"reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion"
+                             f"\\{key} /v X /d C:\\x.exe /f")).triggered, key
+
+    def test_reg_query_is_read_and_must_not_fire(self):
+        """La lettura del registro non e' persistenza."""
+        r = rule_autorun_registry_write(make_event(
+            "reg.exe",
+            command_line=r"reg.exe query HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Updater"))
+        assert not r.triggered
+
+    def test_empty_command_line_not_flagged(self):
+        assert not rule_autorun_registry_write(make_event("reg.exe")).triggered
+
+    def test_unrelated_registry_write_not_flagged(self):
+        r = rule_autorun_registry_write(make_event(
+            "reg.exe",
+            command_line=r"reg.exe add HKCU\Software\Vendor\App /v Theme /d dark /f"))
+        assert not r.triggered
+
+
+class TestRuleScheduledTaskCreation:
+    def test_schtasks_create_flagged(self):
+        r = rule_scheduled_task_creation(make_event(
+            "schtasks.exe",
+            command_line=r"schtasks.exe /create /tn Updater /tr C:\Windows\System32\notepad.exe "
+                         r"/sc once /st 23:59 /f"))
+        assert r.triggered and r.severity == "HIGH"
+        assert r.mitre_technique_id == "T1053.005"
+
+    def test_task_running_powershell_is_critical(self):
+        r = rule_scheduled_task_creation(make_event(
+            "schtasks.exe",
+            command_line="schtasks /create /tn X /tr \"powershell -nop -w hidden -e ABC\" "
+                         "/sc minute /mo 5 /f"))
+        assert r.triggered and r.severity == "CRITICAL"
+
+    def test_schtasks_query_is_read_and_must_not_fire(self):
+        r = rule_scheduled_task_creation(make_event(
+            "schtasks.exe", command_line="schtasks.exe /query /tn Updater"))
+        assert not r.triggered
+
+    def test_empty_command_line_not_flagged(self):
+        assert not rule_scheduled_task_creation(make_event("schtasks.exe")).triggered
+
+
+class TestRuleDiscoveryCommands:
+    def test_whoami_all_flagged(self):
+        r = rule_discovery_commands(make_event("whoami.exe", command_line="whoami.exe /all"))
+        assert r.triggered and r.severity == "MEDIUM"
+        assert r.mitre_tactic_id == "TA0007"
+
+    def test_whoami_priv_flagged(self):
+        assert rule_discovery_commands(
+            make_event("whoami.exe", command_line="whoami /priv")).triggered
+
+    def test_net_user_flagged(self):
+        assert rule_discovery_commands(
+            make_event("net.exe", command_line="net user")).triggered
+
+    def test_net_localgroup_flagged(self):
+        assert rule_discovery_commands(
+            make_event("net.exe", command_line="net localgroup")).triggered
+
+    def test_plain_whoami_not_flagged(self):
+        """`whoami` nudo e' ovunque: build, installer, script."""
+        assert not rule_discovery_commands(
+            make_event("whoami.exe", command_line="whoami")).triggered
+
+    def test_unrelated_process_not_flagged(self):
+        """La regola guarda processi di enumerazione, non una stringa qualsiasi."""
+        assert not rule_discovery_commands(make_event(
+            "python.exe", command_line="python -c \"print('whoami /all')\"")).triggered
+
+    def test_empty_command_line_not_flagged(self):
+        assert not rule_discovery_commands(make_event("whoami.exe")).triggered
+
+    def test_extra_whitespace_still_flagged(self):
+        assert rule_discovery_commands(make_event(
+            "whoami.exe", command_line="  whoami.exe    /all  ")).triggered
+
+
+class TestNewRulesAreRegistered:
+    def test_new_rule_ids_present(self):
+        from app.rules.rule_definitions import STATIC_RULES, RULE_NOTES
+        ids = {s.rule_id for s in STATIC_RULES}
+        for rid in ("AEGIS-S016", "AEGIS-S017", "AEGIS-S018"):
+            assert rid in ids, f"{rid} non registrata"
+            assert rid in RULE_NOTES, f"{rid} senza note/eccezioni per la UI"
 
 
 @pytest.mark.asyncio
