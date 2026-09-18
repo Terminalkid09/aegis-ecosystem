@@ -51,6 +51,11 @@ from app.database.models import AEGIS_TOTAL_DISCLAIMER, TotalReport
 router = APIRouter(tags=["Aegis Total"])
 logger = get_logger(__name__)
 
+# Versione del motore di analisi. Cambiare le regole o i pesi di punteggio puo'
+# cambiare un verdetto, quindi entra nella chiave della cache: i report salvati
+# da una versione precedente vengono rigenerati invece di essere riproposti.
+ENGINE_VERSION = "3.1"
+
 # ─── Static signatures ────────────────────────────────────────────────────────
 
 CRACK_NAMES = re.compile(r"(crack|keygen|keymaker|patcher|serial|activator|loader).*?\.(exe|dll|zip)$", re.I)
@@ -69,17 +74,40 @@ SECRET_PATTERNS: Dict[str, re.Pattern] = {
     "connection_string":re.compile(r"(?i)(mongodb|mysql|postgresql|redis|amqp)://[^\s\"'<>]+"),
 }
 
+# Ogni alternativa che unisce due parole usa `\b` e un salto LIMITATO: senza,
+# `etw.*patch` matchava 895 byte di nomi di API Windows dentro notepad.exe
+# ("etWindowExtEx" contiene "etw", poi un "patch" lontano) e il file finiva
+# "malicious". Un `.*` illimitato su stringhe concatenate e' un generatore di
+# falsi positivi, non una detection.
 SUSPICIOUS_STRINGS: List[re.Pattern] = [
-    re.compile(r"(?i)(mimikatz|bloodhound|sharphound|rubeus|sekurlsa|kerberoast)"),
-    re.compile(r"(?i)(powershell.*-enc|-encodedcommand|frombase64string|invoke-mimikatz|invoke-expression)"),
-    re.compile(r"(?i)(disableamsi|amsi.*patch|etw.*patch|unhook.*ntdll|patch.*amsi)"),
-    re.compile(r"(?i)(keylog|clipboardlog|credential.*dump|lsass.*dump|procdump)"),
-    re.compile(r"(?i)(reverse.*shell|bind.*shell|nc\.exe|ncat|cobalt.*strike|metasploit|meterpreter)"),
-    re.compile(r"(?i)(virtualalloc.*rwx|writeprocessmemory|createremotethread|ntcreatethreadex)"),
-    re.compile(r"(?i)(regsvr32.*scrobj|mshta.*vbscript|certutil.*decode|bitsadmin.*transfer)"),
-    re.compile(r"(?i)(wget.*\|\s*(bash|sh)|curl.*\|\s*(bash|sh))"),
-    re.compile(r"(?i)(xmrig|stratum\+tcp|moneropool|ethermine|nanopool)"),
+    re.compile(r"(?i)\b(mimikatz|bloodhound|sharphound|rubeus|sekurlsa|kerberoast)\b"),
+    re.compile(r"(?i)(\bpowershell\b.{0,60}-enc|\b-encodedcommand\b|\bfrombase64string\b|\binvoke-mimikatz\b|\binvoke-expression\b)"),
+    # `\betw` (senza confine in coda) e non `\betw\b`: le stringhe reali sono
+    # `EtwEventWrite` / `AmsiScanBuffer`, dove il termine e' un prefisso.
+    re.compile(r"(?i)(\bdisableamsi\w*|\bamsi\w*.{0,40}\bpatch\w*|\bpatch\w*.{0,40}\bamsi\w*|\betw\w*.{0,40}\bpatch\w*|\bpatch\w*.{0,40}\betw\w*|\bunhook\w*.{0,40}\bntdll\b)"),
+    re.compile(r"(?i)(\bkeylog\w*|\bclipboardlog\w*|\bcredential\w*.{0,40}\bdump\w*|\blsass\b.{0,40}\bdump\w*|\bprocdump\b)"),
+    re.compile(r"(?i)(\breverse\b.{0,30}\bshell\b|\bbind\b.{0,30}\bshell\b|\bnc\.exe\b|\bncat\b|\bcobalt\b.{0,30}\bstrike\b|\bmetasploit\b|\bmeterpreter\b)"),
+    re.compile(r"(?i)(\bvirtualalloc\b.{0,40}\brwx\b|\bwriteprocessmemory\b|\bcreateremotethread\b|\bntcreatethreadex\b)"),
+    re.compile(r"(?i)(\bregsvr32\b.{0,60}\bscrobj\b|\bmshta\b.{0,60}\bvbscript\b|\bcertutil\b.{0,60}\bdecode\b|\bbitsadmin\b.{0,60}\btransfer\b)"),
+    re.compile(r"(?i)(\bwget\b.{0,60}\|\s*(bash|sh)\b|\bcurl\b.{0,60}\|\s*(bash|sh)\b)"),
+    re.compile(r"(?i)\b(xmrig|stratum\+tcp|moneropool|ethermine|nanopool)\b"),
 ]
+
+# Marker di esecuzione PowerShell: senza almeno uno di questi la sola parola
+# "powershell" e' un riferimento, non un dropper (la contengono binari firmati
+# Microsoft e interi manuali).
+POWERSHELL_EXEC_MARKERS = (
+    b"-encodedcommand", b"-enc ", b"invoke-expression", b"frombase64string",
+    b"-nop", b"-w hidden", b"-windowstyle hidden", b"add-type",
+    b"-executionpolicy bypass", b"iex (", b"iex(", b"new-object net.webclient",
+    b"downloadstring", b"downloadfile", b"invoke-webrequest", b"-noprofile",
+)
+
+# Un quad `x.y.0.0` in un binario e' quasi sempre un numero di versione, non un
+# host: `version="5.1.0.0"` nel manifest di notepad.exe finiva negli IOC come
+# "indirizzo IP incorporato". Un indirizzo di rete .0.0 non e' un indicatore
+# utile, quindi scartarlo costa poco e toglie di mezzo la classe di rumore.
+VERSIONLIKE_IPV4 = re.compile(r"^\d{1,3}\.\d{1,3}\.0\.0$")
 
 IOC_PATTERNS: Dict[str, re.Pattern] = {
     "ipv4":         re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"),
@@ -132,6 +160,18 @@ SUSPICIOUS_IMPORTS: Dict[str, tuple] = {
     "SetThreadContext":     ("Process Injection", "T1055.003"),
     "QueueUserAPC":         ("Process Injection", "T1055.004"),
 }
+
+# API dual-use: le importa qualunque binario Windows normale (notepad.exe ne
+# usa tre). Restano nel report perche' sono contesto utile, ma pesano poco e da
+# sole non possono portare un file a "malicious".
+DUAL_USE_IMPORTS = frozenset({
+    "RegSetValueEx", "CreateService", "ShellExecute", "WinExec",
+    "CreateProcessW", "WinHttpOpen", "InternetOpenUrl", "CryptEncrypt",
+    "GetAsyncKeyState", "SetWindowsHookEx", "NtQueryInformationProcess",
+})
+IMPORT_WEIGHT_SPECIFIC = 15
+IMPORT_WEIGHT_DUAL_USE = 5
+IMPORT_SCORE_CAP = 30  # sotto la soglia "malicious" (60)
 
 # Macro/shell markers usati dall'analisi Office (OLE + OOXML + .rtf)
 VBA_AUTORUN = [
@@ -221,6 +261,9 @@ def _iocs_from(text: str, limit: int = 15) -> Dict[str, List[str]]:
     for name, pat in IOC_PATTERNS.items():
         matches = list(set(pat.findall(text)))[:limit]
         filtered = [m for m in matches if m not in safe]
+        if name == "ipv4":
+            # Numeri di versione (5.1.0.0) non sono indicatori di compromissione.
+            filtered = [m for m in filtered if not VERSIONLIKE_IPV4.match(m)]
         if filtered:
             iocs[name] = filtered
     return iocs
@@ -364,10 +407,21 @@ def _analyze_pe(raw: bytes) -> Dict[str, Any]:
         if pdb:
             result["pdb_path"] = pdb.group(0)[:255]
 
+        import_score = 0
         for fn, (cap, tid) in SUSPICIOUS_IMPORTS.items():
             if any(fn.lower() in s.lower() for s in strings):
-                result["imports_suspicious"].append({"function": fn, "capability": cap, "mitre": tid})
-                result["score_contribution"] = min(result["score_contribution"] + 15, 100)
+                dual = fn in DUAL_USE_IMPORTS
+                result["imports_suspicious"].append({
+                    "function": fn, "capability": cap, "mitre": tid,
+                    "weight": IMPORT_WEIGHT_DUAL_USE if dual else IMPORT_WEIGHT_SPECIFIC,
+                })
+                import_score += IMPORT_WEIGHT_DUAL_USE if dual else IMPORT_WEIGHT_SPECIFIC
+        if import_score:
+            # Gli import da soli non portano a "malicious" (60): pesano al
+            # massimo IMPORT_SCORE_CAP. notepad.exe importa tre API comuni e
+            # con il vecchio peso fisso chiudeva a 45+"malicious".
+            result["score_contribution"] = min(
+                result["score_contribution"] + min(import_score, IMPORT_SCORE_CAP), 100)
 
         for pat in SUSPICIOUS_STRINGS:
             m = pat.search(full_str)
@@ -388,9 +442,20 @@ def _analyze_pe(raw: bytes) -> Dict[str, Any]:
 
         lowered = raw.lower()
         if b"powershell" in lowered or b"invoke-expression" in lowered:
-            result["findings"].append({"type": "embedded_powershell", "severity": "high",
-                                       "detail": "PE contains embedded PowerShell — possible dropper.", "mitre": "T1059.001"})
-            result["score_contribution"] = min(result["score_contribution"] + 30, 100)
+            # Solo un riferimento non basta per un "high": la parola compare in
+            # binari firmati Microsoft e in qualunque documentazione. Il peso
+            # pieno lo prende quando c'e' un marker di esecuzione.
+            exec_like = any(m in lowered for m in POWERSHELL_EXEC_MARKERS)
+            result["findings"].append({
+                "type": "embedded_powershell",
+                "severity": "high" if exec_like else "low",
+                "detail": ("PE contains PowerShell with execution flags — possible dropper."
+                           if exec_like else
+                           "References to PowerShell without execution flags (common in signed binaries and docs)."),
+                "mitre": "T1059.001",
+            })
+            if exec_like:
+                result["score_contribution"] = min(result["score_contribution"] + 30, 100)
 
     except Exception as ex:
         result["parse_error"] = str(ex)
@@ -958,6 +1023,36 @@ def _analyze_binary(raw: bytes, fmt: str) -> Dict[str, Any]:
     }
 
 
+def _malformed_container(raw: bytes, fmt: str, detail: Dict[str, Any]) -> Dict[str, Any]:
+    """Magic riconosciuto ma header non parabile: si analizza comunque.
+
+    Prima questo caso usciva con `score 0` e verdict "clean": un file con i byte
+    `MZ` e un header corrotto o troncato (tecnica di evasione da manuale)
+    spegneva l'analisi perche' il dispatcher aveva gia' scelto il parser PE e il
+    ramo generico non girava mai. Un campione con dentro `mimikatz`,
+    `-EncodedCommand` e `CreateRemoteThread` risultava pulito.
+    """
+    generic = _analyze_binary(raw, f"{fmt} (malformed)")
+    findings: List[Dict[str, Any]] = [{
+        "type": "malformed_header", "severity": "medium",
+        "detail": (f"{fmt} magic recognised but the header does not parse: analyzed "
+                   "generically instead of being skipped."),
+        "mitre": "T1027",
+    }]
+    findings.extend(detail.get("findings") or [])
+    findings.extend(generic.get("findings") or [])
+    generic["findings"] = findings
+    generic["score"] = min(int(generic.get("score") or 0) + 15, 100)
+    generic["format"] = fmt
+    generic["malformed"] = True
+    return generic
+
+
+def _parse_failed(detail: Dict[str, Any]) -> bool:
+    """Il parser ha riconosciuto il formato ma non ha estratto struttura."""
+    return not detail.get("arch") and not detail.get("sections") and not detail.get("kind")
+
+
 def _is_text_file(name: str, content: bytes) -> bool:
     low = name.lower()
     base = low.split("/")[-1]
@@ -1046,17 +1141,23 @@ def _analyze_bytes(raw: bytes, name: str, *, allow_nested: bool, nested_depth: i
 
     if fmt == "pe":
         detail = _analyze_pe(raw)
+        if _parse_failed(detail):
+            return _malformed_container(raw, "PE", detail)
         detail.update({"kind": "binary", "size": len(raw), "format": "PE",
                        "score": detail.pop("score_contribution", 0),
                        "note": "PE: sezioni/entropia, import, .NET, firma, IOC."})
         return detail
     if fmt == "elf":
         detail = _analyze_elf(raw)
+        if _parse_failed(detail):
+            return _malformed_container(raw, "ELF", detail)
         detail.update({"kind": "binary", "size": len(raw), "format": "ELF",
                        "score": detail.pop("score_contribution", 0)})
         return detail
     if fmt == "macho":
         detail = _analyze_macho(raw)
+        if _parse_failed(detail):
+            return _malformed_container(raw, "Mach-O", detail)
         detail.update({"kind": "binary", "size": len(raw), "format": "Mach-O",
                        "score": detail.pop("score_contribution", 0)})
         return detail
@@ -1215,12 +1316,21 @@ async def upload_analyze(
 
     sha256 = hashlib.sha256(raw).hexdigest()
 
-    # SHA256 dedup (cache)
+    # SHA256 dedup (cache) INVALIDATA dal cambio di engine: il report vecchio
+    # resta altrimenti servito per sempre, e dopo una correzione delle regole
+    # l'utente continuerebbe a vedere il verdetto precedente (notepad.exe
+    # restava "malicious" con il vecchio punteggio).
     existing = await db.execute(select(TotalReport).where(TotalReport.sha256 == sha256))
     cached = existing.scalars().first()
     if cached:
-        return {"sha256": sha256, "cached": True, "score": cached.score,
-                "verdict": cached.verdict, "report_id": cached.id}
+        cached_engine = (cached.engines or {}).get("static_lite", {}).get("version")
+        if cached_engine == ENGINE_VERSION:
+            return {"sha256": sha256, "cached": True, "score": cached.score,
+                    "verdict": cached.verdict, "report_id": cached.id}
+        logger.info("total: report %s rigenerato (engine %s -> %s)",
+                    sha256[:12], cached_engine, ENGINE_VERSION)
+        await db.delete(cached)
+        await db.flush()
 
     files_out: List[Dict[str, Any]] = []
     total_score = 0
@@ -1332,7 +1442,7 @@ async def upload_analyze(
     verdict = "clean" if total_score < 20 else ("suspicious" if total_score < 60 else "malicious")
 
     engines = {
-        "static_lite": {"score": total_score, "version": "3.0"},
+        "static_lite": {"score": total_score, "version": ENGINE_VERSION},
         "pe_parser": {"enabled": any(f.get("format") == "PE" for f in files_out)},
         "elf_parser": {"enabled": any(f.get("format") == "ELF" for f in files_out)},
         "macho_parser": {"enabled": any(f.get("format") == "Mach-O" for f in files_out)},

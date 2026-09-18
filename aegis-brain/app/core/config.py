@@ -133,7 +133,7 @@ class Settings(BaseSettings):
     # se MTLS_MODE != required. Default false (dev/lab liberi).
     ENTERPRISE_STRICT: bool = False
 
-    # Aegis Total (VirusTotal interno + code viewer)
+    # Aegis Total (analisi statica: nessun decompilatore, solo struttura/stringhe/IOC)
     TOTAL_MAX_FILE_MB: int = 100
     TOTAL_MAX_ZIP_MB: int = 200
     TOTAL_MAX_FILES_PER_ZIP: int = 2000

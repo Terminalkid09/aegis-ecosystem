@@ -400,7 +400,10 @@ class DeployCredential(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-# ─── M2: Aegis Total (internal VirusTotal + code viewer) ───────────────
+# ─── M2: Aegis Total (internal static analyzer) ─────────────────────────
+# Non e' un decompilatore: il "preview" mostra il contenuto del file caricato
+# (utile per script e sorgenti), i binari si leggono per struttura (sezioni,
+# entropia, import, firma, stringhe, IOC), non per codice.
 
 AEGIS_TOTAL_DISCLAIMER = (
     "Aegis Total mostra metadati, disassemblato/decompilato approssimativo e IOC "
