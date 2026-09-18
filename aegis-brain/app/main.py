@@ -19,6 +19,9 @@ from fastapi import Response as FastAPIResponse
 
 from app.services.redis_consumer import RedisConsumer
 from app.services.alert_enrichment import auto_enrich_new_alerts
+from app.api.v1.auth import SESSION_COOKIE, SESSION_COOKIE_PATH
+from app.core.security import create_access_token, decode_access_token, is_token_blacklisted
+from datetime import datetime, timezone
 
 logger = get_logger(__name__)
 _consumer: RedisConsumer | None = None
@@ -279,6 +282,57 @@ async def security_headers_middleware(request: Request, call_next):
     if request.url.path.startswith("/api/"):
         response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none';"
     return response
+
+@app.middleware("http")
+async def sliding_session_middleware(request: Request, call_next):
+    """Rinnova il cookie di sessione finche' l'utente lavora.
+
+    Il JWT dura JWT_EXPIRE_MINUTES e non c'era alcun rinnovo: un analista con la
+    dashboard aperta veniva riportato al login a meta' turno, e il sintomo
+    riportato era "ricarico la pagina e mi richiede l'accesso". Quando il token
+    ha consumato piu' di meta' della sua vita la risposta ne emette uno nuovo,
+    quindi la sessione scivola in avanti con l'attivita' e scade davvero solo
+    dopo un periodo di inattivita' pari alla TTL.
+
+    Fail-soft per costruzione: qualunque problema qui non deve rompere una
+    risposta che l'endpoint ha gia' prodotto. Il refresh avviene solo su una
+    risposta riuscita e con un token non revocato, altrimenti si prolungherebbe
+    una sessione che il SOC ha gia' chiuso.
+    """
+    response = await call_next(request)
+    try:
+        if response.status_code >= 400 or not request.url.path.startswith("/api/"):
+            return response
+        token = request.cookies.get(SESSION_COOKIE)
+        if not token:
+            return response
+        payload = decode_access_token(token)
+        if not payload:
+            return response
+        exp = payload.get("exp")
+        if not exp:
+            return response
+        ttl_s = max(int(settings.JWT_EXPIRE_MINUTES), 1) * 60
+        if int(exp) - int(datetime.now(timezone.utc).timestamp()) > ttl_s // 2:
+            return response
+        jti = payload.get("jti")
+        if jti and await is_token_blacklisted(jti):
+            return response
+        fresh, _, _ = create_access_token(
+            subject=str(payload.get("sub")), role=str(payload.get("role") or "user"))
+        response.set_cookie(
+            key=SESSION_COOKIE,
+            value=fresh,
+            httponly=True,
+            samesite="strict",
+            secure=not settings.DEBUG,
+            max_age=ttl_s,
+            path=SESSION_COOKIE_PATH,
+        )
+    except Exception as exc:  # mai un 500 per il rinnovo
+        logger.warning(f"session refresh skipped: {exc}")
+    return response
+
 
 # CORS
 allowed_origins = [origin.strip().rstrip("/") for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]

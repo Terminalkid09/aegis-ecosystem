@@ -27,16 +27,31 @@ class LoginRequest(BaseModel):
     email: str = Field(..., min_length=5, max_length=255)
     password: str = Field(..., min_length=1, max_length=128)
 
+SESSION_COOKIE = "aegis_token"
+SESSION_COOKIE_PATH = "/api/"
+
+
 def _set_auth_cookie(response: Response, token: str):
-    """Set JWT as httpOnly, Secure (in production), SameSite=Strict cookie."""
+    """Set JWT as httpOnly, Secure (in production), SameSite=Strict cookie.
+
+    `max_age` is derived from JWT_EXPIRE_MINUTES and not hardcoded: it used to
+    be a literal 3600 next to a configurable TTL, so changing the setting left
+    the browser dropping the cookie after an hour anyway.
+    """
+    # A cookie left by an older build on a different path (/) would be sent
+    # *alongside* the current one, and the server reads the last value for a
+    # repeated name: with a stale duplicate every request answered 401 until
+    # the browser state was cleared by hand. Expire it on every login.
+    response.delete_cookie(key=SESSION_COOKIE, path="/", httponly=True,
+                           samesite="strict", secure=not settings.DEBUG)
     response.set_cookie(
-        key="aegis_token",
+        key=SESSION_COOKIE,
         value=token,
         httponly=True,
         samesite="strict",
         secure=not settings.DEBUG,  # True in production with HTTPS
-        max_age=3600,  # 1 hour
-        path="/api/",
+        max_age=settings.JWT_EXPIRE_MINUTES * 60,
+        path=SESSION_COOKIE_PATH,
     )
 
 @router.post("/register", response_model=TokenResponse)
@@ -97,7 +112,7 @@ async def logout(
     db: AsyncSession = Depends(get_db),
 ):
     """Blacklist the current JWT and clear the auth cookie."""
-    token = request.cookies.get("aegis_token")
+    token = request.cookies.get(SESSION_COOKIE)
     if not token:
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
@@ -113,13 +128,15 @@ async def logout(
                         status_code=503,
                         detail="Token revocation service unavailable",
                     )
-    response.delete_cookie(
-        key="aegis_token",
-        path="/api/",
-        httponly=True,
-        samesite="strict",
-        secure=not settings.DEBUG,
-    )
+    # Both paths: the current one and the legacy one a duplicate could live on.
+    for path in (SESSION_COOKIE_PATH, "/"):
+        response.delete_cookie(
+            key=SESSION_COOKIE,
+            path=path,
+            httponly=True,
+            samesite="strict",
+            secure=not settings.DEBUG,
+        )
     return {"status": "logged_out", "detail": "Token blacklisted and cookie cleared."}
 
 @router.get("/me")

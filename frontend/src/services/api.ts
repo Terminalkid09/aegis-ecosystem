@@ -13,14 +13,18 @@ export const apiClient = axios.create({
 // Expired session: a 401 must not leave the UI stuck in error on every page
 // (the symptom was "sometimes other pages break too"): the auth state is
 // cleared so App.tsx shows the login again. Login/me are excluded because a
-// 401 there is the expected answer, not a lost session.
+// 401 there is the expected answer, not a lost session, and the session is
+// cleared only when the app believed it had one (sessionHint): without that, a
+// 401 from a page opened with no session at all would wipe a valid login.
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error?.response?.status
     const url: string = error?.config?.url || ''
-    if (status === 401 && !url.includes('/auth/login') && !url.includes('/auth/me')) {
-      useAppStore.getState().logout()
+    const store = useAppStore.getState()
+    if (status === 401 && store.sessionHint
+        && !url.includes('/auth/login') && !url.includes('/auth/me')) {
+      store.logout()
     }
     return Promise.reject(error)
   },
