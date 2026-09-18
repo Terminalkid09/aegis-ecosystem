@@ -93,6 +93,6 @@ def score_impact(scan_result: Dict[str, Any], current_score: int) -> Tuple[int, 
         findings.append({
             "type": "yara_signature_match",
             "severity": "high",
-            "detail": f"Regola YARA '{m['rule']}' (fonte: {m['rule_name']}) ha fatto match sul campione",
+            "detail": f"YARA rule '{m['rule']}' (source: {m['rule_name']}) matched the sample",
         })
     return min(score, 100), findings

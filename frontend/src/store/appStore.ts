@@ -55,6 +55,10 @@ interface AppState {
   token: string | null
   login: (token: string, user: User) => void
   logout: () => void
+  // True once a login succeeded on this browser: it tells the app there is a
+  // session cookie worth validating on the next load. A first-time visitor has
+  // no session, so probing /auth/me would only produce a guaranteed 401.
+  sessionHint: boolean
 
   // Live WS data
   liveStats: LiveStats | null
@@ -82,14 +86,15 @@ export const useAppStore = create<AppState>()(
       // Auth
       user: null,
       token: null,
+      sessionHint: false,
       setUser: (user) => set({ user }),
       login: (token, user) => {
         // The server sets an HttpOnly cookie. The token stays in memory only
         // for backwards-compatible state shape and is never persisted.
-        set({ token: token || 'cookie-session', user })
+        set({ token: token || 'cookie-session', user, sessionHint: true })
       },
       logout: () => {
-        set({ token: null, user: null })
+        set({ token: null, user: null, sessionHint: false })
       },
 
       // Live stats
@@ -121,6 +126,7 @@ export const useAppStore = create<AppState>()(
         settings: state.settings,
         sidebarCollapsed: state.sidebarCollapsed,
         user: state.user,
+        sessionHint: state.sessionHint,
       }),
     }
   )

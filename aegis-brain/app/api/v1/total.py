@@ -148,29 +148,29 @@ OFFICE_EXEC_MARKERS = ["ddeauto", "dde ", "microsoft excel 4.0 macro", "xm|", "m
 # Formati che l'engine dichiara alla UI (endpoint /formats)
 SUPPORTED_FORMATS: List[Dict[str, Any]] = [
     {"id": "pe", "label": "Windows PE / .NET", "extensions": [".exe", ".dll", ".sys", ".scr", ".cpl", ".ocx", ".msi"],
-     "analysis": "header, sezioni+entropia, import sospetti, CLR/.NET, firma, IOCs, PDB"},
+     "analysis": "header, sections+entropy, suspicious imports, CLR/.NET, signature, IOCs, PDB"},
     {"id": "elf", "label": "Linux ELF", "extensions": [".elf", ".so", ".ko", ""],
-     "analysis": "architettura, entropia, stringhe sospette, IOCs"},
+     "analysis": "architecture, entropy, suspicious strings, IOCs"},
     {"id": "macho", "label": "macOS Mach-O / fat", "extensions": [".macho", ".dylib"],
-     "analysis": "magic+famiglia CPU, entropia, stringhe sospette, IOCs"},
+     "analysis": "magic+CPU family, entropy, suspicious strings, IOCs"},
     {"id": "office", "label": "Office OLE / OOXML", "extensions": [".doc", ".xls", ".ppt", ".docm", ".xlsm", ".pptm", ".docx", ".xlsx", ".pptx"],
-     "analysis": "macro VBA, auto-exec, DDE, oggetti/embed esterni, MZ incorporato"},
+     "analysis": "VBA macros, auto-exec, DDE, external objects/embeds, embedded MZ"},
     {"id": "pdf", "label": "PDF", "extensions": [".pdf"],
-     "analysis": "JavaScript, /OpenAction, /Launch, allegati, XFA, azioni automatiche"},
-    {"id": "zip", "label": "Archivio ZIP (incl. APK/JAR/OOXML)", "extensions": [".zip", ".jar", ".apk", ".war", ".ear", ".whl", ".xpi", ".ipa"],
-     "analysis": "contenuto per-file, annidamento depth 1, macro VBA, classes.dex, bounds anti zip-bomb"},
-    {"id": "tar", "label": "Archivi tar/gzip/bzip2/xz", "extensions": [".tar", ".gz", ".tgz", ".bz2", ".xz", ".txz"],
-     "analysis": "listing + analisi per-file (bounded)"},
-    {"id": "archive_other", "label": "7z / RAR / ISO / altri contenitori", "extensions": [".7z", ".rar", ".iso", ".cab", ".deb", ".rpm"],
-     "analysis": "identificazione formato, entropia, stringhe/IOC (estrazione completa in Phase 2)"},
+     "analysis": "JavaScript, /OpenAction, /Launch, attachments, XFA, automatic actions"},
+    {"id": "zip", "label": "ZIP archive (incl. APK/JAR/OOXML)", "extensions": [".zip", ".jar", ".apk", ".war", ".ear", ".whl", ".xpi", ".ipa"],
+     "analysis": "per-file content, nesting depth 1, VBA macros, classes.dex, anti zip-bomb bounds"},
+    {"id": "tar", "label": "tar/gzip/bzip2/xz archives", "extensions": [".tar", ".gz", ".tgz", ".bz2", ".xz", ".txz"],
+     "analysis": "listing + per-file analysis (bounded)"},
+    {"id": "archive_other", "label": "7z / RAR / ISO / other containers", "extensions": [".7z", ".rar", ".iso", ".cab", ".deb", ".rpm"],
+     "analysis": "format identification, entropy, strings/IOC (full extraction in Phase 2)"},
     {"id": "class", "label": "Java class / WASM", "extensions": [".class", ".wasm"],
-     "analysis": "magic, architettura/versione, stringhe, IOCs"},
-    {"id": "script", "label": "Script e sorgenti", "extensions": sorted(TEXT_EXTS),
-     "analysis": "secret scan, heuristics, IOCs (sempre con redazione dei segreti)"},
-    {"id": "data", "label": "Database / pcap / LNK / RTF / immagini", "extensions": [".sqlite", ".db", ".pcap", ".pcapng", ".lnk", ".rtf", ".png", ".jpg", ".gif", ".webp", ".bmp", ".ico"],
-     "analysis": "identificazione, entropia, stringhe, IOCs"},
-    {"id": "binary", "label": "Qualunque altro file", "extensions": ["*"],
-     "analysis": "identificazione magic, entropia, stringhe, secret scan su campioni testuali"},
+     "analysis": "magic, architecture/version, strings, IOCs"},
+    {"id": "script", "label": "Scripts and source code", "extensions": sorted(TEXT_EXTS),
+     "analysis": "secret scan, heuristics, IOCs (always with secret redaction)"},
+    {"id": "data", "label": "Database / pcap / LNK / RTF / images", "extensions": [".sqlite", ".db", ".pcap", ".pcapng", ".lnk", ".rtf", ".png", ".jpg", ".gif", ".webp", ".bmp", ".ico"],
+     "analysis": "identification, entropy, strings, IOCs"},
+    {"id": "binary", "label": "Any other file", "extensions": ["*"],
+     "analysis": "magic identification, entropy, strings, secret scan on textual samples"},
 ]
 
 # ─── Analysis helpers ─────────────────────────────────────────────────────────
@@ -327,7 +327,7 @@ def _analyze_pe(raw: bytes) -> Dict[str, Any]:
                 if not result["signed"]:
                     result["findings"].append({
                         "type": "unsigned_binary", "severity": "low",
-                        "detail": "Nessun certificato Authenticode: comune nei dropper/loader.",
+                        "detail": "No Authenticode certificate: common in droppers/loaders.",
                     })
 
         sections, _, overlay_start = _pe_sections(raw, opt_off + opt_hdr_size, num_sections)
@@ -350,7 +350,7 @@ def _analyze_pe(raw: bytes) -> Dict[str, Any]:
             sev = "high" if (overlay_size > 65536 and embedded > 1) else "low"
             result["findings"].append({
                 "type": "overlay_data", "severity": sev,
-                "detail": f"{overlay_size} byte di dati oltre l'ultima sezione (payload appeso / installer SFX).",
+                "detail": f"{overlay_size} bytes of data past the last section (appended payload / SFX installer).",
             })
             if sev == "high":
                 result["score_contribution"] = min(result["score_contribution"] + 20, 100)
@@ -378,18 +378,18 @@ def _analyze_pe(raw: bytes) -> Dict[str, Any]:
         if result.get("dotnet"):
             result["findings"].append({
                 "type": "dotnet_assembly", "severity": "low",
-                "detail": "Assemblaggio .NET (CLR header presente): possibile loading da PowerShell/reflection.",
+                "detail": ".NET assembly (CLR header present): possible loading via PowerShell/reflection.",
                 "mitre": "T1055",
             })
 
         if result["iocs"].get("url") or result["iocs"].get("domain"):
             result["findings"].append({"type": "network_ioc", "severity": "medium",
-                                       "detail": f"{len(result['iocs'].get('url', []))} URL, {len(result['iocs'].get('domain', []))} dominio/i incorporati."})
+                                       "detail": f"{len(result['iocs'].get('url', []))} URL(s), {len(result['iocs'].get('domain', []))} embedded domain(s)."})
 
         lowered = raw.lower()
         if b"powershell" in lowered or b"invoke-expression" in lowered:
             result["findings"].append({"type": "embedded_powershell", "severity": "high",
-                                       "detail": "PE contiene PowerShell incorporato — possibile dropper.", "mitre": "T1059.001"})
+                                       "detail": "PE contains embedded PowerShell — possible dropper.", "mitre": "T1059.001"})
             result["score_contribution"] = min(result["score_contribution"] + 30, 100)
 
     except Exception as ex:
@@ -482,7 +482,7 @@ def _analyze_macho(raw: bytes) -> Dict[str, Any]:
         result["iocs"] = _iocs_from(full_str)
         if "com.apple.quarantine" in full_str or "xattr" in full_str:
             result["findings"].append({"type": "quarantine_evasion", "severity": "medium",
-                                       "detail": "Riferimenti alla gestione della quarantine Apple (possibile evasione Gatekeeper).",
+                                       "detail": "References to Apple quarantine handling (possible Gatekeeper evasion).",
                                        "mitre": "T1553.001"})
             result["score_contribution"] = min(result["score_contribution"] + 15, 100)
     except Exception as ex:
@@ -506,7 +506,7 @@ def _office_findings_from_text(text: str, source: str) -> List[Dict[str, Any]]:
     if risky:
         findings.append({
             "type": "office_macro_risky_api", "severity": "high",
-            "detail": f"API a rischio nel contenuto VBA ({source}): {', '.join(sorted(set(risky))[:8])}",
+            "detail": f"Risky API in the VBA content ({source}): {', '.join(sorted(set(risky))[:8])}",
             "mitre": "T1059.005",
         })
     for marker in OFFICE_EXEC_MARKERS:
@@ -522,7 +522,7 @@ def _office_findings_from_text(text: str, source: str) -> List[Dict[str, Any]]:
         if urls:
             findings.append({
                 "type": "office_external_ref", "severity": "medium",
-                "detail": f"Riferimenti esterni nel documento: {', '.join(urls[:3])}",
+                "detail": f"External references in the document: {', '.join(urls[:3])}",
             })
     return findings
 
@@ -548,7 +548,7 @@ def _analyze_ole(raw: bytes) -> Dict[str, Any]:
         if has_vba:
             result["findings"].append({
                 "type": "ole_vba_project", "severity": "high",
-                "detail": "Progetto VBA presente nel documento OLE.", "mitre": "T1204.002",
+                "detail": "VBA project present in the OLE document.", "mitre": "T1204.002",
             })
             result["score_contribution"] += 30
 
@@ -558,7 +558,7 @@ def _analyze_ole(raw: bytes) -> Dict[str, Any]:
         if b"MZ" in raw and raw.count(b"MZ") > 1:
             result["findings"].append({
                 "type": "embedded_executable", "severity": "critical",
-                "detail": "Documento contiene uno o più oggetti PE incorporati (MZ), possibile dropper.",
+                "detail": "Document contains one or more embedded PE objects (MZ), possible dropper.",
                 "mitre": "T1204.002",
             })
             result["score_contribution"] += 40
@@ -590,7 +590,7 @@ def _analyze_ooxml(raw: bytes, zf: zipfile.ZipFile) -> Dict[str, Any]:
     if any(n.lower().startswith("xl/macrosheets/") for n in names):
         result["findings"].append({
             "type": "excel4_macro_sheet", "severity": "critical",
-            "detail": "Foglio macro Excel 4.0 (xl/macrosheets): esecuzione senza macro VBA classiche.",
+            "detail": "Excel 4.0 macro sheet (xl/macrosheets): execution without classic VBA macros.",
             "mitre": "T1204.002",
         })
         result["score_contribution"] += 45
@@ -599,7 +599,7 @@ def _analyze_ooxml(raw: bytes, zf: zipfile.ZipFile) -> Dict[str, Any]:
     if embedded:
         result["findings"].append({
             "type": "ooxml_embedded_object", "severity": "high",
-            "detail": f"Oggetti incorporati: {', '.join(embedded[:5])}",
+            "detail": f"Embedded objects: {', '.join(embedded[:5])}",
             "mitre": "T1204.002",
         })
         result["score_contribution"] += 20
@@ -619,7 +619,7 @@ def _analyze_ooxml(raw: bytes, zf: zipfile.ZipFile) -> Dict[str, Any]:
     if b"DDEAUTO" in text_sample.upper().encode("latin-1", errors="ignore"):
         result["findings"].append({
             "type": "ooxml_dde", "severity": "critical",
-            "detail": "Richiamo DDE nel contenuto XML (esecuzione senza macro).",
+            "detail": "DDE callback in the XML content (execution without macros).",
             "mitre": "T1559.002",
         })
         result["score_contribution"] += 40
@@ -632,7 +632,7 @@ def _analyze_ooxml(raw: bytes, zf: zipfile.ZipFile) -> Dict[str, Any]:
                 if head[:2] == b"MZ":
                     result["findings"].append({
                         "type": "ooxml_embedded_pe", "severity": "critical",
-                        "detail": f"PE incorporato in {n} (dropper dentro il documento).",
+                        "detail": f"Embedded PE in {n} (dropper inside the document).",
                         "mitre": "T1204.002",
                     })
                     result["score_contribution"] = min(result["score_contribution"] + 30, 100)
@@ -652,14 +652,14 @@ def _analyze_rtf(raw: bytes) -> Dict[str, Any]:
     if obj:
         result["findings"].append({
             "type": "rtf_embedded_object", "severity": "high",
-            "detail": f"RTF con {obj} oggetto/i incorporato/i (vettore classico di exploit/dropper).",
+            "detail": f"RTF with {obj} embedded object(s) (classic exploit/dropper vector).",
             "mitre": "T1204.002",
         })
         result["score_contribution"] += 45
     if re.search(r"\\objclass\s+(Equation|Package)", text, re.I):
         result["findings"].append({
             "type": "rtf_equation_exploit", "severity": "critical",
-            "detail": "Oggetto Equation/Package: vettore CVE storico (Eqnedt32).", "mitre": "T1203",
+            "detail": "Equation/Package object: historical CVE vector (Eqnedt32).", "mitre": "T1203",
         })
         result["score_contribution"] = min(result["score_contribution"] + 30, 100)
     return result
@@ -672,14 +672,14 @@ def _analyze_pdf(raw: bytes) -> Dict[str, Any]:
     try:
         text = raw.decode("latin-1", errors="ignore")
         checks = {
-            "/javascript": ("pdf_javascript", "critical", "JavaScript incorporato nel PDF.", "T1059.007"),
-            "/openaction": ("pdf_openaction", "high", "/OpenAction: azione automatica all'apertura.", "T1204.002"),
-            "/aa": ("pdf_additional_action", "high", "/AA: azione addizionale automatica.", "T1204.002"),
-            "/launch": ("pdf_launch", "critical", "/Launch: esecuzione di un programma esterno.", "T1204.002"),
-            "/embeddedfile": ("pdf_embedded_file", "high", "File allegato incorporato nel PDF.", "T1204.002"),
-            "/richmedia": ("pdf_richmedia", "medium", "Contenuto RichMedia (Flash/JS).", "T1204.002"),
-            "/xfa": ("pdf_xfa_form", "medium", "Form XFA (spesso usato per obfuscation).", "T1027"),
-            "/submitform": ("pdf_form_exfil", "medium", "Azione di invio form (possibile esfiltrazione).", "T1041"),
+            "/javascript": ("pdf_javascript", "critical", "JavaScript embedded in the PDF.", "T1059.007"),
+            "/openaction": ("pdf_openaction", "high", "/OpenAction: automatic action on open.", "T1204.002"),
+            "/aa": ("pdf_additional_action", "high", "/AA: automatic additional action.", "T1204.002"),
+            "/launch": ("pdf_launch", "critical", "/Launch: execution of an external program.", "T1204.002"),
+            "/embeddedfile": ("pdf_embedded_file", "high", "Attached file embedded in the PDF.", "T1204.002"),
+            "/richmedia": ("pdf_richmedia", "medium", "RichMedia content (Flash/JS).", "T1204.002"),
+            "/xfa": ("pdf_xfa_form", "medium", "XFA form (often used for obfuscation).", "T1027"),
+            "/submitform": ("pdf_form_exfil", "medium", "Form submit action (possible exfiltration).", "T1041"),
             "/encrypt": ("pdf_encrypted", "low", "PDF cifrato: i contenuti non sono ispezionabili staticamente.", None),
         }
         low = text.lower()
@@ -698,7 +698,7 @@ def _analyze_pdf(raw: bytes) -> Dict[str, Any]:
             if result["iocs"].get("url") or uri_count > 10:
                 result["findings"].append({
                     "type": "pdf_external_links", "severity": "low",
-                    "detail": f"{uri_count} link esterni nel PDF.",
+                    "detail": f"{uri_count} external links in the PDF.",
                 })
 
         # Dati dopo %%EOF: tecnica classica per appendere un archivio/payload
@@ -758,7 +758,7 @@ def _analyze_zip(raw: bytes, *, max_files: int, max_bytes: int,
     if len(infos) > max_files:
         truncated = True
         findings.append({"type": "archive_truncated", "severity": "low",
-                         "detail": f"Archivio con {len(infos)} file: analizzati i primi {max_files}.",
+                         "detail": f"Archive with {len(infos)} files: first {max_files} analyzed.",
                          "mitre": None})
     if declared > TOTAL_UNCOMPRESSED_MAX:
         truncated = True
@@ -798,7 +798,7 @@ def _analyze_zip(raw: bytes, *, max_files: int, max_bytes: int,
         if budget <= 0 and len(extracted) < len(infos):
             truncated = True
             findings.append({"type": "budget_exhausted", "severity": "low",
-                             "detail": "Budget di analisi esaurito: restanti file non analizzati."})
+                             "detail": "Analysis budget exhausted: remaining files not analyzed."})
             break
 
     return {
@@ -833,7 +833,7 @@ def _analyze_tar_like(raw: bytes, fmt: str, name: str = "archive") -> Optional[D
             detail = _analyze_bytes(expanded, base_name, allow_nested=False, nested_depth=1)
             detail.setdefault("findings", []).insert(0, {
                 "type": "compressed_stream", "severity": "low",
-                "detail": f"Contenuto {fmt.upper()} decompresso e analizzato ({len(expanded)} byte).",
+                "detail": f"{fmt.upper()} content decompressed and analyzed ({len(expanded)} bytes).",
             })
             detail["format"] = f"{fmt.upper()}>" + str(detail.get("format", "BINARY"))
             detail["kind"] = "binary"
@@ -888,7 +888,7 @@ def _analyze_archive_other(raw: bytes, fmt: str) -> Dict[str, Any]:
             score += 25
     if b"MZ" in raw[:65536] or raw.count(b"MZ") > 3:
         findings.append({"type": "executable_inside_container", "severity": "high",
-                         "detail": "Header PE rilevati all'interno del contenitore.", "mitre": "T1027"})
+                         "detail": "PE headers detected inside the container.", "mitre": "T1027"})
         score += 25
     return {"kind": "binary", "format": fmt.upper(), "score": min(score, 100), "findings": findings,
             "iocs": _iocs_from(full), "entropy": round(_entropy(raw), 2),
@@ -904,8 +904,8 @@ def _score_text(content: bytes, name: str) -> Dict[str, Any]:
     findings: List[Dict[str, Any]] = []
     if truncated:
         findings.append({"type": "scan_truncated", "severity": "low",
-                         "detail": f"Sorgente di {len(content) // (1024 * 1024)} MB: analizzati i primi "
-                                   f"{MAX_TEXT_SCAN_BYTES // (1024 * 1024)} MB."})
+                         "detail": f"Source is {len(content) // (1024 * 1024)} MB: first "
+                                   f"{MAX_TEXT_SCAN_BYTES // (1024 * 1024)} MB analyzed."})
     score = 0
     for pname, pat in SECRET_PATTERNS.items():
         matches = pat.findall(text)
@@ -941,7 +941,7 @@ def _analyze_binary(raw: bytes, fmt: str) -> Dict[str, Any]:
     ent = _entropy(raw)
     if ent > 7.5 and len(raw) > 4096:
         findings.append({"type": "high_entropy_blob", "severity": "medium",
-                         "detail": f"Entropia {ent:.2f}: contenuto compresso/cifrato/packato.", "mitre": "T1027"})
+                         "detail": f"Entropy {ent:.2f}: compressed/encrypted/packed content.", "mitre": "T1027"})
         score += 15
     for pat in SUSPICIOUS_STRINGS:
         m = pat.search(full)
@@ -954,7 +954,7 @@ def _analyze_binary(raw: bytes, fmt: str) -> Dict[str, Any]:
         "iocs": iocs, "entropy": round(ent, 2),
         "strings_preview": strings[:120],
         "hexdump": _hexdump_preview(raw),
-        "note": f"Nessun parser dedicato per {fmt.upper()}: entropia, stringhe, IOC ed eventuale hexdump.",
+        "note": f"No dedicated parser for {fmt.upper()}: entropy, strings, IOCs and an optional hexdump.",
     }
 
 
@@ -1110,7 +1110,7 @@ def _analyze_bytes(raw: bytes, name: str, *, allow_nested: bool, nested_depth: i
     detail = _analyze_binary(raw, fmt)
     if fmt == "lnk":
         detail["findings"].append({"type": "windows_shortcut", "severity": "medium",
-                                   "detail": "LNK: controllare target e argomenti (vettore LOLBin classico).",
+                                   "detail": "LNK: check target and arguments (classic LOLBin vector).",
                                    "mitre": "T1204.002"})
     return detail
 
@@ -1126,9 +1126,9 @@ async def supported_formats(user=Depends(get_current_user)):
             "max_files_per_zip": settings.TOTAL_MAX_FILES_PER_ZIP,
             "retention_days": settings.TOTAL_RETENTION_DAYS,
         },
-        "note": "Nessuna estensione viene rifiutata: ogni file riceve analisi statica "
-                "(i formati senza parser dedicato passano da entropia/stringhe/IOC). "
-                "I binari non vengono mai conservati: solo hash, findings e IOC.",
+        "note": "No extension is rejected: every file receives static analysis "
+                "(formats without a dedicated parser go through entropy/strings/IOC). "
+                "Binaries are never retained: only hashes, findings and IOCs.",
     }
 
 
@@ -1208,7 +1208,7 @@ async def upload_analyze(
         raise HTTPException(
             status_code=413,
             detail=f"File too large: {len(raw) // (1024 * 1024)} MB (max {settings.TOTAL_MAX_FILE_MB}MB). "
-                   f"Gli archivi fino a {settings.TOTAL_MAX_ZIP_MB}MB sono accettati (impostabile via TOTAL_MAX_FILE_MB/TOTAL_MAX_ZIP_MB).",
+                   f"Archives up to {settings.TOTAL_MAX_ZIP_MB}MB are accepted (configurable via TOTAL_MAX_FILE_MB/TOTAL_MAX_ZIP_MB).",
         )
     if is_archive and len(raw) > max_zip:
         raise HTTPException(status_code=413, detail=f"Archive too large: max {settings.TOTAL_MAX_ZIP_MB}MB")
@@ -1245,7 +1245,7 @@ async def upload_analyze(
                 "size": len(raw), "sha256": sha256, "score": zdetail.get("score", 0),
                 "findings": zdetail.get("findings", []), "iocs": zdetail.get("iocs", {}),
                 "parts": zdetail.get("parts", []),
-                "note": "Documento Office OOXML: analisi di macro, relazioni esterne, oggetti incorporati.",
+                "note": "Office OOXML document: analysis of macros, external relationships, embedded objects.",
             }]
             total_score = int(zdetail.get("score", 0))
             all_iocs = zdetail.get("iocs", {})
@@ -1271,8 +1271,8 @@ async def upload_analyze(
                     "analyzed_members": zdetail.get("analyzed_members"),
                     "total_members": zdetail.get("total_members"),
                     "truncated": truncated,
-                    "note": f"Contenitore: {zdetail.get('analyzed_members')} membri analizzati su "
-                            f"{zdetail.get('total_members')}.",
+                    "note": f"Container: {zdetail.get('analyzed_members')} of "
+                            f"{zdetail.get('total_members')} members analyzed.",
                 })
         kind = "project"
 
@@ -1324,9 +1324,9 @@ async def upload_analyze(
                     for f in files_out:
                         f.setdefault("findings", []).extend(yfindings)
         else:
-            yara_section = {"enabled": True, "matches": [], "note": "nessuna regola attiva"}
+            yara_section = {"enabled": True, "matches": [], "note": "no active rule"}
     except Exception as exc:
-        logger.warning(f"YARA scan su upload fallita (fail-soft): {exc}")
+        logger.warning(f"YARA scan on upload failed (fail-soft): {exc}")
         yara_section = {"enabled": False, "matches": [], "error": str(exc)[:200]}
 
     verdict = "clean" if total_score < 20 else ("suspicious" if total_score < 60 else "malicious")

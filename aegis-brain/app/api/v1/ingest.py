@@ -91,9 +91,9 @@ async def parser_catalog_endpoint(user=Depends(get_current_user)):
             "apache": "nginx", "httpd": "nginx", "access_log": "nginx",
             "rfc5424": "syslog", "rfc3164": "syslog", "ndjson": "json",
         },
-        "note": "Con source='auto' il parser viene scelto dalla forma del "
-                "payload; un payload non riconosciuto viene contato come "
-                "unparsed e non produce eventi.",
+        "note": "With source='auto' the parser is chosen from the payload "
+                "shape; an unrecognized payload is counted as unparsed and "
+                "produces no events.",
     }
 
 

@@ -91,14 +91,14 @@ async def run_retention_purge(db: AsyncSession, confirmed: bool = False, backup_
             try:
                 files = [f for f in os.listdir(backup_dir) if f.startswith("aegis_db_")]
                 if not files:
-                    return {"error": "Nessun backup trovato: esegui backup prima della purge", "dry_run": True, "preview": preview}
+                    return {"error": "No backup found: run a backup before purging", "dry_run": True, "preview": preview}
                 # Controlla data ultimo backup
                 latest = max(os.path.getmtime(os.path.join(backup_dir, f)) for f in files)
                 age_hours = (datetime.now().timestamp() - latest) / 3600
                 if age_hours > 48:
-                    return {"error": f"Ultimo backup troppo vecchio ({age_hours:.1f}h): esegui backup prima della purge", "dry_run": True, "preview": preview}
+                    return {"error": f"Latest backup too old ({age_hours:.1f}h): run a backup before purging", "dry_run": True, "preview": preview}
             except Exception as e:
-                logger.warning(f"Backup check fallito: {e}")
+                logger.warning(f"Backup check failed: {e}")
         else:
             logger.warning("Backup dir non montato, salto verifica backup (lab)")
 

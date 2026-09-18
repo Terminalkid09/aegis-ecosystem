@@ -72,7 +72,7 @@ async def get_or_create_source_agent(db: AsyncSession, source_name: str,
             is_demo=False,
             isolated=False,
             meta={"kind": LOGS_SOURCE_AGENT_TYPE, "source_type": source_type,
-                  "note": "Sorgente di log esterna: non è un endpoint gestito."},
+                  "note": "External log source: not a managed endpoint."},
         )
         db.add(agent)
         await db.flush()

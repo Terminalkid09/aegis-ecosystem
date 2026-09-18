@@ -102,8 +102,8 @@ export default function Search() {
             <SearchCode className="text-emerald-400" /> Log Search
           </h1>
           <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">
-            Ricerca sugli eventi normalizzati da tutte le sorgenti. I campi filtrabili sono
-            validati lato server: nessuna query libera arriva al database.
+            Search across normalized events from every source. Filterable fields are
+            validated server-side: no free-form query ever reaches the database.
           </p>
         </div>
         <button
@@ -123,7 +123,7 @@ export default function Search() {
             <SearchCode size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
             <input
               className="input pl-9"
-              placeholder="Ricerca libera su messaggio e campi indicizzati…"
+              placeholder="Free-text search over the message and indexed fields…"
               value={text}
               onChange={e => { setText(e.target.value); setPage(0) }}
               onKeyDown={e => { if (e.key === 'Enter') refetch() }}
@@ -134,20 +134,20 @@ export default function Search() {
             value={hours}
             onChange={e => { setHours(Number(e.target.value)); setPage(0) }}
           >
-            <option value={1}>Ultima ora</option>
-            <option value={6}>Ultime 6 ore</option>
-            <option value={24}>Ultime 24 ore</option>
-            <option value={72}>Ultimi 3 giorni</option>
-            <option value={168}>Ultimi 7 giorni</option>
-            <option value={720}>Ultimi 30 giorni</option>
+            <option value={1}>Last hour</option>
+            <option value={6}>Last 6 hours</option>
+            <option value={24}>Last 24 hours</option>
+            <option value={72}>Last 3 days</option>
+            <option value={168}>Last 7 days</option>
+            <option value={720}>Last 30 days</option>
           </select>
           <select
             className="input md:w-40"
             value={order}
             onChange={e => { setOrder(e.target.value as 'desc' | 'asc'); setPage(0) }}
           >
-            <option value="desc">Più recenti</option>
-            <option value="asc">Più vecchi</option>
+            <option value="desc">Newest first</option>
+            <option value="asc">Oldest first</option>
           </select>
         </div>
 
@@ -176,9 +176,9 @@ export default function Search() {
         </div>
 
         <div className="flex items-center gap-4 text-xs text-[hsl(var(--muted-foreground))]">
-          <span><span className="text-white font-semibold">{total.toLocaleString()}</span> eventi trovati</span>
+          <span><span className="text-white font-semibold">{total.toLocaleString()}</span> events found</span>
           {stats && <>
-            <span className="flex items-center gap-1"><Database size={12} /> {Object.keys(stats.by_source_type || {}).length} tipi sorgente</span>
+            <span className="flex items-center gap-1"><Database size={12} /> {Object.keys(stats.by_source_type || {}).length} source types</span>
             <span className="flex items-center gap-1"><Activity size={12} /> {stats.events_per_second} eps ({hours}h)</span>
           </>}
         </div>
@@ -188,12 +188,12 @@ export default function Search() {
       <div className="card overflow-hidden">
         {isFetching && items.length === 0 ? (
           <div className="py-16 flex items-center justify-center gap-3 text-[hsl(var(--muted-foreground))]">
-            <Loader2 size={24} className="animate-spin text-emerald-400" /> Ricerca in corso…
+            <Loader2 size={24} className="animate-spin text-emerald-400" /> Searching…
           </div>
         ) : items.length === 0 ? (
           <div className="py-16 text-center text-[hsl(var(--muted-foreground))] italic border border-dashed border-[hsl(var(--border))] rounded-lg m-4">
             <SearchCode size={32} className="mx-auto mb-3 opacity-20 text-emerald-400" />
-            Nessun evento corrisponde ai filtri. Prova ad ampliare la finestra temporale.
+No events match the filters. Try widening the time window.
           </div>
         ) : (
           <>
@@ -204,8 +204,8 @@ export default function Search() {
                     <th className="p-3 font-medium w-8"></th>
                     <th className="p-3 font-medium">Timestamp</th>
                     <th className="p-3 font-medium">Severity</th>
-                    <th className="p-3 font-medium">Sorgente</th>
-                    <th className="p-3 font-medium">Host / Utente</th>
+                    <th className="p-3 font-medium">Source</th>
+                    <th className="p-3 font-medium">Host / User</th>
                     <th className="p-3 font-medium">Rete</th>
                     <th className="p-3 font-medium w-full">Messaggio</th>
                   </tr>
@@ -259,7 +259,7 @@ export default function Search() {
             {/* Paginazione */}
             <div className="flex items-center justify-between p-4 border-t border-[hsl(var(--border))] text-sm">
               <span className="text-[hsl(var(--muted-foreground))]">
-                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} di {total.toLocaleString()}
+                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total.toLocaleString()}
               </span>
               <div className="flex items-center gap-2">
                 <button

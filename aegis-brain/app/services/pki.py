@@ -110,9 +110,9 @@ def sign_csr(ca_key, ca_cert, csr_pem: bytes, agent_id: str,
     try:
         csr = x509.load_pem_x509_csr(csr_pem)
     except Exception as e:
-        raise ValueError(f"CSR illeggibile: {e}")
+        raise ValueError(f"unreadable CSR: {e}")
     if not csr.is_signature_valid:
-        raise ValueError("firma CSR non valida")
+        raise ValueError("invalid CSR signature")
     cn = None
     try:
         cn = csr.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
@@ -215,7 +215,7 @@ class RevokeList:
     def revoke(self, entry: str) -> None:
         entry = (entry or "").strip().lower()
         if not entry:
-            raise ValueError("entry vuota")
+            raise ValueError("empty entry")
         with self._lock:
             self._entries.add(entry)
             try:

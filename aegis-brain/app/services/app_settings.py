@@ -43,12 +43,13 @@ AI_PROVIDERS = ("auto", "disabled", "ollama", "gemini", "openai")
 LOCAL_PROVIDERS = frozenset({"ollama"})
 CLOUD_PROVIDERS = frozenset({"gemini", "openai"})
 
+# Labels shown in the dashboard: English, like the rest of the UI.
 PROVIDER_LABELS: Dict[str, str] = {
-    "auto": "Auto (usa ciò che risponde)",
-    "disabled": "Disattivata",
-    "ollama": "Ollama (locale o server tuo)",
+    "auto": "Auto (use whatever responds)",
+    "disabled": "Disabled",
+    "ollama": "Ollama (local or your own server)",
     "gemini": "Google Gemini (cloud)",
-    "openai": "OpenAI / OpenAI-compatibile (cloud)",
+    "openai": "OpenAI / OpenAI-compatible (cloud)",
 }
 
 # Chiavi gestite. Una riga qui = un campo in UI.

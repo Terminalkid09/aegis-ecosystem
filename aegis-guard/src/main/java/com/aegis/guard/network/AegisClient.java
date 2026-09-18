@@ -233,7 +233,7 @@ public class AegisClient {
             }
             JsonObject o = JsonParser.parseString(new String(content)).getAsJsonObject();
             if (!o.has("certificate_pem")) {
-                throw new IOException("CSR response senza certificate_pem");
+                throw new IOException("CSR response without certificate_pem");
             }
             return o.get("certificate_pem").getAsString();
         });

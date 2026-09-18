@@ -68,12 +68,12 @@ def _validate_paths(paths: List[str]) -> List[str]:
     seen = set()
     for p in paths:
         if not isinstance(p, str):
-            raise HTTPException(status_code=422, detail="Ogni percorso deve essere una stringa")
+            raise HTTPException(status_code=422, detail="Every path must be a string")
         p = p.strip()
         if not p:
             continue
         if len(p) > MAX_PATH_LEN:
-            raise HTTPException(status_code=422, detail=f"Percorso troppo lungo (max {MAX_PATH_LEN}): {p[:60]}...")
+            raise HTTPException(status_code=422, detail=f"Path too long (max {MAX_PATH_LEN}): {p[:60]}...")
         if p in seen:
             continue
         seen.add(p)

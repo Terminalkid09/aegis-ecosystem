@@ -43,30 +43,30 @@ PROVIDERS: Dict[str, ProviderSpec] = {
     for spec in (
         ProviderSpec(
             key="shodan", label="Shodan", env_var="SHODAN_API_KEY",
-            help_text="Enrichment IP: ISP, organizzazione, geo, porte esposte.",
+            help_text="IP enrichment: ISP, organization, geolocation, exposed ports.",
             docs_url="https://account.shodan.io/",
         ),
         ProviderSpec(
             key="abuseipdb", label="AbuseIPDB", env_var="ABUSEIPDB_API_KEY",
-            help_text="Reputazione IP: abuse confidence score e report.",
+            help_text="IP reputation: abuse confidence score and reports.",
             docs_url="https://www.abuseipdb.com/account/api",
         ),
         ProviderSpec(
             key="virustotal", label="VirusTotal", env_var="VIRUSTOTAL_API_KEY",
-            help_text="Reputazione IP/domini: analisi e sentimento della community.",
+            help_text="IP/domain reputation: community analysis and sentiment.",
             docs_url="https://www.virustotal.com/gui/my-apikey",
         ),
         ProviderSpec(
             key="gemini", label="Google Gemini (AI)", env_var="GEMINI_API_KEY",
-            help_text=("Chiave API per l'AI (free tier): riassunti e analisi degli alert "
-                       "SENZA container LLM locale. I dati anonimizzati escono dalla rete "
-                       "solo quando lo chiedi, se AI_AUTOMATIC_ENRICH=false."),
+            help_text=("AI API key (free tier): alert summaries and analysis WITHOUT a local "
+                       "LLM container. Anonymized data leaves the network only when you ask "
+                       "for it, unless automatic enrichment is enabled."),
             docs_url="https://aistudio.google.com/apikey",
         ),
         ProviderSpec(
-            key="openai", label="OpenAI / compatibile", env_var="OPENAI_API_KEY",
-            help_text=("Chiave per endpoint OpenAI-compatibile (OPENAI_BASE_URL: OpenAI, "
-                       "Azure, vLLM, LM Studio, un server tuo...)."),
+            key="openai", label="OpenAI / compatible", env_var="OPENAI_API_KEY",
+            help_text=("Key for any OpenAI-compatible endpoint (OPENAI_BASE_URL: OpenAI, "
+                       "Azure, vLLM, LM Studio, your own server...)."),
             docs_url="https://platform.openai.com/api-keys",
         ),
     )

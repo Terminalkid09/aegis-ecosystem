@@ -59,7 +59,7 @@ def _validate_rule_content(content: str) -> None:
     stripped = content.strip()
     if not any(k in stripped for k in ("rule ", "import ", "private rule", "global rule")):
         raise HTTPException(status_code=422,
-                            detail="Il contenuto non sembra una regola YARA (manca 'rule ...')")
+                            detail="Content does not look like a YARA rule (missing 'rule ...')")
 
 
 async def _get_agent(db: AsyncSession, agent_id: str) -> Agent:
@@ -154,7 +154,7 @@ async def scan_agent(agent_id: str, payload: ScanRequest, request: Request,
     result = await db.execute(query)
     rules = result.scalars().all()
     if not rules:
-        raise HTTPException(status_code=422, detail="Nessuna regola YARA attiva")
+        raise HTTPException(status_code=422, detail="No active YARA rule")
 
     rules_yara = "\n\n".join(r.content for r in rules[:MAX_RULES_PER_SCAN])
     try:
@@ -175,4 +175,4 @@ async def scan_agent(agent_id: str, payload: ScanRequest, request: Request,
     await db.commit()
     return {"queued": True, "agent_id": str(agent.agent_id),
             "rules_sent": min(len(rules), MAX_RULES_PER_SCAN),
-            "note": "I match arriveranno come alert 'yara_match' e sono ricercabili in Log Search"}
+            "note": "Matches will arrive as 'yara_match' alerts and are searchable in Log Search"}

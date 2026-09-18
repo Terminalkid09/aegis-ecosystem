@@ -183,7 +183,7 @@ public final class UpdateManager {
                 m.doFinal(body.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         if (!MessageDigest.isEqual(expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 mac.toLowerCase().getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
-            throw new SecurityException("update.state MAC invalido: possibile tampering");
+            throw new SecurityException("invalid update.state MAC: possible tampering");
         }
         return new String[]{staged, sha};
     }

@@ -19,7 +19,7 @@ export default function YaraManager() {
   const user = useAppStore((s) => s.user)
   const canEdit = ['analyst', 'admin'].includes((user?.role || '').toLowerCase())
 
-  // ── regole ──────────────────────────────────────────────────────────
+  // ── rules ───────────────────────────────────────────────────────────
   const { data: rules = [], isLoading: rulesLoading } = useQuery({
     queryKey: ['yara-rules'],
     queryFn: () => yaraAPI.list().then(r => (r.data?.items ?? []) as YaraRule[]),
@@ -44,14 +44,24 @@ export default function YaraManager() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['yara-rules'] }),
   })
 
-  // ── agenti (per la watchlist) ───────────────────────────────────────
-  const { data: agentsData } = useQuery({
+  // ── endpoints (for the watchlist) ───────────────────────────────────
+  // `asArray` and not `as any[]`: on the first render (and on any failed
+  // request) `agentsData` is undefined, and `undefined.filter(...)` crashed
+  // the whole page — that was the "YARA & FIM never loads" bug.
+  const { data: agentsData, isLoading: agentsLoading, isError: agentsError } = useQuery({
     queryKey: ['agents'],
     queryFn: () => statsAPI.getAgents().then(r => asArray(r.data)),
     refetchInterval: 30000,
   })
-  const agents = agentsData as any[]
+  const agents = asArray<any>(agentsData)
   const realAgents = agents.filter(a => !a.is_demo)
+  // A watchlist can only be applied to an endpoint that declares the FIM
+  // capability: without this the dropdown mixes in stale/soak-test enrollments
+  // that will never answer the command. Agents enrolled before capabilities
+  // were reported don't declare one, so if nobody does we keep the full list
+  // instead of hiding every endpoint.
+  const capableAgents = realAgents.filter(a => a?.capabilities?.fim === true)
+  const selectableAgents = capableAgents.length > 0 ? capableAgents : realAgents
   const [selectedAgent, setSelectedAgent] = useState('')
 
   // ── watchlist ───────────────────────────────────────────────────────
@@ -72,8 +82,8 @@ export default function YaraManager() {
 
   const watchMut = useMutation({
     mutationFn: () => fimAPI.set(selectedAgent, pathsText.split('\n').map(s => s.trim()).filter(Boolean), recursive),
-    onSuccess: (r) => setFimMsg(`Salvata (${r.data?.count ?? 0} percorsi) — comando ${r.data?.command_queued ? 'accodato all\u2019agente' : 'in coda al riavvio agente'}.`),
-    onError: (e: any) => setFimMsg(e?.response?.data?.detail || 'Salvataggio fallito.'),
+    onSuccess: (r) => setFimMsg(`Saved (${r.data?.count ?? 0} paths) — command ${r.data?.command_queued ? 'delivered to the agent' : 'queued until the agent restarts'}.`),
+    onError: (e: any) => setFimMsg(e?.response?.data?.detail || 'Save failed.'),
   })
 
   return (
@@ -83,29 +93,29 @@ export default function YaraManager() {
           <Binary size={20} className="text-cyan-400" /> YARA &amp; FIM
         </h1>
         <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">
-          Firme YARA per scansioni on-demand e watchlist File Integrity Monitoring per endpoint.
+          YARA signatures for on-demand scans, and per-endpoint File Integrity Monitoring watchlists.
         </p>
       </div>
 
-      {/* ── Regole YARA ─────────────────────────────────────────────── */}
+      {/* ── YARA rules ──────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="card p-5">
-          <h3 className="font-bold mb-4 flex items-center gap-2 text-white"><Binary size={16} className="text-cyan-400" /> Regole ({rules.length})</h3>
+          <h3 className="font-bold mb-4 flex items-center gap-2 text-white"><Binary size={16} className="text-cyan-400" /> Rules ({rules.length})</h3>
           {rulesLoading ? (
             <div className="flex justify-center py-8"><Loader2 className="animate-spin" size={20} /></div>
           ) : rules.length === 0 ? (
-            <p className="text-sm text-[hsl(var(--muted-foreground))] py-6 text-center">Nessuna regola: creane una a destra.</p>
+            <p className="text-sm text-[hsl(var(--muted-foreground))] py-6 text-center">No rules yet — create one on the right.</p>
           ) : (
             <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
               {rules.map((r) => (
                 <div key={r.id} className="flex items-center gap-2 rounded bg-[hsl(var(--secondary))] border border-[hsl(var(--border))] px-3 py-2">
                   <span className={cn('text-xs font-semibold flex-1 truncate', r.is_active ? 'text-white' : 'text-[hsl(var(--muted-foreground))]')}>{r.name}</span>
                   <PermissionGate perms={['rules']}>
-                    <button onClick={() => toggleMut.mutate(r)} title={r.is_active ? 'Disattiva' : 'Attiva'}
+                    <button onClick={() => toggleMut.mutate(r)} title={r.is_active ? 'Disable' : 'Enable'}
                       className={cn('p-1.5 rounded', r.is_active ? 'text-emerald-400' : 'text-[hsl(var(--muted-foreground))]')}>
                       {r.is_active ? <Eye size={14} /> : <EyeOff size={14} />}
                     </button>
-                    <button onClick={() => { if (confirm(`Elimina la regola ${r.name}?`)) deleteMut.mutate(r.id) }}
+                    <button onClick={() => { if (confirm(`Delete rule ${r.name}?`)) deleteMut.mutate(r.id) }}
                       className="p-1.5 rounded text-[hsl(var(--muted-foreground))] hover:text-red-400">
                       <Trash2 size={14} />
                     </button>
@@ -117,22 +127,22 @@ export default function YaraManager() {
         </div>
 
         <div className="card p-5">
-          <h3 className="font-bold mb-4 flex items-center gap-2 text-white"><Plus size={16} className="text-emerald-400" /> Nuova regola</h3>
+          <h3 className="font-bold mb-4 flex items-center gap-2 text-white"><Plus size={16} className="text-emerald-400" /> New rule</h3>
           <PermissionGate perms={['rules']}>
-            <input className="input mb-2" placeholder="Nome regola (es. Maze_Ransomware_Note)" value={newName} onChange={e => setNewName(e.target.value)} />
+            <input className="input mb-2" placeholder="Rule name (e.g. Maze_Ransomware_Note)" value={newName} onChange={e => setNewName(e.target.value)} />
             <textarea className="input h-[220px] font-mono text-[11px] text-emerald-400 resize-none bg-[hsl(var(--background))]" value={newContent} onChange={e => setNewContent(e.target.value)} />
             <button onClick={() => createMut.mutate()} disabled={!newName || createMut.isPending}
               className="btn btn-primary w-full mt-3 bg-cyan-600 hover:bg-cyan-500 border-cyan-500">
-              {createMut.isPending ? <Loader2 size={16} className="animate-spin" /> : 'Salva regola'}
+              {createMut.isPending ? <Loader2 size={16} className="animate-spin" /> : 'Save rule'}
             </button>
           </PermissionGate>
         </div>
       </div>
 
-      {/* ── Watchlist FIM ───────────────────────────────────────────── */}
+      {/* ── FIM watchlist ───────────────────────────────────────────── */}
       <div className="card p-5">
         <h3 className="font-bold mb-4 flex items-center gap-2 text-white">
-          <FolderSearch size={16} className="text-orange-400" /> File Integrity Monitoring — watchlist per endpoint
+          <FolderSearch size={16} className="text-orange-400" /> File Integrity Monitoring — per-endpoint watchlist
         </h3>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div className="space-y-3">
@@ -140,9 +150,12 @@ export default function YaraManager() {
               <label className="text-[10px] font-bold text-[hsl(var(--muted-foreground))] uppercase tracking-widest">Endpoint</label>
               <div className="flex items-center gap-2 mt-1">
                 <Server size={14} className="text-[hsl(var(--muted-foreground))]" />
-                <select className="input" value={selectedAgent} onChange={e => setSelectedAgent(e.target.value)}>
-                  <option value="">Seleziona un endpoint…</option>
-                  {realAgents.map((a: any) => (
+                <select className="input" value={selectedAgent} onChange={e => setSelectedAgent(e.target.value)}
+                  disabled={agentsLoading}>
+                  <option value="">
+                    {agentsLoading ? 'Loading endpoints…' : agentsError ? 'Endpoints unavailable' : selectableAgents.length === 0 ? 'No endpoints enrolled' : 'Select an endpoint…'}
+                  </option>
+                  {selectableAgents.map((a: any) => (
                     <option key={a.agent_id} value={a.agent_id}>{a.hostname || a.agent_id?.slice(0, 8)}</option>
                   ))}
                 </select>
@@ -151,22 +164,22 @@ export default function YaraManager() {
             <PermissionGate perms={['manage']}>
               <div className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
                 <input type="checkbox" checked={recursive} onChange={e => setRecursive(e.target.checked)} className="accent-orange-500" />
-                Monitora ricorsivamente le sottocartelle
+                Monitor subfolders recursively
               </div>
               <button onClick={() => watchMut.mutate()} disabled={!selectedAgent || watchMut.isPending}
                 className="btn btn-primary w-full bg-orange-600 hover:bg-orange-500 border-orange-500">
-                {watchMut.isPending ? <Loader2 size={16} className="animate-spin" /> : 'Applica watchlist'}
+                {watchMut.isPending ? <Loader2 size={16} className="animate-spin" /> : 'Apply watchlist'}
               </button>
             </PermissionGate>
             {fimMsg && <p className="text-xs text-cyan-300">{fimMsg}</p>}
             <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
-              Ogni modifica ai file monitorati genera un evento FIM: alert con mapping MITRE (persistenza T1543/T1547)
-              e ricerca in Log Search. L'hash SHA256 e' calcolato dall'agente fino a 8MB.
+              Every change to a monitored file produces a FIM event: an alert with MITRE mapping (persistence T1543/T1547)
+              plus a searchable entry in Log Search. The agent computes the SHA-256 hash for files up to 8 MB.
             </p>
           </div>
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-[hsl(var(--muted-foreground))] uppercase tracking-widest">
-              Percorsi da monitorare (uno per riga)
+              Paths to monitor (one per line)
             </label>
             <textarea className="input h-[190px] font-mono text-[11px] resize-none bg-[hsl(var(--background))]"
               placeholder={'C:\\Windows\\System32\\drivers\\etc\\hosts\nC:\\Windows\\System32\\Tasks\n/etc/cron.d'}

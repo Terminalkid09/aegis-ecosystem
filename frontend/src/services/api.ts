@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { useAppStore } from '@/store/appStore'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
 
@@ -8,6 +9,22 @@ export const apiClient = axios.create({
   withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 })
+
+// Expired session: a 401 must not leave the UI stuck in error on every page
+// (the symptom was "sometimes other pages break too"): the auth state is
+// cleared so App.tsx shows the login again. Login/me are excluded because a
+// 401 there is the expected answer, not a lost session.
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error?.response?.status
+    const url: string = error?.config?.url || ''
+    if (status === 401 && !url.includes('/auth/login') && !url.includes('/auth/me')) {
+      useAppStore.getState().logout()
+    }
+    return Promise.reject(error)
+  },
+)
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 export const authAPI = {

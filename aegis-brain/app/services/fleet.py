@@ -24,7 +24,7 @@ def normalize_site(site: Any) -> str:
     s = str(site or "").strip().lower()
     if not SITE_RE.match(s):
         raise ValueError(
-            "site non valido: minuscolo, [a-z0-9-], max 64 char")
+            "invalid site: lowercase, [a-z0-9-], max 64 chars")
     return s
 
 
@@ -79,7 +79,7 @@ def retention_cutoffs(telemetry_days: int = 14, alerts_days: int = 90,
     now = now or datetime.now(timezone.utc)
     for v in (telemetry_days, alerts_days, audit_days, syslog_days):
         if int(v) <= 0:
-            raise ValueError("retention days deve essere positivo")
+            raise ValueError("retention days must be positive")
     return {
         "telemetry": now - timedelta(days=telemetry_days),
         "alerts": now - timedelta(days=alerts_days),

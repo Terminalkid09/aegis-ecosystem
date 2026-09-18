@@ -44,11 +44,11 @@ function ApiKeysSection() {
       await integrationsAPI.setKey(p.key, drafts[p.key] ?? '')
       setDrafts(d => ({ ...d, [p.key]: '' }))
       await load()
-      setMsg(`${p.label} aggiornato.`)
+      setMsg(`${p.label} updated.`)
     } catch (e: any) {
       setMsg(e?.response?.status === 403
-        ? 'Serve il ruolo admin per modificare le chiavi.'
-        : 'Salvataggio fallito.')
+        ? 'Admin role required to change API keys.'
+        : 'Save failed.')
     } finally { setBusy(false) }
   }
 
@@ -60,7 +60,7 @@ function ApiKeysSection() {
           <h3 className="text-lg font-bold text-white">Integrations & API Keys</h3>
         </div>
         <p className="text-sm text-[hsl(var(--muted-foreground))] mt-3">
-          Nessun provider configurato oppure backend non raggiungibile.
+          No provider configured, or the backend is unreachable.
         </p>
       </div>
     )
@@ -90,11 +90,11 @@ function ApiKeysSection() {
                 : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20')}>
                 {p.source === 'env' ? `da env (${p.masked})` : `da dashboard (${p.masked})`}
               </span>}
-              {!p.active && <span className="ml-2 text-[9px] text-[hsl(var(--muted-foreground))] normal-case">non configurata</span>}
+              {!p.active && <span className="ml-2 text-[9px] text-[hsl(var(--muted-foreground))] normal-case">not set</span>}
             </label>
             <a href={p.docs_url} target="_blank" rel="noreferrer"
                className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
-              ottieni chiave <ExternalLink size={10} />
+              get key <ExternalLink size={10} />
             </a>
           </div>
           <div className="flex gap-2">
@@ -102,7 +102,7 @@ function ApiKeysSection() {
               type="password"
               autoComplete="off"
               disabled={!p.overridable && p.source === 'env'}
-              placeholder={p.source === 'env' ? 'Gestita da .env (override non possibile)' : 'Inserisci API key...'}
+              placeholder={p.source === 'env' ? 'Managed by .env (override not possible)' : 'Enter API key...'}
               value={drafts[p.key] ?? ''}
               onChange={e => setDrafts(d => ({ ...d, [p.key]: e.target.value }))}
               className="input w-full bg-[hsl(var(--background))] font-mono text-sm"
@@ -110,13 +110,13 @@ function ApiKeysSection() {
             <PermissionGate perms={['manage']}>
               <button onClick={() => save(p)} disabled={busy}
                 className="btn btn-primary bg-cyan-600 hover:bg-cyan-500 border-cyan-500 px-4 text-xs">
-                Salva
+                Save
               </button>
             </PermissionGate>
           </div>
           <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
             {p.help_text}
-            {p.source === 'database' && ' · Salvata cifrata nel database (override attivo).'}
+            {p.source === 'database' && ' · Stored encrypted in the database (override active).'}
           </p>
         </div>
       ))}
@@ -148,12 +148,12 @@ interface AISettings {
 }
 
 const sourceBadge = (source: 'env' | 'database' | 'default') => {
-  if (source === 'env') return { text: 'da .env', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' }
-  if (source === 'database') return { text: 'da dashboard', cls: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' }
+  if (source === 'env') return { text: 'from .env', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' }
+  if (source === 'database') return { text: 'from dashboard', cls: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' }
   return { text: 'default', cls: 'bg-[hsl(var(--secondary))] text-[hsl(var(--muted-foreground))] border-[hsl(var(--border))]' }
 }
 
-/** Sezione AI: provider, modello e consenso all'uscita dei dati.
+/** AI section: provider, model and consent for data leaving the network.
  *  Il valore di ogni campo dichiara la sua origine (.env o dashboard) perché
  *  un campo che non ha effetto senza dirlo è peggio di un campo assente. */
 function AISection() {
@@ -188,11 +188,11 @@ function AISection() {
         automatic_enrich: autoCloud,
       })
       setData(res.data)
-      setMsg('Impostazioni AI salvate. Hanno effetto immediato: nessun riavvio.')
+      setMsg('AI settings saved. They apply immediately: no restart needed.')
     } catch (e: any) {
       setMsg(e?.response?.status === 403
-        ? 'Serve il ruolo admin per cambiare il provider AI.'
-        : e?.response?.data?.detail || 'Salvataggio fallito.')
+        ? 'Admin role required to change the AI provider.'
+        : e?.response?.data?.detail || 'Save failed.')
     } finally { setBusy(false) }
   }
 
@@ -204,7 +204,7 @@ function AISection() {
           <h3 className="text-lg font-bold text-white">AI Provider</h3>
         </div>
         <p className="text-sm text-[hsl(var(--muted-foreground))] mt-3">
-          Backend non raggiungibile: stato AI non disponibile.
+          Backend unreachable: AI status unavailable.
         </p>
       </div>
     )
@@ -212,7 +212,7 @@ function AISection() {
 
   const pb = sourceBadge(data.current.provider_source)
   const mb = sourceBadge(data.current.model_source)
-  const placeholder = data.default_models[provider] || 'default del provider'
+  const placeholder = data.default_models[provider] || 'provider default'
 
   return (
     <div className="card p-6 space-y-5 bg-[hsl(var(--secondary)/0.3)]">
@@ -231,10 +231,10 @@ function AISection() {
           data.status.provider === 'disabled' || data.status.reachable === false
             ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
             : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20')}>
-          stato: {data.status.provider}{data.status.model ? ` · ${data.status.model}` : ''}
+          status: {data.status.provider}{data.status.model ? ` · ${data.status.model}` : ''}
         </span>
         <span className="px-2 py-1 rounded border bg-[hsl(var(--secondary))] text-[hsl(var(--muted-foreground))] border-[hsl(var(--border))]">
-          {data.status.local ? 'nessun dato esce dalla rete' : 'provider cloud: i dati anonimizzati escono se autorizzato'}
+          {data.status.local ? 'no data leaves the network' : 'cloud provider: anonymized data leaves only when authorized'}
         </span>
         {data.status.reason && <span className="text-[hsl(var(--muted-foreground))]">{data.status.reason}</span>}
       </div>
@@ -255,7 +255,7 @@ function AISection() {
         </select>
         {data.current.provider_source === 'env' && (
           <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
-            Impostato dal <span className="font-mono">.env</span> (AI_PROVIDER): per sceglierlo dalla dashboard, rimuovilo dall'env.
+            Set in the <span className="font-mono">.env</span> (AI_PROVIDER): to choose it from the dashboard, remove it from the env.
           </p>
         )}
       </div>
@@ -263,16 +263,16 @@ function AISection() {
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-[10px] font-bold text-[hsl(var(--muted-foreground))] uppercase tracking-widest">
-            Modello{' '}
+            Model{' '}
             <span className={cn('ml-1 px-1.5 py-0.5 rounded border text-[9px] normal-case', mb.cls)}>{mb.text}</span>
           </label>
         </div>
         <input value={model} onChange={e => setModel(e.target.value)}
           disabled={data.current.model_source === 'env'}
-          placeholder={`vuoto = ${placeholder}`}
+          placeholder={`empty = ${placeholder}`}
           className="input w-full bg-[hsl(var(--background))] font-mono text-sm" />
         <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
-          Con Ollama puoi usare un modello servito altrove (es. <span className="font-mono">qwen2.5:14b</span>) o puntare a una macchina potente in rete.
+          With Ollama you can use a model served elsewhere (e.g. <span className="font-mono">qwen2.5:14b</span>) or point to a powerful machine on your network.
         </p>
       </div>
 
@@ -281,18 +281,18 @@ function AISection() {
           disabled={data.current.automatic_source === 'env'}
           className="mt-0.5 h-4 w-4 accent-cyan-500" />
         <span className="text-xs text-[hsl(var(--muted-foreground))]">
-          <span className="font-semibold text-white">Arricchimento automatico con provider cloud</span>
+          <span className="font-semibold text-white">Automatic enrichment with a cloud provider</span>
           <br />
-          Se attivo, gli alert nuovi vengono riassunti automaticamente dal provider scelto — con Gemini/OpenAI
-          il contesto (IP, email e token già anonimizzati prima dell'invio) esce dalla rete. Con un provider
-          locale resta sempre attivo e non richiede consenso. Spento, l'AI risponde solo alle domande.
+          When on, new alerts are summarized automatically by the selected provider — with Gemini/OpenAI the
+          context (IPs, emails and tokens already anonymized before sending) leaves the network. With a local
+          provider it stays always on and needs no consent. Off, the AI only answers questions.
         </span>
       </label>
 
       <PermissionGate perms={['manage']}>
         <button onClick={save} disabled={busy}
           className="btn btn-primary bg-cyan-600 hover:bg-cyan-500 border-cyan-500 px-4 text-xs w-full">
-          {busy ? 'Salvataggio…' : 'Salva impostazioni AI'}
+          {busy ? 'Saving…' : 'Save AI settings'}
         </button>
       </PermissionGate>
     </div>
@@ -443,7 +443,7 @@ export default function SettingsPage() {
               <div className="flex justify-between items-center py-2 border-b border-[hsl(var(--border))]">
                 <span className="text-[10px] font-bold text-[hsl(var(--muted-foreground))] uppercase tracking-widest">Platform Version</span>
                 <span className="font-mono text-sm font-bold text-white">
-                  {backend?.version ? `v${backend.version}` : 'backend non raggiungibile'}
+                  {backend?.version ? `v${backend.version}` : 'backend unreachable'}
                 </span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-[hsl(var(--border))]">

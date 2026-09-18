@@ -74,7 +74,7 @@ export default function LogSources() {
       setFormError(null)
       qc.invalidateQueries({ queryKey: ['siem-sources'] })
     },
-    onError: (err: any) => setFormError(err?.response?.data?.detail?.toString() || 'Creazione sorgente fallita'),
+    onError: (err: any) => setFormError(err?.response?.data?.detail?.toString() || 'Source creation failed'),
   })
 
   const testParser = useMutation({
@@ -100,8 +100,8 @@ export default function LogSources() {
             <Database className="text-emerald-400" /> Log Sources
           </h1>
           <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">
-            Ingestione multi-sorgente: syslog, Windows Event Log, Zeek, Suricata, firewall, proxy.
-            Endpoint di ingestione: <code className="text-emerald-400">POST /api/v1/ingest/&lt;sorgente&gt;</code>
+            Multi-source ingestion: syslog, Windows Event Log, Zeek, Suricata, firewall, proxy.
+            Ingest endpoint: <code className="text-emerald-400">POST /api/v1/ingest/&lt;source&gt;</code>
           </p>
         </div>
         <button
@@ -116,31 +116,31 @@ export default function LogSources() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="card p-4">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-            <Activity size={14} /> Eventi 24h
+            <Activity size={14} /> Events 24h
           </div>
           <div className="text-2xl font-bold text-white mt-2">{totalEvents.toLocaleString()}</div>
-          <div className="text-xs text-[hsl(var(--muted-foreground))]">{eps} eventi/s medi</div>
+          <div className="text-xs text-[hsl(var(--muted-foreground))]">{eps} avg events/s</div>
         </div>
         <div className="card p-4">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-            <Database size={14} /> Sorgenti
+            <Database size={14} /> Sources
           </div>
           <div className="text-2xl font-bold text-white mt-2">{sources.length}</div>
-          <div className="text-xs text-[hsl(var(--muted-foreground))]">{healthy} senza errori</div>
+          <div className="text-xs text-[hsl(var(--muted-foreground))]">{healthy} with no errors</div>
         </div>
         <div className="card p-4">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-            <ShieldCheck size={14} /> Regole Sigma attive
+            <ShieldCheck size={14} /> Active Sigma rules
           </div>
           <div className="text-2xl font-bold text-white mt-2">
             {stats?.detection?.sigma_rules ?? '—'}
             <span className="text-sm text-[hsl(var(--muted-foreground))]">/{stats?.detection?.sigma_rules_total ?? '—'}</span>
           </div>
-          <div className="text-xs text-[hsl(var(--muted-foreground))]">eseguibili / caricate</div>
+          <div className="text-xs text-[hsl(var(--muted-foreground))]">compilable / loaded</div>
         </div>
         <div className="card p-4">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-            <ShieldCheck size={14} /> Correlazioni attive
+            <ShieldCheck size={14} /> Active correlations
           </div>
           <div className="text-2xl font-bold text-white mt-2">
             {stats?.detection?.correlation_rules ?? '—'}
@@ -154,16 +154,16 @@ export default function LogSources() {
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="card p-5 space-y-3">
           <h2 className="font-semibold text-white flex items-center gap-2">
-            <Plus size={16} className="text-emerald-400" /> Registra una sorgente
+            <Plus size={16} className="text-emerald-400" /> Register a source
           </h2>
           <p className="text-xs text-[hsl(var(--muted-foreground))]">
-            Registrare la sorgente prima che i log arrivino permette di monitorarne la salute.
-            Con <code>auto</code> il parser viene scelto dalla forma del payload.
+            Registering a source before its logs arrive lets you track its health.
+            With <code>auto</code> the parser is chosen from the payload shape.
           </p>
           <div className="grid grid-cols-2 gap-3">
             <input
               className="input"
-              placeholder="nome (es. fw-sede-01)"
+              placeholder="name (e.g. fw-hq-01)"
               value={newSource.name}
               onChange={e => setNewSource(s => ({ ...s, name: e.target.value }))}
             />
@@ -191,7 +191,7 @@ export default function LogSources() {
             onClick={() => createSource.mutate()}
           >
             {createSource.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            Aggiungi sorgente
+            Add source
           </button>
         </div>
 
@@ -200,7 +200,7 @@ export default function LogSources() {
             <FlaskConical size={16} className="text-purple-400" /> Prova un parser
           </h2>
           <p className="text-xs text-[hsl(var(--muted-foreground))]">
-            Nessun dato viene salvato: serve a validare il formato di una sorgente nuova.
+Nothing is stored: this only validates the format of a new source.
           </p>
           <select
             className="input"
@@ -233,8 +233,8 @@ export default function LogSources() {
                   ? <CheckCircle2 size={14} className="text-emerald-400" />
                   : <AlertTriangle size={14} className="text-yellow-400" />}
                 <span className="text-white">
-                  parser: {testResult.parser || 'nessuno'} · eventi: {testResult.events?.length ?? 0}
-                  {testResult.unparsed ? ` · non riconosciuti: ${testResult.unparsed}` : ''}
+                  parser: {testResult.parser || 'none'} · events: {testResult.events?.length ?? 0}
+                  {testResult.unparsed ? ` · unrecognized: ${testResult.unparsed}` : ''}
                 </span>
               </div>
               {testResult.errors?.length > 0 && (
@@ -255,7 +255,7 @@ export default function LogSources() {
         </h2>
         <div className="grid md:grid-cols-3 gap-4 text-sm">
           <div>
-            <div className="text-xs uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-2">Sigma per livello</div>
+            <div className="text-xs uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-2">Sigma by level</div>
             <div className="flex flex-wrap gap-2">
               {Object.entries(coverage?.sigma?.by_level || {}).map(([level, count]) => (
                 <span key={level} className={cn('px-2 py-0.5 rounded text-[10px] font-bold border', SEVERITY_STYLE[level] || SEVERITY_STYLE.INFO)}>
@@ -265,7 +265,7 @@ export default function LogSources() {
             </div>
           </div>
           <div>
-            <div className="text-xs uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-2">Correlazione</div>
+            <div className="text-xs uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-2">Correlation</div>
             <div className="text-[hsl(var(--muted-foreground))]">
               threshold: {coverage?.correlation?.by_type?.threshold ?? 0} · sequence: {coverage?.correlation?.by_type?.sequence ?? 0}
             </div>
@@ -277,7 +277,7 @@ export default function LogSources() {
         </div>
         {((coverage?.sigma?.excluded?.length || 0) + (coverage?.correlation?.excluded?.length || 0)) > 0 && (
           <div className="mt-3 text-xs text-yellow-400">
-            Regole escluse (non eseguibili): {[...(coverage?.sigma?.excluded || []), ...(coverage?.correlation?.excluded || [])]
+            Excluded rules (not executable): {[...(coverage?.sigma?.excluded || []), ...(coverage?.correlation?.excluded || [])]
               .map((r: any) => `${r.id} (${(r.reason || []).join(', ')})`).join(' · ')}
           </div>
         )}
@@ -287,26 +287,26 @@ export default function LogSources() {
       <div className="card overflow-hidden">
         {isLoading ? (
           <div className="py-16 flex items-center justify-center gap-3 text-[hsl(var(--muted-foreground))]">
-            <Loader2 size={24} className="animate-spin text-emerald-400" /> Caricamento sorgenti…
+            <Loader2 size={24} className="animate-spin text-emerald-400" /> Loading sources…
           </div>
         ) : sources.length === 0 ? (
           <div className="py-16 text-center text-[hsl(var(--muted-foreground))] italic border border-dashed border-[hsl(var(--border))] rounded-lg m-4">
             <Database size={32} className="mx-auto mb-3 opacity-20 text-emerald-400" />
-            Nessuna sorgente di log. Punta un rsyslog, il Filebeat o
-            <code className="mx-1">scripts/winevent-collector.ps1</code> all'endpoint di ingestione.
+            No log sources yet. Point rsyslog, Filebeat or
+            <code className="mx-1">scripts/winevent-collector.ps1</code> at the ingestion endpoint.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="bg-[hsl(var(--secondary))] text-[hsl(var(--muted-foreground))] text-xs uppercase tracking-wider">
                 <tr>
-                  <th className="p-4 font-medium">Sorgente</th>
-                  <th className="p-4 font-medium">Tipo</th>
+                  <th className="p-4 font-medium">Source</th>
+                  <th className="p-4 font-medium">Type</th>
                   <th className="p-4 font-medium">Parser</th>
-                  <th className="p-4 font-medium">Eventi</th>
-                  <th className="p-4 font-medium">Non riconosciuti</th>
-                  <th className="p-4 font-medium">Ultimo evento</th>
-                  <th className="p-4 font-medium w-full">Ultimo errore</th>
+                  <th className="p-4 font-medium">Events</th>
+                  <th className="p-4 font-medium">Unparsed</th>
+                  <th className="p-4 font-medium">Last event</th>
+                  <th className="p-4 font-medium w-full">Last error</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[hsl(var(--border))]">

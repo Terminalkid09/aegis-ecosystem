@@ -40,8 +40,8 @@ def enforce_enterprise_strict() -> None:
         if mtls_mode() != "required":
             raise RuntimeError(
                 "ENTERPRISE_STRICT is true but MTLS_MODE != required: "
-                "abilitare l'overlay mTLS (docker-compose.mtls.yml) o "
-                "disattivare ENTERPRISE_STRICT per lab/dev")
+                "enable the mTLS overlay (docker-compose.mtls.yml) or "
+                "disable ENTERPRISE_STRICT for lab/dev")
 
 
 async def lifespan(app: FastAPI):

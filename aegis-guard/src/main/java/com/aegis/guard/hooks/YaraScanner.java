@@ -63,13 +63,13 @@ public final class YaraScanner {
     /** Esegue la scansione. Mai eccezioni all'esterno: risultato esplicito. */
     public ScanResult scan(String rulesYara, List<String> targets) {
         if (!Files.isRegularFile(YARA_BIN)) {
-            return ScanResult.failed("yara64.exe non disponibile (atteso in " + YARA_BIN + ")");
+            return ScanResult.failed("yara64.exe not available (expected at " + YARA_BIN + ")");
         }
         if (rulesYara == null || rulesYara.isBlank()) {
-            return ScanResult.failed("regole YARA vuote");
+            return ScanResult.failed("empty YARA rules");
         }
         if (targets == null || targets.isEmpty()) {
-            return ScanResult.failed("nessun target di scansione");
+            return ScanResult.failed("no scan target");
         }
         Path rulesFile = null;
         try {

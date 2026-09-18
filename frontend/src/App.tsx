@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, Component, type ReactNode } from 'react'
+import { Suspense, lazy, useEffect, useRef, Component, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAppStore } from '@/store/appStore'
 import { useLiveStats } from '@/hooks/useLiveStats'
@@ -64,12 +64,12 @@ class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
       return (
         <div className="flex items-center justify-center h-64">
           <div className="text-center space-y-3">
-            <p className="text-red-400 text-sm">Questa vista ha riscontrato un errore.</p>
+            <p className="text-red-400 text-sm">This view hit an error.</p>
             <button
               className="btn btn-primary px-4 py-2 text-sm"
               onClick={() => this.setState({ error: null })}
             >
-              Riprova
+              Retry
             </button>
           </div>
         </div>
@@ -80,14 +80,19 @@ class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
 }
 
 function AppShell() {
-  const { user, setUser, currentPage } = useAppStore()
+  const { user, setUser, currentPage, sessionHint } = useAppStore()
 
-  // Hydrate user from token on app start
+  // Hydrate the session on app start. The session lives in an HttpOnly cookie,
+  // so it is validated (and the user refreshed) only when this browser has
+  // logged in before: a first-time visitor has nothing to restore and probing
+  // /auth/me would only produce a guaranteed 401. The ref keeps it to one
+  // request per load (React StrictMode runs effects twice in dev).
+  const probed = useRef(false)
   useEffect(() => {
-    if (!user) {
-      authAPI.me().then(r => setUser(r.data)).catch(() => {})
-    }
-  }, [user, setUser])
+    if (probed.current || user || !sessionHint) return
+    probed.current = true
+    authAPI.me().then(r => setUser(r.data)).catch(() => {})
+  }, [user, sessionHint, setUser])
 
   // Start live WS stats
   useLiveStats()

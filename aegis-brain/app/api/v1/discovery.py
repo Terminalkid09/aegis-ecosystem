@@ -482,7 +482,7 @@ async def deployment_plan(payload: DeploymentPlanRequest, user=Depends(require_p
             "nodetrace": "NodeTrace/agents/python/dist/nodetrace-agent/nodetrace-agent.exe",
             "guard_jar": "aegis-guard/target/aegis-guard.jar",
         },
-        "note": "Deploy manuale/one-line: genera un token in /deploy/token e incolla il comando sul target. Nessuna credenziale viene richiesta, salvata o usata.",
+        "note": "Manual/one-line deploy: generate a token in /deploy/token and paste the command on the target. No credential is requested, stored or used.",
     }
 
 
