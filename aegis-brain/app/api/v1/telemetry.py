@@ -245,7 +245,10 @@ async def get_recent_telemetry(
     db: AsyncSession = Depends(get_db),
     _user = Depends(get_current_user),
     agent_id: Optional[str] = None,
-    limit: int = Query(50, ge=1, le=200)
+    # Tetto alto apposta: la dashboard disegna una serie temporale (~10s per
+    # campione), quindi 200 punti coprono pochi minuti e il grafico non può
+    # tornare indietro. 2000 è la finestra massima che vale la pena disegnare.
+    limit: int = Query(50, ge=1, le=2000)
 ):
     stmt = (
         select(Telemetry, Agent)

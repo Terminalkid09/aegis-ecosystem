@@ -1,11 +1,11 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle, Shield, Activity, TrendingUp,
   Cpu, HardDrive, Monitor, CheckCircle2,
 } from 'lucide-react'
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Brush,
 } from 'recharts'
 import { statsAPI, incidentsAPI, healthAPI } from '@/services/api'
 import { useAppStore } from '@/store/appStore'
@@ -24,7 +24,9 @@ export default function DashboardOverview() {
     queryKey: ['telemetry-recent'],
     // Audit schermo-nero: asArray, mai `|| []` (un oggetto truthy non-array
     // crashava i .filter a valle).
-    queryFn: () => statsAPI.getRecentTelemetry({ limit: 60 }).then(r => asArray(r.data)),
+    // 600 punti = ~30 minuti con telemetria a 10s: la finestra che serve per
+    // guardare indietro nel grafico senza riprendere tutto da capo.
+    queryFn: () => statsAPI.getRecentTelemetry({ limit: 600 }).then(r => asArray(r.data)),
     refetchInterval: 15000,
   })
 
@@ -69,20 +71,70 @@ export default function DashboardOverview() {
     return { label: 'NORMAL', color: 'text-emerald-400', glow: 'shadow-emerald-500/20', bg: 'from-emerald-950/60 to-emerald-900/20 border-emerald-800/40' }
   }, [stats])
 
-  const chartData = useMemo(() =>
+  // Ogni campione con host, in ordine di tempo. Il filtro sul null non basta:
+  // un valore non numerico finiva come "NaN" sulla Y, quindi si valida qui.
+  const telemetryRows = useMemo(() =>
     (telemetry as any[])
-      .filter(t => t.cpu_usage !== null && t.ram_usage !== null)
       .map(t => ({
-        time: new Date(t.timestamp).getTime(),
-        timeLabel: new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        cpu: Number(t.cpu_usage ?? 0).toFixed(1),
-        ram: Number(t.ram_usage ?? 0).toFixed(1),
-        host: t.hostname || t.agent_id,
+        ts: new Date(t.timestamp).getTime(),
+        host: t.hostname || t.agent_id || 'unknown',
+        cpu: Number(t.cpu_usage),
+        ram: Number(t.ram_usage),
       }))
-      .sort((a, b) => a.time - b.time)
-      .slice(-40),
+      .filter(r => Number.isFinite(r.ts) && Number.isFinite(r.cpu) && Number.isFinite(r.ram))
+      .sort((a, b) => a.ts - b.ts),
     [telemetry]
   )
+
+  // Host presenti, dal più attivo: senza questa lista non si può dire a chi
+  // appartiene una linea, e con più agenti una serie sola è una bugia.
+  const hosts = useMemo(() => {
+    const counts = new Map<string, number>()
+    telemetryRows.forEach(r => counts.set(r.host, (counts.get(r.host) || 0) + 1))
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([h]) => h)
+  }, [telemetryRows])
+
+  const [chartHost, setChartHost] = useState<string>('all')
+  const [chartWindow, setChartWindow] = useState<number>(0) // 0 = tutta la finestra
+
+  const fmtClock = (ts: number) =>
+    new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+  const chartData = useMemo(() => {
+    const rows = telemetryRows.filter(r => chartHost === 'all' || r.host === chartHost)
+    const win = chartWindow > 0 ? rows.filter(r => r.ts >= rows[rows.length - 1]!.ts - chartWindow) : rows
+
+    if (chartHost !== 'all') {
+      // Un host: un punto per campione. Niente aggregazione, niente ambiguità.
+      return win.map(r => ({
+        time: r.ts,
+        cpu: +r.cpu.toFixed(1),
+        ram: +r.ram.toFixed(1),
+        host: r.host,
+        points: 1,
+      }))
+    }
+
+    // "All hosts": un punto per campione sarebbe una linea che salta da un
+    // host all'altro. Si aggrega per finestra di telemetria (10s) e lo si dice.
+    const buckets = new Map<number, { cpu: number[]; ram: number[] }>()
+    win.forEach(r => {
+      const key = Math.floor(r.ts / 10000) * 10000
+      const b = buckets.get(key) ?? { cpu: [], ram: [] }
+      b.cpu.push(r.cpu)
+      b.ram.push(r.ram)
+      buckets.set(key, b)
+    })
+    return [...buckets.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([key, b]) => ({
+        time: key,
+        cpu: +(b.cpu.reduce((s, v) => s + v, 0) / b.cpu.length).toFixed(1),
+        ram: +(b.ram.reduce((s, v) => s + v, 0) / b.ram.length).toFixed(1),
+        host: `${b.cpu.length} host`,
+        points: b.cpu.length,
+      }))
+  }, [telemetryRows, chartHost, chartWindow])
 
   const incidents = (incidentsData as any)?.items ?? (Array.isArray(incidentsData) ? incidentsData : [])
   const degradedCount = (agents as any[]).filter((a: any) => a.status === 'stale' || a.status === 'offline' || (a.quality && String(a.quality).startsWith('degraded'))).length
@@ -213,17 +265,48 @@ export default function DashboardOverview() {
 
       {/* Chart */}
       <div className="card p-6">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="font-semibold text-white">System Performance</h3>
-          <div className="flex items-center gap-4 text-xs text-[hsl(var(--muted-foreground))]">
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" />CPU</span>
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-purple-400 inline-block" />RAM</span>
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <div>
+            <h3 className="font-semibold text-white">System Performance</h3>
+            <p className="text-[10px] text-[hsl(var(--muted-foreground))] mt-0.5">
+              {chartData.length} plotted points · one sample per telemetry interval (~10s)
+              {chartHost === 'all' && hosts.length > 0 && ` · averaged across ${hosts.length} host${hosts.length > 1 ? 's' : ''}`}
+              {' · drag the strip below to zoom, scroll inside it to pan'}
+            </p>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            {hosts.length > 1 && (
+              <select
+                value={chartHost}
+                onChange={e => setChartHost(e.target.value)}
+                className="bg-[hsl(var(--secondary))] border border-[hsl(var(--border))] rounded-md text-xs text-white px-2 py-1.5 outline-none focus:border-[hsl(var(--primary)/0.5)] max-w-[200px]"
+              >
+                <option value="all">All hosts ({hosts.length})</option>
+                {hosts.map(h => <option key={h} value={h}>{h}</option>)}
+              </select>
+            )}
+            <div className="flex rounded-md border border-[hsl(var(--border))] overflow-hidden">
+              {[{ l: '5m', v: 5 * 60_000 }, { l: '15m', v: 15 * 60_000 }, { l: '1h', v: 60 * 60_000 }, { l: 'All', v: 0 }].map(({ l, v }) => (
+                <button
+                  key={l}
+                  onClick={() => setChartWindow(v)}
+                  className={cn('px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide transition-colors',
+                    chartWindow === v ? 'bg-[hsl(var(--primary)/0.2)] text-[hsl(var(--primary))]' : 'text-[hsl(var(--muted-foreground))] hover:text-white hover:bg-[hsl(var(--secondary))]')}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-4 text-xs text-[hsl(var(--muted-foreground))]">
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" />CPU</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-purple-400 inline-block" />RAM</span>
+            </div>
           </div>
         </div>
-        <div className="h-64">
+        <div className="h-72">
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 0 }}>
+              <AreaChart data={chartData} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
                 <defs>
                   <linearGradient id="cpu" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%"  stopColor="#22d3ee" stopOpacity={0.3} />
@@ -235,15 +318,31 @@ export default function DashboardOverview() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(222 47% 14%)" />
-                <XAxis dataKey="timeLabel" tick={{ fill: '#64748b', fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                {/* Asse numerico con secondi: i campioni a 10s non si sovrappongono
+                    più sull'etichetta del minuto, e il tooltip dice l'istante esatto. */}
+                <XAxis dataKey="time" type="number" scale="time" domain={['dataMin', 'dataMax']}
+                       tickFormatter={fmtClock} tick={{ fill: '#64748b', fontSize: 11 }}
+                       tickLine={false} axisLine={false} minTickGap={40} />
                 <YAxis tick={{ fill: '#64748b', fontSize: 11 }} tickLine={false} axisLine={false} unit="%" domain={[0, 100]} width={32} />
                 <Tooltip
                   contentStyle={{ background: 'hsl(222,47%,8%)', border: '1px solid hsl(222,47%,14%)', borderRadius: '8px', fontSize: '12px' }}
                   labelStyle={{ color: '#94a3b8' }}
-                  formatter={(v: any) => [`${Number(v).toFixed(1)}%`]}
+                  labelFormatter={(t: any) => new Date(Number(t)).toLocaleString()}
+                  formatter={(v: any, name: any) => [`${Number(v).toFixed(1)}%`, name]}
                 />
-                <Area type="monotone" dataKey="cpu" stroke="#22d3ee" strokeWidth={2} fill="url(#cpu)" dot={false} name="CPU" />
-                <Area type="monotone" dataKey="ram" stroke="#a855f7" strokeWidth={2} fill="url(#ram)" dot={false} name="RAM" />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
+                <Area type="monotone" dataKey="cpu" stroke="#22d3ee" strokeWidth={2} fill="url(#cpu)"
+                      dot={chartData.length <= 150 ? { r: 1.5, fill: '#22d3ee' } : false}
+                      activeDot={{ r: 4 }} name="CPU" />
+                <Area type="monotone" dataKey="ram" stroke="#a855f7" strokeWidth={2} fill="url(#ram)"
+                      dot={chartData.length <= 150 ? { r: 1.5, fill: '#a855f7' } : false}
+                      activeDot={{ r: 4 }} name="RAM" />
+                {/* Brush = lo scroll che mancava: si restringe la finestra e si
+                    torna indietro sui punti intermedi invece di vederli
+                    compattati in una riga sola. */}
+                <Brush dataKey="time" height={24} travellerWidth={8}
+                       stroke="#475569" fill="hsl(222,47%,8%)"
+                       tickFormatter={fmtClock} />
               </AreaChart>
             </ResponsiveContainer>
           ) : (
