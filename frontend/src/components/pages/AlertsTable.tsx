@@ -18,7 +18,7 @@ export default function AlertsTable() {
     queryKey: ['alerts', filterSeverity, filterResolved],
     queryFn: () => alertsAPI.getAlerts({
       severity: filterSeverity !== 'ALL' ? filterSeverity : undefined,
-      resolved: filterResolved === 'RESOLVED' ? true : filterResolved === 'UNRESOLVED' ? false : undefined,
+      is_resolved: filterResolved === 'RESOLVED' ? true : filterResolved === 'UNRESOLVED' ? false : undefined,
       limit: 200,
     }).then(r => r.data?.items ?? r.data ?? []),
     refetchInterval: 20000,

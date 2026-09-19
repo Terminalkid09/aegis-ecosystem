@@ -28,15 +28,21 @@ async def get_alerts(
     db: AsyncSession = Depends(get_db), 
     _user = Depends(get_current_user),
     severity: Optional[str] = None,
-    is_resolved: Optional[bool] = Query(False),
+    # Senza filtro si vedono TUTTI gli alert: nascondere i risolti per default
+    # cancellava la storia del triage (audit UI: i resolved non apparivano mai).
+    # `resolved` resta accettato come alias: era il nome che la UI inviava e
+    # veniva silenziosamente ignorato.
+    is_resolved: Optional[bool] = Query(None),
+    resolved: Optional[bool] = Query(None, include_in_schema=False),
     skip: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=1000)
 ):
     stmt = select(Alert)
     if severity:
         stmt = stmt.where(Alert.severity == severity)
-    if is_resolved is not None:
-        if is_resolved:
+    effective_resolved = is_resolved if is_resolved is not None else resolved
+    if effective_resolved is not None:
+        if effective_resolved:
             stmt = stmt.where(Alert.is_resolved == True)
         else:
             stmt = stmt.where(or_(Alert.is_resolved == False, Alert.is_resolved == None))
