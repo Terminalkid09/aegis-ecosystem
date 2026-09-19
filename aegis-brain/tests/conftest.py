@@ -288,6 +288,20 @@ def _isolated_pki_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "PKI_DIR", str(tmp_path / "pki"))
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    """Contatori rate-limit azzerati prima di ogni test.
+
+    I limiti restano attivi e verificabili (429) DENTRO il singolo test, ma
+    nessun test parte con il bucket gia' consumato dai test precedenti: su CI
+    il runoff degli altri test riempiva i bucket (10/min login, 5/min register)
+    e auth/remember/userManagement fallivano a cascata con 429.
+    """
+    from app.core.rate_limit import limiter as _limiter
+    _limiter.reset()
+    yield
+
+
 @pytest.fixture
 async def test_user(db_session):
     user = User(

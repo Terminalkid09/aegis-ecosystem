@@ -352,7 +352,10 @@ def disassemble_pe(raw: bytes, *, max_instructions: int = DEFAULT_MAX_INSTRUCTIO
         "instructions": instructions,
         "instructions_analyzed": len(instructions),
         "truncated": truncated,
-        "window_bytes": len(code),
+        # La finestra e' quella *dichiarata* (quanto abbiamo chiesto di
+        # disassemblare dall'entry point), non i byte effettivamente presenti
+        # nel file: un PE piu' piccolo della finestra resta una finestra 4096.
+        "window_bytes": max_bytes,
         "imports_resolved": len(imports),
         "suspicious_calls": suspicious,
     }
