@@ -31,6 +31,18 @@ PRIVILEGED_USERS = {
 # il match per sottostringa scambiava "untrusted"/"distrusted" per trusted (audit).
 TRUSTED_SIGNATURE_STATES = frozenset({"authenticode-trusted"})
 
+def is_signed_verified(event: Any) -> bool:
+    """True se il binario ha firma Authenticode VALIDA (editore qualsiasi).
+
+    Diverso da is_trusted_signed: qui l'identita' dell'editore e' accertata
+    (catena di certificati valida), non necessariamente "Microsoft". E' il
+    criterio giusto per sopprimere le regole a bassa confidenza: node/npm
+    (OpenJS), curl (curl Foundation) sono binari firmati legittimi che il set
+    Microsoft-only classificherebbe come sospetti.
+    """
+    sig_s = str(getattr(event, "signature", None) or "").lower().strip()
+    return sig_s in TRUSTED_SIGNATURE_STATES
+
 def is_trusted_signed(event: Any) -> bool:
     """True se firma valida E publisher fidato (entrambi match esatto).
 

@@ -459,12 +459,13 @@ def rule_suspicious_execution_path(event: EventSchema) -> RuleResult:
     path_lower = _norm_path(event.process_path)
     for suspicious in SUSPICIOUS_PATHS:
         if suspicious in path_lower:
-            # Un binario firmato da vendor fidato che gira da Downloads/Desktop e'
-            # evidenza debole (installer legittimi, app portable, IDE): LOW, non
-            # HIGH. Il path resta utente-scrivibile, quindi la regola non si
-            # zittisce: cambia solo il peso. NON firmato da Downloads = HIGH.
-            from app.services.detection_context import is_trusted_signed
-            trusted = is_trusted_signed(event)
+            # Un binario con firma valida (editore qualsiasi: OpenJS, curl Fdn,
+            # Microsoft...) che gira da Downloads/Desktop e' evidenza debole
+            # (installer legittimi, app portable, IDE): LOW, non HIGH. Il path
+            # resta utente-scrivibile, quindi la regola non si zittisce: cambia
+            # solo il peso. NON firmato da Downloads = HIGH.
+            from app.services.detection_context import is_signed_verified
+            trusted = is_signed_verified(event)
             return RuleResult(
                 triggered=True,
                 severity="LOW" if trusted else "HIGH",

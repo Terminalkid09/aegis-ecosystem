@@ -311,18 +311,18 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
             # Best-effort: mai blocca la detection se il DB è down.
             ctx = {}
             try:
-                from app.services.detection_context import fetch_context, is_trusted_signed
+                from app.services.detection_context import fetch_context, is_signed_verified
                 ctx = await fetch_context(db, event)
             except Exception:
                 ctx = {}
-                from app.services.detection_context import is_trusted_signed
+                from app.services.detection_context import is_signed_verified
             else:
-                from app.services.detection_context import is_trusted_signed
+                from app.services.detection_context import is_signed_verified
 
             # Regole rumorose che si sopprimono se il binario è firmato trusted
             # (riduce FP su System32, updater, ecc. senza perdere i veri attack tool).
             TRUSTED_SUPPRESS = {"AEGIS-S009", "AEGIS-S010", "AEGIS-S012", "AEGIS-S014"}
-            trusted = is_trusted_signed(event)
+            trusted = is_signed_verified(event)
 
             for rule in ALL_RULES:
                 try:
@@ -340,6 +340,17 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                                 "CANARY %s v%s avrebbe allertato su %s (%s)",
                                 rule_result.rule_id, rule_result.version,
                                 event.process_name, rule_result.description[:160])
+                        elif (is_signed_verified(event)
+                              and rule_result.rule_id in TRUSTED_SUPPRESS
+                              and rule_result.confidence == "low"):
+                            # Rumore noto su binario firmato-trusted: un editore
+                            # fidato che lancia pwsh/curl non merita un alert
+                            # (macchine di sviluppo legittime). Se la stessa
+                            # regola scatta su binario NON trusted resta un
+                            # alert a tutti gli effetti.
+                            logger.info(
+                                "Trusted-suppressed %s su %s (firmato)",
+                                rule_result.rule_id, event.process_name)
                         else:
                             triggered_rules.append(rule_result)
                 except Exception as e:
