@@ -7,6 +7,8 @@ Proprieta' bloccate:
 - config via API admin-gated, con validazione chat_id/min_severity;
 - fail-soft: un errore di invio non rompe mai l'ingest.
 """
+import logging
+
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import patch, AsyncMock
@@ -32,15 +34,34 @@ def _alert(sev="HIGH", etype="PROCESS_CREATED", name="evil.exe", agent=None):
 @pytest.fixture(autouse=True)
 def _reset_notifier_state():
     telegram_notifier.invalidate_cache()
+    # Surface swallowed errors: il notifier e' fail-soft per contratto, ma in
+    # test un'eccezione silenziosa e' un bug invisibile (gia' successo: su CI
+    # i test positivi fallivano con sent==[] e nessun traceback nei log).
+    logging.getLogger("aegis.telegram").propagate = True
     yield
     telegram_notifier.invalidate_cache()
+    logging.getLogger("aegis.telegram").propagate = False
 
 
 async def _enable(db, chat_id="12345", min_sev="HIGH"):
+    """Config dal DB + seed deterministico della cache del notifier.
+
+    Il seed diretto rende i test positivi indipendenti dal lazy-load (già
+    coperto end-to-end da test_settings_endpoint_validation): ciò che qui si
+    verifica sono le soglie, il cooldown e il formato del messaggio.
+    """
     await app_settings.set_value(db, "telegram.enabled", "true")
     await app_settings.set_value(db, "telegram.chat_id", chat_id)
     await app_settings.set_value(db, "telegram.min_severity", min_sev)
     await db.flush()  # autoflush=False nella sessione di test: senza flush la cache non vede le righe
+    app_settings._TG_CACHE.clear()
+    app_settings._TG_CACHE.update({
+        app_settings.KEY_TG_ENABLED: "true",
+        app_settings.KEY_TG_CHAT: chat_id,
+        app_settings.KEY_TG_MIN_SEV: min_sev,
+    })
+    telegram_notifier._cache_loaded = True
+    telegram_notifier._enabled = None
 
 
 @pytest.mark.asyncio

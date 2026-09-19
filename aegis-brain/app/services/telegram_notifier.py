@@ -132,17 +132,19 @@ async def notify_alert(db: AsyncSession, alert: Any) -> None:
             return
         _last_sent[cooldown_key] = now
 
-        # Hostname con SELECT esplicita: il lazy load implicito di
-        # `alert.agent` dipende dalla versione di SQLAlchemy (2.0.36 su CI
-        # si e' rifiutato dentro la sessione di test) e la notifica non puo'
-        # reggersi su quello. Una sola query, solo quando l'alert ha superato
-        # tutte le soglie di notifica.
-        hostname = None
+        # Hostname: campo cosmetico del messaggio. La lookup e' incapsulata
+        # perche' un fallimento qui NON deve mai sopprimere la notifica (gia'
+        # successo: su CI l'errore veniva inghiottito dal fail-soft esterno e
+        # l'alert non arrivava mai). La notifica si regge su token+chat+testo.
         agent_id = str(getattr(alert, "agent_id", "") or "")
-        if agent_id:
-            res = await db.execute(
-                select(Agent.hostname).where(Agent.agent_id == agent_id))
-            hostname = res.scalar_one_or_none()
+        hostname: Optional[str] = None
+        try:
+            if agent_id:
+                res = await db.execute(
+                    select(Agent.hostname).where(Agent.agent_id == agent_id))
+                hostname = res.scalar_one_or_none()
+        except Exception:  # noqa: BLE001 — hostname mancante < alert perso
+            logger.debug("telegram: hostname lookup failed for %s", agent_id[:8])
         text = _format_message(_alert_dict(alert), hostname)
         await _send(token, chat_id, text)
         logger.info("telegram: notified %s alert on %s", sev, hostname or agent_id[:8])
