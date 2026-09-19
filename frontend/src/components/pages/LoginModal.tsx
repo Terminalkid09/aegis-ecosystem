@@ -3,10 +3,16 @@ import { Shield, Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react'
 import { authAPI } from '@/services/api'
 import { useAppStore } from '@/store/appStore'
 
+const LAST_EMAIL_KEY = 'aegis-last-email'
+
 export default function LoginModal() {
   const { login } = useAppStore()
   const [mode, setMode] = useState<'login' | 'register'>('login')
-  const [email, setEmail] = useState('')
+  // L'email dell'ultimo login su questo browser e' precompilata: dopo una
+  // scadenza di sessione l'utente digita solo la password.
+  const [email, setEmail] = useState(() => {
+    try { return localStorage.getItem(LAST_EMAIL_KEY) ?? '' } catch { return '' }
+  })
   const [password, setPassword] = useState('')
   const [username, setUsername] = useState('')
   const [showPass, setShowPass] = useState(false)
@@ -24,6 +30,7 @@ export default function LoginModal() {
         const token = body.access_token ?? body.accessToken ?? body.token
         if (token) {
           const user = body.user ?? (await authAPI.me().then(r => r.data))
+          try { localStorage.setItem(LAST_EMAIL_KEY, email) } catch {}
           login(token, user)
         }
       } else {

@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useRef, Component, type ReactNode } from 'react'
+import { useSessionRenewal } from '@/hooks/useSessionRenewal'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAppStore } from '@/store/appStore'
 import { useLiveStats } from '@/hooks/useLiveStats'
@@ -81,6 +82,9 @@ class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
 
 function AppShell() {
   const { user, setUser, currentPage, sessionHint } = useAppStore()
+  // Rinnovo silenzioso della sessione (mai piu' kick a meta' lavoro) e cache
+  // svuotata al cambio utente (mai piu' dashboard freezata dopo il re-login).
+  useSessionRenewal()
 
   // Hydrate the session on app start. The session lives in an HttpOnly cookie,
   // so it is validated (and the user refreshed) only when this browser has

@@ -17,7 +17,8 @@ export function useLiveStats() {
     const url = WS_BASE
 
     function connect() {
-      if (wsRef.current) wsRef.current.close()
+      const prev = wsRef.current
+      if (prev) prev.close()
       const ws = new WebSocket(url)
       wsRef.current = ws
 
@@ -32,7 +33,12 @@ export function useLiveStats() {
 
       ws.onerror = () => console.warn('[Aegis WS] error, will reconnect')
       ws.onclose = () => {
-        // Reconnect after 5 seconds on unexpected close
+        // Riconnette SOLO se questo socket e' ancora quello corrente: se e'
+        // stato sostituito da un connect() piu' recente, il suo onclose non
+        // deve a sua volta schedulare un'altra connessione (doppio loop).
+        if (wsRef.current !== ws) return
+        // Il browser riusa il cookie aggiornato dal rinnovo silenzioso:
+        // una sessione viva si ricollega da sola senza intervento utente.
         setTimeout(connect, 5000)
       }
     }

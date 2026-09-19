@@ -143,6 +143,22 @@ async def logout(
         )
     return {"status": "logged_out", "detail": "Token blacklisted and cookie cleared."}
 
+@router.post("/refresh", response_model=TokenResponse)
+@limiter.limit("30/minute")
+async def refresh_session(request: Request, response: Response, user: User = Depends(get_current_user)):
+    """Rinnova la sessione: nuovo token + nuovo cookie.
+
+    Esiste perche' una sessione che scade a metà lavoro costringeva al
+    re-login con perdita dello stato della pagina. Il client la chiama in
+    silenzio a meta' della finestra di validita' (e al ritorno sulla
+    finestra): l'utente non vede mai la scadenza. Un account disattivato
+    viene gia' rifiutato da get_current_user.
+    """
+    token, jti, exp = create_access_token(subject=str(user.id), role=user.role)
+    _set_auth_cookie(response, token)
+    return {"access_token": token, "token_type": "bearer", "user": user}
+
+
 @router.get("/me")
 @limiter.limit("30/minute")
 async def get_me(request: Request, user: User = Depends(get_current_user)):

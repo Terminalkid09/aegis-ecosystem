@@ -21,8 +21,9 @@ apiClient.interceptors.response.use(
   (error) => {
     const status = error?.response?.status
     const url: string = error?.config?.url || ''
+    const skipWipe = (error?.config as any)?.__skipAuthWipe === true
     const store = useAppStore.getState()
-    if (status === 401 && store.sessionHint
+    if (status === 401 && !skipWipe && store.sessionHint
         && !url.includes('/auth/login') && !url.includes('/auth/me')) {
       store.logout()
     }
@@ -36,6 +37,10 @@ export const authAPI = {
   register: (data: { username: string; email: string; password: string }) => apiClient.post('/auth/register', data),
   me: () => apiClient.get('/auth/me'),
   logout: () => apiClient.post('/auth/logout'),
+  // Silent session renewal: nuovo cookie, stesso utente. Escludo l'interceptor
+  // 401-wipe via flag: un refresh fallito NON deve sloggare l'utente (lo fa
+  // solo il 401 su una richiesta dati reale).
+  refresh: () => apiClient.post('/auth/refresh', null, { __skipAuthWipe: true } as any),
 }
 
 // ─── Telemetry / Stats ───────────────────────────────────────────────────────
