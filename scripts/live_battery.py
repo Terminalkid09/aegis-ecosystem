@@ -2,9 +2,18 @@
 
 Flusso identico a quello di un agente vero: token di deploy monouso -> /enroll
 -> agent_id + agent_secret -> ingest firmata con il segreto del device.
+
+Credenziali dashboard via env (niente segreti nel repo):
+  AEGIS_EMAIL / AEGIS_PASSWORD (o E2E_EMAIL / E2E_PASSWORD)
 """
+import os
 import requests, time, uuid, sys
 from datetime import datetime, timezone
+
+B = "http://127.0.0.1:8000"
+EMAIL = os.getenv("AEGIS_EMAIL") or os.getenv("E2E_EMAIL") or ""
+PASSWORD = os.getenv("AEGIS_PASSWORD") or os.getenv("E2E_PASSWORD") or ""
+assert EMAIL and PASSWORD, "set AEGIS_EMAIL / AEGIS_PASSWORD (dashboard credentials)"
 
 B = "http://127.0.0.1:8000"
 def fresh():
@@ -20,7 +29,7 @@ def check(name, cond, extra=""):
     else: fail.append(name); print(f"  [FAIL] {name} {extra}")
 
 S = fresh()
-r = S.post(f"{B}/api/v1/auth/login", json={"email":"aegis@aegis.prod","password":"010424CL"}, timeout=15)
+r = S.post(f"{B}/api/v1/auth/login", json={"email": EMAIL, "password": PASSWORD}, timeout=15)
 assert r.status_code == 200, r.text[:200]
 H = {"Authorization": f"Bearer {r.json()['access_token']}"}
 print("1) login admin ok")

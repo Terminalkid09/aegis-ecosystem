@@ -13,12 +13,19 @@ enrolled con il flusso reale (token deploy -> /enroll -> segreto device):
 Attribuzione per PID: ogni caso ha un pid unico, quindi ogni alert e' ricondotto
 al caso esatto che lo ha generato. Percentuali finali: FP rate, detection rate,
 accuratezza di severita' sui casi con mappatura nota.
+
+Credenziali dashboard via env (niente segreti nel repo):
+  AEGIS_EMAIL / AEGIS_PASSWORD (o E2E_EMAIL / E2E_PASSWORD)
 """
+import os
 import requests, time, uuid, sys
 from datetime import datetime, timezone
 
 B = "http://127.0.0.1:8000"
 RUN = int(time.time())
+EMAIL = os.getenv("AEGIS_EMAIL") or os.getenv("E2E_EMAIL") or ""
+PASSWORD = os.getenv("AEGIS_PASSWORD") or os.getenv("E2E_PASSWORD") or ""
+assert EMAIL and PASSWORD, "set AEGIS_EMAIL / AEGIS_PASSWORD (dashboard credentials)"
 
 def fresh():
     s = requests.Session(); s.trust_env = False
@@ -26,7 +33,7 @@ def fresh():
     return s
 
 S = fresh()
-r = S.post(f"{B}/api/v1/auth/login", json={"email":"aegis@aegis.prod","password":"010424CL"}, timeout=15)
+r = S.post(f"{B}/api/v1/auth/login", json={"email": EMAIL, "password": PASSWORD}, timeout=15)
 assert r.status_code == 200, r.text[:200]
 H = {"Authorization": f"Bearer {r.json()['access_token']}"}
 
