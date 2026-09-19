@@ -41,7 +41,7 @@ class StaticRule:
 
 # — Credential dumping / password recovery
 CREDENTIAL_TOOLS = {
-    "mimikatz.exe", "mimikatz", "wce.exe", "fgdump.exe", "pwdump.exe",
+    "mimikatz.exe", "mimikatz", "sekurlsa", "logonpasswords", "wce.exe", "fgdump.exe", "pwdump.exe",
     "gsecdump.exe", "lsadump.exe", "procdump.exe", "samdump2",
     "cachedump.exe", "creddump", "creddump7", "creddump8",
     "quarkspwdump.exe", "pwddump", "pwdump7.exe", "pwdump8.exe",
@@ -79,6 +79,11 @@ EXPLOIT_TOOLS = {
 }
 
 # — Post-exploitation / lateral movement
+# NOTA (audit FP): gli strumenti di amministrazione remota legittimi (ssh,
+# putty, mstsc/rdp, freerdp) NON stanno qui: per il solo nome non sono mai
+# indicatori di attacco — ssh.exe firmato da System32 veniva etichettato
+# "malware" CRITICAL. Stanno in REMOTE_ADMIN_TOOLS e vengono coperti dal
+# contesto (regola network tool, path, parent).
 POST_EXPLOIT_TOOLS = {
     "psexec.exe", "psexec64.exe", "psexecsvc.exe",
     "wmiexec", "wmiexec.exe", "wmic.exe", "wmic",
@@ -88,9 +93,13 @@ POST_EXPLOIT_TOOLS = {
     "impacket", "impacket.exe", "impacket_smb",
     "remcom", "pth-winexe", "winexe",
     "evil-winrm", "evil_winrm", "winrm.vbs",
-    "xfreerdp", "freerdp", "remmina",
-    "putty.exe", "plink.exe", "ssh.exe",
-    "mstsc.exe", "mstsc",
+}
+
+# Amministrazione remota legittima: nome solo = innocuo, il giudizio lo danno
+# path/parent/command_line. Esclusa dal matching "known attack tool".
+REMOTE_ADMIN_TOOLS = {
+    "putty.exe", "plink.exe", "ssh.exe", "ssh", "sshd", "sshd.exe",
+    "mstsc.exe", "mstsc", "xfreerdp", "freerdp", "remmina",
 }
 
 # — Living-off-the-land binaries (LOLBins)
