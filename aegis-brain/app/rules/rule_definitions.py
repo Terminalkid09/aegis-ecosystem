@@ -459,8 +459,16 @@ def rule_suspicious_execution_path(event: EventSchema) -> RuleResult:
     path_lower = _norm_path(event.process_path)
     for suspicious in SUSPICIOUS_PATHS:
         if suspicious in path_lower:
+            # Un binario firmato da vendor fidato che gira da Downloads/Desktop e'
+            # evidenza debole (installer legittimi, app portable, IDE): LOW, non
+            # HIGH. Il path resta utente-scrivibile, quindi la regola non si
+            # zittisce: cambia solo il peso. NON firmato da Downloads = HIGH.
+            from app.services.detection_context import is_trusted_signed
+            trusted = is_trusted_signed(event)
             return RuleResult(
-                triggered=True, severity="HIGH",
+                triggered=True,
+                severity="LOW" if trusted else "HIGH",
+                confidence="low" if trusted else "medium",
                 description=f"Process '{event.process_name}' executing from suspicious path: '{event.process_path}'.",
                 mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="Command and Scripting Interpreter",
                 mitre_technique_id="T1059"

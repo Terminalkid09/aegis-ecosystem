@@ -162,6 +162,7 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
 
     for anomaly in anomalies:
         top_proc = "unknown"
+        context = "host-wide resource spike (no per-process data): "
         processes = data.get("processes", [])
         if isinstance(processes, list) and processes:
             try:
@@ -174,6 +175,15 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                         try: pid = int(p.split('(')[1].rstrip(')'))
                         except: pid = 0
                         normalized.append({"name": name, "pid": pid, "cpu_percent": 0})
+
+                # Pseudo-processi: rappresentano tempo/macchina, non carichi di
+                # processo (System Idle = CPU inattiva). Attribuire un picco a
+                # loro era un falso positivo immediato (audit alert live).
+                _PSEUDO = {"system idle process", "idle", "memcompression",
+                           "registry", "secure system"}
+                normalized = [p for p in normalized
+                              if str(p.get("name", "")).lower().strip() not in _PSEUDO
+                              and int(p.get("pid") or 0) != 0]
 
                 metric_key = anomaly["metric"]
                 cpu_keys = ["cpu_percent", "cpu_usage", "cpu", "percent"]
@@ -192,8 +202,10 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                 )
                 if sorted_procs:
                     top_proc = _proc_str(sorted_procs[0])
+                    context = f"on process '{top_proc}': "
                 elif normalized:
                     top_proc = _proc_str(normalized[0])
+                    context = f"heaviest sampled process '{top_proc}', host-wide spike: "
             except Exception:
                 pass
         alert = Alert(
@@ -204,7 +216,7 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
             description=(
                 f"Suspicious {anomaly['metric'].replace('_', ' ').title()} spike "
                 f"(z-score={anomaly['z_score']:.1f}, threshold={anomaly.get('threshold', 3.0):.1f}) "
-                f"on process '{top_proc}': "
+                f"{context}"
                 f"current={anomaly['value']:.1f}% — "
                 f"significantly above normal baseline. "
             )
@@ -335,7 +347,13 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
 
             if triggered_rules:
                 score_map = {"CRITICAL": 100, "HIGH": 50, "MEDIUM": 25, "LOW": 10}
-                total_score = sum(score_map.get(res.severity, 10) for res in triggered_rules)
+                # Le regole a bassa confidenza (rumore noto: interpreti di script,
+                # LOLBin, beacon) contano come LOW nel punteggio cumulativo:
+                # N regole deboli non devono fabbricare un HIGH.
+                total_score = sum(
+                    (10 if getattr(res, "confidence", None) == "low" else score_map.get(res.severity, 10))
+                    for res in triggered_rules
+                )
 
                 if total_score >= 100:
                     overall_severity = "CRITICAL"
