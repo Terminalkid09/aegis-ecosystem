@@ -337,6 +337,13 @@ Docker containers come back on their own (`restart: unless-stopped`), but host a
 - **Telemetry transport**: agents push events over **HTTPS** (`POST /api/v1/telemetry/report` and `/report/batch`) with an encrypted local spool and bounded retry — **not** over a persistent WebSocket.
 - **Smooth charts**: Recharts AreaChart with Brush zoom, disabled animations for real-time data
 
+### Notifications (works fully local — no cloud deployment needed)
+- **Telegram channel**: HIGH/CRITICAL alerts are pushed to a Telegram bot chat the moment they are created, plus a periodic "Aegis is alive" heartbeat — the dashboard does not need to be open. The notifier makes **outbound HTTPS** calls to `api.telegram.org`, so a fully local stack needs no open ports, no port forwarding, no cloud host.
+  - Setup: create a bot with `@BotFather`, paste the token in **Settings → Integrations & API Keys** (`telegram_bot_token`, encrypted at rest), then the chat id in **Settings → Telegram Notifications** (min severity: HIGH or CRITICAL-only; heartbeat interval configurable). **Send test message** verifies token + chat for real before the first alert.
+  - Delivery is best-effort and fail-soft: Telegram errors are logged and deduplicated, detection and storage never depend on it. With a **cloud provider** nothing changes; with the stack local, notifications keep working as long as the machine has internet access.
+- **Browser notifications (dashboard open)**: the *Desktop Notifications* and *Audio Alarms* toggles in Settings → Alerts & Notifications are functional — native OS notifications via the Notification API and an audio beep via WebAudio, driven by the realtime alert stream.
+- **Realtime alert stream**: `/api/v1/ws/alerts` pushes every newly created alert to connected dashboards (same HttpOnly-cookie authentication as `/ws/overview`, no tokens in URLs); alert lists and counters update instantly instead of waiting for the next poll.
+
 ### Demo Agent Tag
 - Demo agents are tagged `is_demo: true`, excluded from main stats by default
 - Yellow "DEMO" badge in Endpoints list
