@@ -7,6 +7,30 @@
 # `apt-get upgrade` / `apk upgrade` al build time aggiornano gia' tutto il
 # disponibile: queste CVE restano perche' SENZA fix upstream (settembre 2026).
 
+# === group: caddy-go-binary ===
+# package: usr/bin/caddy (gobinary) in caddy:2-alpine
+# image: caddy:2-alpine
+# reason: HIGH nella stdlib Go del binario Caddy upstream (v2.11.4); Caddy qui e' SOLO reverse proxy interno (admin API non esposta, nessun handler custom), i vettori sono DoS via input patologico. Nessuna immagine alpine ricostruita con la fix al 2026-09-19: da rivalutare al prossimo upstream.
+# fix: none upstream (in attesa di rebuild dell'immagine caddy)
+# owner: platform
+# review: 2026-10-19
+# expiry: 2026-11-30
+CVE-2026-27145
+CVE-2026-33818
+CVE-2026-39821
+CVE-2026-39822
+CVE-2026-42504
+CVE-2026-46600
+CVE-2026-56852
+CVE-2026-56853
+CVE-2026-56854
+CVE-2026-56858
+CVE-2026-56859
+CVE-2026-56860
+CVE-2026-56862
+CVE-2026-84304
+CVE-2026-84445
+
 # === group: util-linux ===
 # package: util-linux/mount/bsdutils/login 2.41.5-0+deb13u1
 # image: python:3.12-slim (Debian bookworm)

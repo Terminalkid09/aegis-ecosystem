@@ -128,7 +128,12 @@ async def notify_alert(db: AsyncSession, alert: Any) -> None:
 
         cooldown_key = f"{sev}:{getattr(alert, 'event_type', '?')}"
         now = time.monotonic()
-        if now - _last_sent.get(cooldown_key, 0) < _COOLDOWN_SECONDS:
+        # `None` = mai inviato: deve partire SUBITO. Il default 0 era un bug
+        # reale (su CI l'uptime del runner e' < cooldown, quindi il primo
+        # alert di sempre veniva silenziato come "in cooldown" — e nessun log,
+        # perche' e' un return silenzioso, non un'eccezione).
+        last = _last_sent.get(cooldown_key)
+        if last is not None and now - last < _COOLDOWN_SECONDS:
             return
         _last_sent[cooldown_key] = now
 

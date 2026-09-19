@@ -50,7 +50,7 @@ def test_trivyignore_no_duplicate_cves():
         for cve in g["_cves"]:
             assert cve not in seen, f"{cve} duplicata in {seen[cve]} e {g['group']}"
             seen[cve] = g["group"]
-    assert len(seen) == 22, f"attese 22 CVE documentate, trovate {len(seen)}"
+    assert len(seen) == 37, f"attese 37 CVE documentate, trovate {len(seen)}"
 
 
 def test_trivyignore_expiry_forces_review():

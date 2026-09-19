@@ -100,6 +100,25 @@ async def test_high_alert_notified_and_cooldown(client, db_session, test_agent):
 
 
 @pytest.mark.asyncio
+async def test_first_alert_after_boot_is_not_cooldown_blocked(client, db_session, test_agent):
+    """Regressione CI: uptime macchina < cooldown non deve silenziare il primo alert.
+
+    Il cooldown era inizializzato con default 0 su time.monotonic(): su un
+    runner appena avviato now - 0 < 600 e l'alert di sempre veniva scartato
+    in silenzio. "Mai inviato" ora e' None, non 0.
+    """
+    await _enable(db_session)
+    telegram_notifier._last_sent.clear()  # nessun invio precedente
+    fake_monotonic = 120.0  # uptime simulato basso, come su un runner CI
+    sent = []
+    with _patch_token(), \
+         patch.object(telegram_notifier.time, "monotonic", return_value=fake_monotonic), \
+         patch.object(telegram_notifier, "_send", new=AsyncMock(side_effect=lambda t, c, x: sent.append(x))):
+        await telegram_notifier.notify_alert(db_session, _alert(agent=test_agent))
+    assert len(sent) == 1, "il primo alert dopo l'avvio deve sempre partire"
+
+
+@pytest.mark.asyncio
 async def test_min_severity_critical_filters_high(client, db_session, test_agent):
     """Con min_severity=CRITICAL gli HIGH restano silenziosi."""
     await _enable(db_session, min_sev="CRITICAL")
