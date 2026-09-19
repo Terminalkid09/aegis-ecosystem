@@ -35,7 +35,7 @@ services:
       retries: 5
 
   aegis-ollama:
-    image: ollama/ollama:0.3.14@sha256:e1ce9edb7ccd60ef8b4d99fffe7afdc67edfd1f4d7c6028a4253e6efa82f7e60
+    image: ollama/ollama:0.34.2@sha256:da6e0dc5651df159e45686fd663c4dbe1624a52c44d7280eeac1551d8f865532
     container_name: aegis-ollama
     profiles: ["ollama"]
     restart: unless-stopped
