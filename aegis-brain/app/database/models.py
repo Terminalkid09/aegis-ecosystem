@@ -347,6 +347,27 @@ class SyslogEvent(Base):
 # NOTE: agent_id kept as String(36) on purpose for SQLite/aio tests compat
 # (Agent.agent_id uses PG UUID which is Postgres-only).
 
+class RememberDevice(Base):
+    """Token "Mantieni l'accesso su questo dispositivo" (remember-me).
+
+    Modello GitHub/Google: il cookie contiene SOLO il token opaco; sul server
+    c'e' solo l'hash (sha256), quindi il dump del DB non permette di spacciarsi
+    per un dispositivo. Revocabile singolarmente dal pannello Users. La
+    revoca dell'account (active=False) invalida tutti i remember-token
+    dell'utente perche' la validazione passa da get_current_user.
+    """
+    __tablename__ = "remember_devices"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    device_label: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
 class EnrollToken(Base):
     """Short-lived single-use enrollment tokens for one-liner install.
 

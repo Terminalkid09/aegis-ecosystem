@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Bell, Lock, Zap, Shield, HelpCircle, Network, KeyRound, ExternalLink, RefreshCw, Sparkles } from 'lucide-react'
+import { Bell, Lock, Zap, Shield, HelpCircle, Network, KeyRound, ExternalLink, RefreshCw, Sparkles, MonitorSmartphone } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
-import { aiAPI, healthAPI, integrationsAPI } from '@/services/api'
+import { aiAPI, devicesAPI, healthAPI, integrationsAPI } from '@/services/api'
 import { PermissionGate } from '@/components/common/PermissionGate'
 import { cn } from '@/lib/utils'
 
@@ -299,6 +299,82 @@ function AISection() {
   )
 }
 
+/** Dispositivi fidati ("Mantieni l'accesso"): elenco e revoca individuale.
+ *  Il logout da un PC condiviso senza revocare da qui lascerebbe il trust
+ *  attivo: la revoca qui è il modo ufficiale per chiudere una sessione
+ *  persistente da un'altra macchina. */
+function TrustedDevicesSection() {
+  const [devices, setDevices] = useState<any[]>([])
+  const [msg, setMsg] = useState('')
+
+  const load = async () => {
+    try {
+      const res = await devicesAPI.list()
+      setDevices(res.data || [])
+    } catch { setDevices([]) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const revoke = async (id: number) => {
+    try {
+      await devicesAPI.revoke(id)
+      setMsg('Device revoked.')
+      await load()
+    } catch { setMsg('Revoke failed.') }
+  }
+
+  const fmt = (d?: string | null) => d
+    ? new Date(d).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+    : '—'
+
+  return (
+    <div className="card p-6 space-y-4 bg-[hsl(var(--secondary)/0.3)]">
+      <div className="flex items-center justify-between border-b border-[hsl(var(--border))] pb-4">
+        <div className="flex items-center gap-3">
+          <MonitorSmartphone size={20} className="text-cyan-400" />
+          <h3 className="text-lg font-bold text-white">Trusted Devices</h3>
+        </div>
+        <button onClick={load} className="btn btn-ghost btn-sm flex items-center gap-1.5">
+          <RefreshCw size={13} /> Reload
+        </button>
+      </div>
+      <p className="text-xs text-[hsl(var(--muted-foreground))]">
+        Browsers where "Stay signed in" is active. Logging out on a shared
+        machine ends its session, but revoke here to remove the 30-day trust.
+      </p>
+      {msg && <p className="text-xs text-cyan-400">{msg}</p>}
+      {!devices.length ? (
+        <p className="text-sm text-[hsl(var(--muted-foreground))]">No trusted devices.</p>
+      ) : (
+        <div className="space-y-2">
+          {devices.map(d => (
+            <div key={d.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-[hsl(var(--background))] border border-[hsl(var(--border))]">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-white truncate">
+                  {d.device_label || 'Unknown device'}
+                  {d.revoked && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">revoked</span>}
+                </p>
+                <p className="text-[10px] text-[hsl(var(--muted-foreground))] truncate">
+                  Added {fmt(d.created_at)} · Last used {fmt(d.last_used_at)} · Expires {fmt(d.expires_at)}
+                </p>
+              </div>
+              {!d.revoked && (
+                <button
+                  onClick={() => revoke(d.id)}
+                  className="btn btn-ghost btn-sm shrink-0 hover:bg-red-500/10 hover:text-red-400"
+                >
+                  Revoke
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SettingCard({ icon: Icon, title, description, enabled, onChange, highlight = false }: any) {
   return (
     <div className={cn("card p-6 flex items-center justify-between transition-all group", highlight ? "border-[hsl(var(--primary)/0.5)] shadow-[0_0_15px_rgba(6,182,212,0.1)]" : "hover:border-[hsl(var(--primary)/0.3)]")}>
@@ -401,6 +477,8 @@ export default function SettingsPage() {
           <AISection />
 
           <ApiKeysSection />
+
+          <TrustedDevicesSection />
 
           <div className="card p-6 space-y-6 bg-[hsl(var(--secondary)/0.3)]">
             <div className="flex items-center gap-3 border-b border-[hsl(var(--border))] pb-4">

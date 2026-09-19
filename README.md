@@ -458,8 +458,12 @@ Docker containers come back on their own (`restart: unless-stopped`), but host a
 | Endpoint | Auth | Purpose |
 | --- | --- | --- |
 | `POST /api/v1/auth/register` | none (or admin if `ALLOW_OPEN_REGISTRATION=false`) | Create dashboard user (validated, rate-limited) |
-| `POST /api/v1/auth/login` | none | Get JWT (rate-limited + per-account throttle) |
-| `POST /api/v1/auth/logout` | Bearer JWT | Blacklist token, clear cookie |
+| `POST /api/v1/auth/login` | none | Get JWT (rate-limited + per-account throttle); `remember: true` issues a 30-day device-trust cookie |
+| `POST /api/v1/auth/refresh` | session cookie | Silent session renewal (new JWT + cookie, same user) |
+| `POST /api/v1/auth/remember` | `aegis_remember` HttpOnly cookie | Silent re-login from a trusted device; rotates the device token on every use |
+| `GET /api/v1/auth/devices` | Bearer JWT | List trusted devices ("Stay signed in") with last-used timestamps |
+| `DELETE /api/v1/auth/devices/{id}` | Bearer JWT | Revoke a trusted device; its cookie dies at next use |
+| `POST /api/v1/auth/logout` | Bearer JWT | Blacklist token, clear cookie, end device trust |
 | `GET /api/v1/auth/me` | Bearer JWT | Current user profile (rate-limited 30/min) |
 | `GET /api/v1/users` | `manage` (admin) | List dashboard accounts (email, role, active) |
 | `PATCH /api/v1/users/{id}` | `manage` (admin) | Enable/disable an account or change its role; disabled accounts are locked out of login and their existing JWTs stop working immediately; last-active-admin is protected (409) |
@@ -536,6 +540,7 @@ This project is designed for local security labs and development. Before product
 - For production, use `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` to avoid exposing Postgres/Redis ports.
 - Replace Caddy `tls internal` with proper TLS certificates (Let's Encrypt).
 - Store JWTs in a safer browser session model than long-lived `localStorage` tokens.
+- **Remember-me done defensively**: the device cookie carries only an opaque token (server keeps the SHA-256), it is **rotated on every use** so a stolen cookie replays exactly once, it is scoped to the auth paths (it never rides along on data requests), it sits behind the same origin/CSRF gate as the session cookie, and every device is listed and revocable from **Settings → Trusted Devices**. Logging out ends the trust too — the model is GitHub's, not "forever sessions".
 - Use incremental Alembic migrations for all schema changes (migrations are idempotent).
 - Keep `AEGIS_LOG_LEVEL=INFO` or stricter in production.
 

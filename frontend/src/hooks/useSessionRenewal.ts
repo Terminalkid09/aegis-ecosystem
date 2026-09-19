@@ -40,6 +40,21 @@ export function useSessionRenewal() {
     }
   }, [user?.id, queryClient])
 
+  // Remember-me: se non c'e' sessione ma il browser ha un dispositivo fidato
+  // ("Mantieni l'accesso"), rientra in silenzio senza chiedere le credenziali.
+  // Un solo tentativo per montaggio: 401 = nessun trust valido, caso normale.
+  const rememberTriedRef = useRef(false)
+  useEffect(() => {
+    if (user || rememberTriedRef.current) return
+    rememberTriedRef.current = true
+    authAPI.rememberLogin()
+      .then((res: any) => {
+        const { access_token: token, user: u } = res.data
+        if (u) useAppStore.getState().login(token || 'cookie-session', u)
+      })
+      .catch(() => { /* nessun dispositivo fidato: si passa dal login */ })
+  }, [user?.id])
+
   useEffect(() => {
     if (!user) return
 

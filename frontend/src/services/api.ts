@@ -33,7 +33,10 @@ apiClient.interceptors.response.use(
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 export const authAPI = {
-  login: (email: string, password: string) => apiClient.post('/auth/login', { email, password }),
+  // remember: "Mantieni l'accesso su questo dispositivo" — il server emette un
+  // cookie remember separato (30 gg, revocabile da Settings → Dispositivi).
+  login: (email: string, password: string, remember = false) =>
+    apiClient.post('/auth/login', { email, password, remember }),
   register: (data: { username: string; email: string; password: string }) => apiClient.post('/auth/register', data),
   me: () => apiClient.get('/auth/me'),
   logout: () => apiClient.post('/auth/logout'),
@@ -41,6 +44,16 @@ export const authAPI = {
   // 401-wipe via flag: un refresh fallito NON deve sloggare l'utente (lo fa
   // solo il 401 su una richiesta dati reale).
   refresh: () => apiClient.post('/auth/refresh', null, { __skipAuthWipe: true } as any),
+  // Login silenzioso da dispositivo fidato ("Mantieni l'accesso"): scambia il
+  // remember-token con una nuova sessione. 401 se non c'e' trust: fallimento
+  // normale, non deve sloggare nulla.
+  rememberLogin: () => apiClient.post('/auth/remember', null, { __skipAuthWipe: true } as any),
+}
+
+// ─── Dispositivi fidati (remember-me) ──────────────────────────────────────
+export const devicesAPI = {
+  list: () => apiClient.get('/auth/devices'),
+  revoke: (id: number) => apiClient.delete(`/auth/devices/${id}`),
 }
 
 // ─── Telemetry / Stats ───────────────────────────────────────────────────────

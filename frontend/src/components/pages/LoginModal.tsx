@@ -15,6 +15,7 @@ export default function LoginModal() {
   })
   const [password, setPassword] = useState('')
   const [username, setUsername] = useState('')
+  const [remember, setRemember] = useState(false)
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -25,7 +26,7 @@ export default function LoginModal() {
     setError(null)
     try {
       if (mode === 'login') {
-        const res = await authAPI.login(email, password)
+        const res = await authAPI.login(email, password, remember)
         const body = res.data
         const token = body.access_token ?? body.accessToken ?? body.token
         if (token) {
@@ -35,7 +36,7 @@ export default function LoginModal() {
         }
       } else {
         await authAPI.register({ username, email, password })
-        const res = await authAPI.login(email, password)
+        const res = await authAPI.login(email, password, remember)
         const body = res.data
         const token = body.access_token ?? body.token
         if (token) {
@@ -144,6 +145,18 @@ export default function LoginModal() {
                 </button>
               </div>
             </div>
+
+            {mode === 'login' && (
+              <label className="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="accent-[hsl(var(--primary))] w-3.5 h-3.5"
+                  checked={remember}
+                  onChange={e => setRemember(e.target.checked)}
+                />
+                Mantieni l&apos;accesso su questo dispositivo (30 giorni)
+              </label>
+            )}
 
             {error && (
               <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs">

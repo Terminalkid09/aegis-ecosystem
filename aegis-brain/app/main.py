@@ -374,7 +374,12 @@ def _origin_allowed(origin: str) -> bool:
 
 @app.middleware("http")
 async def csrf_origin_middleware(request: Request, call_next):
-    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.cookies.get("aegis_token"):
+    # Il remember cookie vale quanto la sessione ai fini CSRF: una richiesta
+    # mutante che porta l'uno o l'altro deve dimostrare l'origine. Per browser
+    # SameSite=strict blocca gia' l'invio cross-site, ma questo e' il secondo
+    # lucchetto (client non-browser, estensioni, proxy).
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and (
+            request.cookies.get("aegis_token") or request.cookies.get("aegis_remember")):
         origin = request.headers.get("origin", "").rstrip("/")
         if not _origin_allowed(origin):
             return JSONResponse(status_code=403, content={"detail": "Invalid request origin"})
