@@ -31,6 +31,16 @@ CVE-2026-56862
 CVE-2026-84304
 CVE-2026-84445
 
+# === group: caddy-grpc-go ===
+# package: google.golang.org/grpc (gobinary) in caddy:2-alpine
+# image: caddy:2-alpine
+# reason: modulo gRPC-Go nel binario Caddy upstream (xDS RBAC/HTTP2, GHSA-hrxh-6v49-42gf); l'admin API gRPC non e' esposta (Caddy e' solo reverse proxy interno). Fix in grpc 1.82.1: da rivalutare quando upstream ricostruisce l'immagine.
+# fix: none upstream (in attesa di rebuild dell'immagine caddy)
+# owner: platform
+# review: 2026-10-19
+# expiry: 2026-11-30
+GHSA-hrxh-6v49-42gf
+
 # === group: util-linux ===
 # package: util-linux/mount/bsdutils/login 2.41.5-0+deb13u1
 # image: python:3.12-slim (Debian bookworm)

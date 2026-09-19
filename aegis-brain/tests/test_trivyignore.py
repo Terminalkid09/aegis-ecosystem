@@ -7,7 +7,10 @@ REPO = os.path.join(os.path.dirname(__file__), "..", "..")
 IGNORE = os.path.join(REPO, ".trivyignore")
 
 REQUIRED_KEYS = {"group", "package", "image", "reason", "fix", "owner", "review", "expiry"}
-CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$")
+# Trivy riporta l'ID della fonte: CVE per NVD, GHSA per advisory GitHub
+# (es. librerie Go dentro binari upstream come il caddy builtin). L'alfabeto
+# GHSA esclude 0,1,a,e,i,o,u,l,n,s,t,y.
+CVE_RE = re.compile(r"^(CVE-\d{4}-\d{4,}|GHSA-[23456789cfghjmpqrvwxz]{4}-[23456789cfghjmpqrvwxz]{4}-[23456789cfghjmpqrvwxz]{4})$")
 
 
 def _parse():
@@ -50,7 +53,7 @@ def test_trivyignore_no_duplicate_cves():
         for cve in g["_cves"]:
             assert cve not in seen, f"{cve} duplicata in {seen[cve]} e {g['group']}"
             seen[cve] = g["group"]
-    assert len(seen) == 37, f"attese 37 CVE documentate, trovate {len(seen)}"
+    assert len(seen) == 38, f"attese 38 advisory documentate, trovate {len(seen)}"
 
 
 def test_trivyignore_expiry_forces_review():
