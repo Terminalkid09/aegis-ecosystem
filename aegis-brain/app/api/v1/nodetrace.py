@@ -23,6 +23,7 @@ class RegisterRequest(BaseModel):
     os: str
     enroll_key: str
     mac_address: Optional[str] = None
+    agent_type: str = "nodetrace"
 
 class TelemetryUpdate(BaseModel):
     device_id: str
@@ -84,16 +85,8 @@ async def register_agent(payload: RegisterRequest, db: AsyncSession = Depends(ge
     _expected = (settings.AGENT_ENROLL_KEY or "").strip()
     valid_static = bool(_expected) and _hmac.compare_digest(_key, _expected)
     if not valid_static:
-        import hashlib
-        from app.database.models import EnrollToken
-        digest = hashlib.sha256(payload.enroll_key.strip().encode()).hexdigest()
-        r = await db.execute(select(EnrollToken).where(EnrollToken.token_hash == digest))
-        tok = r.scalars().first()
-        now = datetime.now(timezone.utc)
-        if not (tok and not tok.revoked and not tok.used_at and tok.expires_at and tok.expires_at.replace(tzinfo=timezone.utc) > now):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid enrollment key")
-        tok.used_at = now
-        tok.used_by_hostname = payload.hostname[:255]
+        from app.services.enrollment import consume_enroll_token
+        await consume_enroll_token(db, payload.enroll_key, "nodetrace", payload.hostname)
 
     # Check for existing agent
     result = await db.execute(select(Agent).where(Agent.hostname == payload.hostname, Agent.os_type == payload.os))

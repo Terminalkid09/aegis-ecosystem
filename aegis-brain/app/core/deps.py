@@ -83,6 +83,10 @@ async def _validate_token(token: str, db: AsyncSession) -> User:
     user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    # Account disattivato dall'admin: il token esistente perde valore subito,
+    # senza attendere la sua scadenza naturale.
+    if not user.active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account disabled")
     return user
 
 

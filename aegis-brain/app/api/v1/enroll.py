@@ -29,6 +29,7 @@ class EnrollRequest(BaseModel):
     hostname: str
     os: str
     enroll_key: str
+    agent_type: str = "aegis-guard"
 
 class EnrollResponse(BaseModel):
     agent_id: str
@@ -47,20 +48,13 @@ async def enroll_agent(request: Request, payload: EnrollRequest, db: AsyncSessio
     )
     used_token: EnrollToken | None = None
     if not valid_static:
-        digest = hashlib.sha256(payload.enroll_key.strip().encode()).hexdigest()
-        r = await db.execute(select(EnrollToken).where(EnrollToken.token_hash == digest))
-        tok = r.scalars().first()
-        now = datetime.now(timezone.utc)
-        not_expired = (tok is not None and tok.expires_at is not None
-                       and tok.expires_at.replace(tzinfo=timezone.utc) > now)
-        if tok and not tok.revoked and not tok.used_at and not_expired:
-            used_token = tok
-        else:
+        from app.services.enrollment import consume_enroll_token
+        try:
+            used_token = await consume_enroll_token(
+                db, payload.enroll_key, payload.agent_type, payload.hostname)
+        except HTTPException:
             logger.warning(f"Invalid enrollment attempt from {payload.hostname}")
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid enrollment key")
-    if used_token:
-        used_token.used_at = datetime.now(timezone.utc)
-        used_token.used_by_hostname = payload.hostname[:255]
+            raise
 
     agent_id = uuid.uuid4()
     agent_secret = secrets.token_urlsafe(32)
@@ -117,7 +111,7 @@ async def enroll_agent(request: Request, payload: EnrollRequest, db: AsyncSessio
         agent_id=agent_id,
         hostname=payload.hostname,
         os_type=payload.os,
-        agent_type="aegis-guard",
+        agent_type=payload.agent_type,
         device_token_hash=hash_password(agent_secret)
     )
     db.add(new_agent)

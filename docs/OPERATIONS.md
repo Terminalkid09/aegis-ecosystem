@@ -21,6 +21,30 @@ Prerequisiti: Docker + Compose v2, Python 3.10+ per `scripts/run_integration_tes
 Verifiche: `GET /health/live|ready|startup` sul brain; Caddy con certificato
 reale in prod (sostituire `tls internal` nel Caddyfile con email ACME).
 
+## 1b. Enrollment token e servizi host
+
+Da **Deployment Manager** creare un token per `Aegis-Guard`, `NodeTrace` o
+`Both agents`. Il token è breve e monouso per ogni tipo di agent: con `Both`
+Guard e NodeTrace effettuano due enrollment separati sullo stesso host.
+
+Il comando generato:
+
+- scarica l'artefatto dal Brain usando il token bootstrap;
+- configura l'URL del Brain e le URL di enrollment/heartbeat;
+- registra `AegisGuard`/`AegisNodeTrace` come servizi Windows, oppure crea le
+  unità systemd equivalenti su Linux;
+- abilita l'avvio automatico, il restart dopo crash e verifica lo stato del
+  servizio prima di terminare con successo.
+
+La connessione alla dashboard remota è opzionale. Se disattivata, i file
+vengono estratti ma i servizi non vengono avviati, perché un agent senza
+endpoint di enrollment configurato non deve partire in modo ambiguo.
+
+La dashboard locale sull'endpoint non è ancora distribuita: non selezionarla
+come requisito operativo. Per aziende isolate usare una dashboard centrale
+raggiungibile dalla rete interna; il supporto a una dashboard locale richiede
+un bundle statico, un server locale e una configurazione API autenticata.
+
 ## 2. PKI bootstrap (una volta, prima degli agent)
 
 ```bash

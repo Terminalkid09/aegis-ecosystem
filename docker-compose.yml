@@ -55,9 +55,25 @@ services:
     ports:
       - "127.0.0.1:${BRAIN_PORT_EXTERNAL:-8000}:8000"
     environment:
-      # Profilo lab: DEBUG=true (registrazione aperta permessa). La prod
-      # usa l'overlay prod (DEBUG=false + registrazione chiusa, fail-closed).
-      DEBUG: "true"
+      # Il contenitore vede SOLO le variabili elencate qui: quelle scritte nel
+      # .env ma assenti da questo blocco vengono ignorate in silenzio (era il
+      # caso di DEBUG, scritto a mano a "true", e di JWT_EXPIRE_MINUTES).
+      #
+      # I profili sono namespaced AEGIS_* di proposito: compose fa vincere
+      # l'ambiente dell'HOST sul .env, e un nome generico come DEBUG e' gia'
+      # definito su molte macchine -> il brain partiva in lab mode anche con
+      # DEBUG=false nel .env, senza validazione dei secret e senza il blocco
+      # CORS wildcard. Con il prefisso la configurazione e' dell'applicazione,
+      # non dell'host. Default = profilo produzione (fail-closed).
+      DEBUG: ${AEGIS_DEBUG:-false}
+      ALLOW_OPEN_REGISTRATION: ${AEGIS_ALLOW_OPEN_REGISTRATION:-false}
+      # `Secure` sui cookie: true di default (richiede HTTPS). Va messo a false
+      # nel .env solo per un accesso in HTTP, altrimenti il login non regge.
+      COOKIE_SECURE: ${AEGIS_COOKIE_SECURE:-true}
+      JWT_EXPIRE_MINUTES: ${AEGIS_JWT_EXPIRE_MINUTES:-60}
+      JWT_ALGORITHM: ${AEGIS_JWT_ALGORITHM:-HS256}
+      AI_RATE_LIMIT_PER_MIN: ${AEGIS_AI_RATE_LIMIT_PER_MIN:-20}
+      VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@aegis-redis:6379
       REDIS_HOST: aegis-redis

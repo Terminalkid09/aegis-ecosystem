@@ -132,3 +132,44 @@ async def test_drop_old_partitions_returns_empty_when_catalog_unavailable():
             raise RuntimeError("no pg_inherits")
 
     assert await siem_store.drop_old_partitions(FlatSession(), retention_days=30) == []
+
+
+# ── caratteri di controllo non memorizzabili (audit: NUL byte) ────────────────
+#
+# `store_events` inserisce tutte le righe con UN solo INSERT: una riga che il
+# database rifiuta (0x00 in una colonna text) faceva fallire l'intero blocco, e
+# in un log sorgente qualche byte binario dentro è la norma. Misurato dal vivo:
+# la sorgente rispondeva "store failed" e le righe del blocco andavano perse.
+
+
+def test_control_chars_stripped_from_a_log_line():
+    event = _event(open(os.path.join(LOGS, "syslog.log"), encoding="utf-8").readline())
+    event.message = "sshd: auth failure\x00 for user root"
+    event.command_line = "/usr/bin/ssh\x00-d"
+
+    row = siem_store.event_to_row(event)
+
+    assert "\x00" not in row["message"]
+    assert row["message"] == "sshd: auth failure for user root"
+    assert row["command_line"] == "/usr/bin/ssh-d"
+
+
+def test_control_chars_stripped_from_json_extra():
+    """Anche jsonb rifiuta \\u0000 dentro una stringa."""
+    event = _event(open(os.path.join(LOGS, "syslog.log"), encoding="utf-8").readline())
+    event.extra = {"raw": "a\x00b", "nested": {"k": ["c\x00d"]}}
+
+    row = siem_store.event_to_row(event)
+
+    assert row["extra"]["raw"] == "ab"
+    assert row["extra"]["nested"]["k"] == ["cd"]
+
+
+def test_clean_event_is_untouched_by_the_strip():
+    """Controprova: la ripulitura non altera un evento senza caratteri di
+    controllo (nessuna riscrittura silenziosa dei dati)."""
+    event = _event(open(os.path.join(LOGS, "syslog.log"), encoding="utf-8").readline())
+    row = siem_store.event_to_row(event)
+    assert "\x00" not in (row["message"] or "")
+    assert row["message"] == event.message
+    assert row["hostname"] == event.hostname

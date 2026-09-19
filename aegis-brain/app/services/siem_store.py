@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.redaction import strip_control_chars
 from app.database.models import LogSource, SiemEvent
 from app.ingest.base import UnifiedEvent
 
@@ -138,8 +139,26 @@ async def claim_event(event_id: str) -> bool:
 
 # ─── inserimento ─────────────────────────────────────────────────────────────
 
+def _strip_structure(value: Any, changed: List[bool]) -> Any:
+    """Rimuove i caratteri di controllo non memorizzabili da una riga.
+
+    Vale per `extra` (JSON) oltre che per i campi testuali: anche un campo
+    jsonb rifiuta \\u0000 nella stringa.
+    """
+    if isinstance(value, str):
+        cleaned = strip_control_chars(value)
+        if cleaned != value:
+            changed[0] = True
+        return cleaned
+    if isinstance(value, dict):
+        return {k: _strip_structure(v, changed) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_strip_structure(v, changed) for v in value]
+    return value
+
+
 def event_to_row(event: UnifiedEvent) -> Dict[str, Any]:
-    return {
+    row = {
         "time": event.time,
         "source": event.source,
         "source_type": event.source_type,
@@ -178,6 +197,19 @@ def event_to_row(event: UnifiedEvent) -> Dict[str, Any]:
         "search_text": event.searchable_text()[:4000],
         "extra": event.extra or None,
     }
+    # Perché qui e non nel parser: `store_events` inserisce TUTTE le righe con
+    # un solo INSERT, quindi una riga che il database rifiuta (NUL in una
+    # colonna text) faceva fallire l'intero blocco — e un log sorgente con
+    # qualche byte binario dentro è la norma, non l'eccezione. Risultato
+    # osservato: `store failed`, cioè centinaia di righe di log perse per un
+    # carattere. Si ripulisce la riga e la perdita si DICHIARA nel log.
+    changed = [False]
+    clean = {k: _strip_structure(v, changed) for k, v in row.items()}
+    if changed[0]:
+        logger.warning("Evento da %s ripulito da caratteri di controllo "
+                       "non memorizzabili (event_id=%s)",
+                       event.source, event.event_id or "assente")
+    return clean
 
 
 async def store_events(db: AsyncSession, events: Sequence[UnifiedEvent]) -> int:

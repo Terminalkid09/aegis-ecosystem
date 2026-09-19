@@ -45,3 +45,55 @@ def test_sanitize_event_redacts_command_line():
 
 def test_redact_null_passthrough():
     assert redact_text(None) is None
+
+
+# --- caratteri di controllo non memorizzabili (audit: NUL byte) -------------
+
+
+def test_nul_byte_removed_from_every_string():
+    """Un NUL non ha rappresentazione in una colonna text: si toglie.
+
+    Non è cosmetico: PostgreSQL rifiuta 0x00 ('invalid byte sequence for
+    encoding "UTF8: 0x00"'), quindi un evento con un NUL non era sporco, era
+    non scrivibile — e quell'errore, lungo l'ingestion, diventava un 500.
+    """
+    out = sanitize_event({
+        "process_name": "robust\x00.exe",
+        "parent_process_name": "explorer\x00.exe",  # campo passthrough
+        "hostname": "host\x00-01",
+        "command_line": "run \x00 --flag",
+    })
+    assert out["process_name"] == "robust.exe"
+    assert out["parent_process_name"] == "explorer.exe"
+    assert out["hostname"] == "host-01"
+    assert "\x00" not in out["command_line"]
+
+
+def test_nul_byte_removed_in_nested_structures():
+    out = sanitize_event({
+        "process_name": "a.exe",
+        "processes": [{"name": "b\x00.exe"}],
+        "network_flows": [{"dst": "1\x002.3.4"}],
+    })
+    assert out["processes"][0]["name"] == "b.exe"
+    assert out["network_flows"][0]["dst"] == "12.3.4"
+
+
+def test_removal_is_declared_in_quality():
+    """La perdita si dichiara: un evento alterato deve essere riconoscibile."""
+    out = sanitize_event({"process_name": "a\x00.exe"})
+    assert "stripped-ctrl" in (out.get("quality") or "")
+
+
+def test_clean_event_has_no_quality_marker():
+    """Controprova: senza caratteri da togliere, `quality` non si inventa nulla."""
+    out = sanitize_event({"process_name": "a.exe", "command_line": "echo ok"})
+    assert not out.get("quality")
+
+
+def test_tab_and_newline_are_legitimate():
+    """TAB/LF/CR restano: sono normali in una command line e nei log."""
+    cmd = "prog.exe\t-a\n-b\r\n"
+    out = sanitize_event({"command_line": cmd})
+    assert out["command_line"] == cmd
+    assert not out.get("quality")

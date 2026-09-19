@@ -270,6 +270,27 @@ SUSPICIOUS_PARENT_CHILD = [
      "CRITICAL", "System process spawning script interpreter: '{parent}' -> '{child}'.",
      "TA0004", "Privilege Escalation", "Process Injection", "T1055"),
 
+    # Un browser che lancia un binario di SISTEMA e' la firma di un'iniezione o
+    # di un process hollowing. Mancava del tutto: la batteria "difficile" ha
+    # mostrato che `chrome.exe -> svchost.exe` non generava nulla, mentre il
+    # ramo inverso (system -> interprete) era gia' coperto. `lsass.exe` sta a
+    # parte perche' generarlo da un'app utente e' credenzial-theft, non
+    # anomalia di lineage.
+    (("chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe",
+      "iexplore.exe", "winword.exe", "excel.exe", "powerpnt.exe",
+      "acrord32.exe", "acrord64.exe", "outlook.exe"),
+     ("lsass.exe",),
+     "CRITICAL", "User application spawning lsass.exe: '{parent}' -> '{child}'.",
+     "TA0004", "Privilege Escalation", "Process Injection", "T1055"),
+
+    (("chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe",
+      "iexplore.exe", "winword.exe", "excel.exe", "powerpnt.exe",
+      "acrord32.exe", "acrord64.exe", "outlook.exe"),
+     ("svchost.exe", "services.exe", "wininit.exe", "winlogon.exe",
+      "csrss.exe", "smss.exe", "lsaiso.exe"),
+     "HIGH", "User application spawning a system process: '{parent}' -> '{child}'.",
+     "TA0004", "Privilege Escalation", "Process Injection", "T1055"),
+
     (("explorer.exe", "explorer"),
      ("powershell", "cmd.exe", "wscript.exe", "mshta.exe",
       "regsvr32.exe", "rundll32.exe", "certutil.exe"),
@@ -903,6 +924,153 @@ def rule_discovery_commands(event: EventSchema) -> RuleResult:
     return RuleResult(triggered=False)
 
 
+# ── Manomissione dei controlli e distruzione delle evidenze ─────────────
+# Perché servono: la batteria di tecniche "difficili" (azioni di un operatore
+# reale, non nomi di tool noti) ha misurato 6 detection mancate su 18, e
+# quattro erano la stessa idea — spegnere ciò che osserva (AV, log, firewall)
+# o distruggere ciò da cui si ripristina (backup, shadow copy, recovery).
+# Non sono tecniche esotiche: sono il primo passo dopo l'accesso, e senza una
+# regola dedicata Aegis era cieco esattamente lì. L'azione sta negli argomenti:
+# `wevtutil`, `bcdedit`, `sc` sono binari di sistema legittimi.
+
+# Prodotti/servizi di sicurezza: si riconoscono dal nome del servizio, non dal
+# nome del processo che li tocca.
+_SECURITY_SERVICES = (
+    "windefend", "wdnissvc", "sense", "msmpeng", "mpssvc",
+    "csfalconservice", "csagent", "crowdstrike", "sophos", "savservice",
+    "mcshield", "mcafee", "ekrn", "avast", "avp", "avgnt", "trendmicro",
+    "carbonblack", "cbdefense", "sentinelone", "sentinelagent",
+)
+# Verbi che FERMANO o DISABILITANO un servizio. `sc config <svc> start= auto`
+# (riattivazione) non deve scattare: per quel verbo si pretende che il nuovo
+# stato sia disabled/demand.
+_SERVICE_STOP_MARKERS = (
+    "sc stop", "sc delete", "net stop", "stop-service", "set-service",
+    "remove-service",
+)
+_SECURITY_PROCESS_KILL = ("taskkill", "stop-process", "kill ")
+# Protezioni ed esclusioni di Defender.
+_DEFENDER_TAMPER_MARKERS = (
+    "disablerealtimemonitoring", "disableioavprotection",
+    "disablebehaviormonitoring", "disablescriptscanning",
+    "disableblockatfirstseen", "disableantispyware", "disableantivirus",
+    "-exclusionpath", "-exclusionprocess", "-exclusionextension",
+    "-disableintrusionpreventionsystem", "-disablesandbox",
+)
+# Cancellazione delle tracce nei log (T1070.001).
+_LOG_CLEAR_MARKERS = (
+    "wevtutil cl", "wevtutil clear-log", "clear-eventlog", "remove-eventlog",
+    "/e:false", "wevtutil sl",
+)
+# Distruzione del ripristino: backup, shadow copy, recovery (T1490).
+_RECOVERY_DESTRUCTION = (
+    "recoveryenabled no", "bootstatuspolicy ignoreallfailures",
+    "wbadmin delete catalog", "wbadmin delete systemstatebackup",
+    "vssadmin delete shadows", "vssadmin resize shadowstorage",
+    "delete shadows /all", "diskshadow",
+)
+
+
+def rule_security_control_tampering(event: EventSchema) -> RuleResult:
+    """Spegnere o accecare i controlli di sicurezza (T1562 Impair Defenses).
+
+    Copre i tre modi pratici: disabilitare/fermare il servizio di un prodotto
+    di sicurezza, ucciderne il processo, e togliere le protezioni o aggiungere
+    esclusioni a Defender. Il firewall spento e i criteri di audit azzerati
+    rientrano nella stessa tecnica.
+
+    Non scatta su un servizio di sicurezza *riattivato* (`sc config ... start=
+    auto`) né sull'ispezione dello stato (`sc query`, `net start` senza argomenti).
+    """
+    cmd = " ".join((event.command_line or "").lower().split())
+    cmd = re.sub(r"\.exe\b", "", cmd)
+    if not cmd:
+        return RuleResult(triggered=False)
+
+    def _fire(reason: str, severity: str = "HIGH") -> RuleResult:
+        return RuleResult(
+            triggered=True, severity=severity,
+            description=(f"Security control tampering ({reason}) by "
+                         f"'{event.process_name}': '{event.command_line[:200]}'."),
+            mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion",
+            mitre_technique="Impair Defenses", mitre_technique_id="T1562",
+        )
+
+    touches_security_product = any(s in cmd for s in _SECURITY_SERVICES)
+    if touches_security_product:
+        if any(m in cmd for m in _SERVICE_STOP_MARKERS):
+            return _fire("security service stopped/disabled", "CRITICAL")
+        if "sc config" in cmd and any(w in cmd for w in ("disabled", "demand")):
+            return _fire("security service set to disabled", "CRITICAL")
+        if any(k in cmd for k in _SECURITY_PROCESS_KILL):
+            return _fire("security product process terminated", "CRITICAL")
+
+    if "mppreference" in cmd and any(m in cmd for m in _DEFENDER_TAMPER_MARKERS):
+        return _fire("Defender protection disabled or exclusion added", "CRITICAL")
+
+    # Firewall: `netsh advfirewall set ... state off`, `netsh firewall set
+    # opmode disable`, `Set-NetFirewallProfile -Enabled false`.
+    if "firewall" in cmd or "netfirewallprofile" in cmd:
+        if "state off" in cmd or "opmode disable" in cmd or "-enabled false" in cmd \
+                or "-enabled 0" in cmd:
+            return _fire("host firewall disabled")
+
+    # Criteri di audit azzerati: senza audit policy gli eventi non vengono
+    # nemmeno generati (T1562.002), quindi è più grave di cancellarli.
+    if "auditpol" in cmd and ("/clear" in cmd or "remove" in cmd):
+        return _fire("audit policy cleared", "CRITICAL")
+
+    return RuleResult(triggered=False)
+
+
+def rule_event_log_clearing(event: EventSchema) -> RuleResult:
+    """Cancellazione o disattivazione dei log di Windows (T1070.001).
+
+    Distinta dal tampering: qui non si spegne il controllo, si distrugge
+    l'evidenza già raccolta. È il gesto che rende impossibile l'indagine, e per
+    questo è CRITICAL anche da solo.
+    """
+    cmd = " ".join((event.command_line or "").lower().split())
+    cmd = re.sub(r"\.exe\b", "", cmd)
+    if not cmd or not any(m in cmd for m in _LOG_CLEAR_MARKERS):
+        return RuleResult(triggered=False)
+    return RuleResult(
+        triggered=True, severity="CRITICAL",
+        description=(f"Windows event log cleared or disabled by "
+                     f"'{event.process_name}': '{event.command_line[:200]}'."),
+        mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion",
+        mitre_technique="Indicator Removal: Clear Windows Event Logs",
+        mitre_technique_id="T1070.001",
+    )
+
+
+def rule_recovery_destruction(event: EventSchema) -> RuleResult:
+    """Distruzione di backup e shadow copy (T1490 Inhibit System Recovery).
+
+    `bcdedit /set recoveryenabled no` toglie il ripristino, `wbadmin delete
+    catalog` elimina il catalogo dei backup e `vssadmin delete shadows` le
+    copie shadow. Insieme sono la preparazione di un ransomware: quando la
+    cifratura parte non esiste più nulla da cui recuperare.
+    """
+    cmd = " ".join((event.command_line or "").lower().split())
+    cmd = re.sub(r"\.exe\b", "", cmd)
+    if not cmd:
+        return RuleResult(triggered=False)
+    # `wmic shadowcopy delete` e l'equivalente WMI in PowerShell: serve sia il
+    # riferimento alla shadow copy sia il verbo di cancellazione.
+    wmi_shadow_delete = ("win32_shadowcopy" in cmd or "shadowcopy" in cmd) \
+        and ("delete" in cmd or "remove-wmiobject" in cmd)
+    if not wmi_shadow_delete and not any(m in cmd for m in _RECOVERY_DESTRUCTION):
+        return RuleResult(triggered=False)
+    return RuleResult(
+        triggered=True, severity="CRITICAL",
+        description=(f"System recovery destroyed (backup/shadow copy/recovery) by "
+                     f"'{event.process_name}': '{event.command_line[:200]}'."),
+        mitre_tactic_id="TA0040", mitre_tactic="Impact",
+        mitre_technique="Inhibit System Recovery", mitre_technique_id="T1490",
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  HELPERS
 # ═══════════════════════════════════════════════════════════════════
@@ -1016,6 +1184,21 @@ STATIC_RULES = [
                description="Local account/group/privilege enumeration (whoami /all, net user, net localgroup, quser).",
                mitre_tactic_id="TA0007", mitre_tactic="Discovery", mitre_technique="System Owner/User Discovery",
                mitre_technique_id="T1033", fn=rule_discovery_commands),
+    StaticRule(rule_id="AEGIS-S019", version="1.0", confidence="high",
+               name="Security Control Tampering", severity="CRITICAL",
+               description="Security product/service disabled or killed, Defender exclusions added, host firewall turned off, audit policy cleared.",
+               mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Impair Defenses",
+               mitre_technique_id="T1562", fn=rule_security_control_tampering),
+    StaticRule(rule_id="AEGIS-S020", version="1.0", confidence="high",
+               name="Event Log Clearing", severity="CRITICAL",
+               description="Windows event log cleared or disabled (wevtutil cl, Clear-EventLog, wevtutil sl /e:false).",
+               mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Indicator Removal: Clear Windows Event Logs",
+               mitre_technique_id="T1070.001", fn=rule_event_log_clearing),
+    StaticRule(rule_id="AEGIS-S021", version="1.0", confidence="high",
+               name="Recovery Destruction", severity="CRITICAL",
+               description="Backup catalog, shadow copies or Windows recovery disabled/deleted (ransomware preparation).",
+               mitre_tactic_id="TA0040", mitre_tactic="Impact", mitre_technique="Inhibit System Recovery",
+               mitre_technique_id="T1490", fn=rule_recovery_destruction),
 ]
 
 ALL_RULES = [s.fn for s in STATIC_RULES]
@@ -1143,6 +1326,24 @@ RULE_NOTES: dict[str, dict] = {
     "AEGIS-S015": {
         "exceptions": ("Vendors using similar names (e.g. legitimate 'GoogleUpdate')"),
         "allowlist": ("Process names of software installed through the software inventory"),
+    },
+    "AEGIS-S019": {
+        "exceptions": ("Endpoint management tooling that migrates or reconfigures the AV agent",
+                       "Help-desk hotfix that temporarily stops a security service"),
+        "allowlist": ("Change ticket naming the service, the host and the window",
+                      "Execution from a signed management agent on the management VLAN"),
+    },
+    "AEGIS-S020": {
+        "exceptions": ("Log-rotation scripts that export before clearing, run by a scheduled job",
+                       "Lab machines reset between exercises"),
+        "allowlist": ("Rotation job hash and the destination of the exported logs",
+                      "Hosts declared as disposable (lab image)"),
+    },
+    "AEGIS-S021": {
+        "exceptions": ("Backup software rotating its own catalog on schedule",
+                       "Lab rebuild scripts that drop shadow copies before imaging"),
+        "allowlist": ("Signed backup agent with a documented retention policy",
+                      "Hosts in the lab pool, excluded by site policy"),
     },
     "custom": {
         "exceptions": ("No standard exceptions for custom rules"),

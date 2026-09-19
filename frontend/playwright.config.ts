@@ -1,9 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
 
 // E2E pilot (audit F7). Richiede: npm i -D @playwright/test && npx playwright install chromium
-// Esecuzione: npm run e2e  (oppure npx playwright test)
-// Stato: NOT-RUN in questa sessione (Playwright non installato); gli spec sono
-// pronti e l'API smoke (scripts/api_smoke.py) e' il ramo eseguito.
+// Esecuzione: E2E_EMAIL=... E2E_PASSWORD=... npm run e2e
+//
+// La sessione si crea una volta sola nel progetto `setup` e viene riusata da
+// tutti gli spec (`storageState`): con un login per test il rate limit di
+// /auth/login faceva fallire in blocco test diversi, e il fallimento era della
+// suite, non del prodotto.
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
@@ -20,5 +23,12 @@ export default defineConfig({
         reuseExistingServer: true,
         timeout: 60_000,
       },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'setup', testMatch: /global\.setup\.ts/ },
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/state.json' },
+      dependencies: ['setup'],
+    },
+  ],
 });

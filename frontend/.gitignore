@@ -24,3 +24,6 @@ playwright-report/
 *.njsproj
 *.sln
 *.sw?
+
+# Sessione e2e salvata dal setup di Playwright (mai committare un token)
+e2e/.auth/

@@ -5,6 +5,8 @@ from typing import Optional, List, Dict, Any, Annotated
 from datetime import datetime
 from uuid import UUID
 
+from app.core.redaction import CONTROL_TAG, strip_control_chars
+
 # Marcatore di troncatura: finisce in `quality` (es. 'truncated:command_line').
 TRUNCATION_TAG = "truncated"
 
@@ -170,6 +172,13 @@ class EventSchema(BaseModel):
         doverli elencare) e lo si dichiara in `quality`, stessa convenzione di
         'degraded:etw-disabled'. La telemetria non si butta: si tronca, e la
         perdita è visibile.
+
+        Nello stesso passaggio si tolgono i caratteri di controllo non
+        memorizzabili (NUL): PostgreSQL non può contenere 0x00 in una colonna
+        text, quindi un evento con un NUL non era "sporco", era proprio non
+        scrivibile. Essendo `EventSchema` il punto d'ingresso di TUTTI i
+        percorsi (telemetria, parser SIEM, consumer Redis), filtrare qui copre
+        anche le sorgenti che non passano da `sanitize_event`.
         """
         if not isinstance(data, dict):
             return data
@@ -188,7 +197,20 @@ class EventSchema(BaseModel):
 
         clean = dict(data)
         truncated: list[str] = []
+        stripped = False
         for key, value in data.items():
+            # 1) Caratteri di controllo non memorizzabili (NUL): si tolgono su
+            #    OGNI stringa di primo livello, anche su un campo senza
+            #    max_length, perché il problema non è la lunghezza ma il byte.
+            #    Senza questo, un NUL in un nome processo arrivava fino alla
+            #    INSERT e PostgreSQL la rifiutava — e quel fallimento, lungo il
+            #    percorso dell'ingestion, diventava un 500.
+            if isinstance(value, str):
+                cleaned = strip_control_chars(value)
+                if cleaned != value:
+                    clean[key] = value = cleaned
+                    stripped = True
+            # 2) Troncamento ai limiti dichiarati dai campi stessi.
             entry = limits.get(key)
             if entry is None or not isinstance(value, str):
                 continue
@@ -198,12 +220,13 @@ class EventSchema(BaseModel):
                 if field_name != "quality":
                     truncated.append(field_name)
 
+        markers = [CONTROL_TAG] if stripped else []
         if truncated:
-            marker = TRUNCATION_TAG + ":" + ",".join(sorted(set(truncated)))
+            markers.append(TRUNCATION_TAG + ":" + ",".join(sorted(set(truncated))))
+        if markers:
             existing = clean.get("quality")
-            merged = f"{existing};{marker}" if existing else marker
-            q_limit = limits["quality"][1]
-            clean["quality"] = merged[:q_limit]
+            merged = f"{existing};{';'.join(markers)}" if existing else ";".join(markers)
+            clean["quality"] = merged[: limits["quality"][1]]
 
         return clean
 

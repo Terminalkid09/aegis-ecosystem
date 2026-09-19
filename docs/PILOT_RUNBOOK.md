@@ -26,6 +26,21 @@ curl -sk http://localhost:8000/health/live
 
 Verifica comune: `GET /health/live` → `{"status":"alive"}`, `GET /audit/logs?exclude_test=true` → `[]` su fresco, `GET /audit/logs?include_test=true` mostra solo is_test=true.
 
+### Enrollment token end-to-end
+
+Nel Deployment Manager scegli `Aegis-Guard`, `NodeTrace` oppure `Both agents`.
+Con `Both agents` lo stesso token autorizza due enrollment distinti e il
+comando installa due servizi, non due processi legati alla sessione utente.
+
+Su Windows il comando richiede PowerShell elevato e crea servizi automatici
+con restart-on-crash. Su Linux richiede root e crea unità systemd con
+`systemctl enable --now`; entrambi i percorsi falliscono esplicitamente se
+manca il runtime (`Java 21+` per Guard o l'eseguibile NodeTrace).
+
+La checkbox dashboard remota configura l'URL Brain. La dashboard locale non è
+ancora un artefatto distribuibile: il backend rifiuta questa scelta invece di
+produrre un'installazione parziale.
+
 ## 2. Pilot (prod overlay + mTLS)
 
 ```bash

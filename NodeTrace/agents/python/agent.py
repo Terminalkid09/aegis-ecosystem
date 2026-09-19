@@ -216,6 +216,7 @@ class Agent:
         payload = {
             "hostname": self.config["device_name"],
             "os": system_info["os"],
+            "agent_type": "nodetrace",
             "os_version": system_info["os_version"],
             "cpu_model": system_info["cpu_model"],
             "total_ram": system_info["total_ram"],

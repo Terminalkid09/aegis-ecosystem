@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle, Shield, Activity, TrendingUp,
@@ -26,7 +26,10 @@ export default function DashboardOverview() {
     // crashava i .filter a valle).
     // 600 punti = ~30 minuti con telemetria a 10s: la finestra che serve per
     // guardare indietro nel grafico senza riprendere tutto da capo.
-    queryFn: () => statsAPI.getRecentTelemetry({ limit: 600 }).then(r => asArray(r.data)),
+    // `slim`: il grafico e la lista usano quattro campi, e la riga completa
+    // pesa ~8 KB per via dei blob network_flows/processes. Senza slim erano
+    // 4,9 MB per richiesta ogni 15s, per dati che qui non si mostrano.
+    queryFn: () => statsAPI.getRecentTelemetry({ limit: 600, slim: true }).then(r => asArray(r.data)),
     refetchInterval: 15000,
   })
 
@@ -95,10 +98,13 @@ export default function DashboardOverview() {
   }, [telemetryRows])
 
   const [chartHost, setChartHost] = useState<string>('all')
-  const [chartWindow, setChartWindow] = useState<number>(0) // 0 = tutta la finestra
-
-  const fmtClock = (ts: number) =>
-    new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  // Finestra iniziale corta: con tutta la storia caricata il grafico copre ore,
+  // quindi un campione nuovo ogni 12s sposta la linea di 1/600 di larghezza e
+  // sembra fermo. Partendo da 15 minuti il tempo che passa si vede.
+  const [chartWindow, setChartWindow] = useState<number>(15 * 60_000)
+  // Range del brush: serve per sapere quanto è larga la finestra VISIBILE, che
+  // dopo uno zoom non è più quella dei dati caricati.
+  const [zoomRange, setZoomRange] = useState<{ startIndex: number; endIndex: number } | null>(null)
 
   const chartData = useMemo(() => {
     const rows = telemetryRows.filter(r => chartHost === 'all' || r.host === chartHost)
@@ -135,6 +141,33 @@ export default function DashboardOverview() {
         points: b.cpu.length,
       }))
   }, [telemetryRows, chartHost, chartWindow])
+
+  // Etichette dell'asse: al minuto quando la finestra visibile è ampia, al
+  // secondo solo se si è zoomati dentro. Prima mostravano sempre i secondi e
+  // l'asse diventava una fila di orari illeggibile; il dettaglio al secondo
+  // resta nel tooltip e nei tick quando la finestra è stretta.
+  const visibleSpan = useMemo(() => {
+    if (chartData.length < 2) return 0
+    if (zoomRange && zoomRange.endIndex > zoomRange.startIndex) {
+      const a = chartData[Math.max(0, Math.min(zoomRange.startIndex, chartData.length - 1))]!.time
+      const b = chartData[Math.max(0, Math.min(zoomRange.endIndex, chartData.length - 1))]!.time
+      return b - a
+    }
+    return chartData[chartData.length - 1]!.time - chartData[0]!.time
+  }, [chartData, zoomRange])
+
+  const fmtClock = (ts: number) =>
+    visibleSpan < 10 * 60_000
+      ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      : new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+  // Età dell'ultimo campione: è la risposta verificabile a "è in tempo reale?"
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 5000)
+    return () => clearInterval(t)
+  }, [])
+  const latestAge = telemetryRows.length ? Math.max(0, Math.round((nowTick - telemetryRows[telemetryRows.length - 1]!.ts) / 1000)) : null
 
   const incidents = (incidentsData as any)?.items ?? (Array.isArray(incidentsData) ? incidentsData : [])
   const degradedCount = (agents as any[]).filter((a: any) => a.status === 'stale' || a.status === 'offline' || (a.quality && String(a.quality).startsWith('degraded'))).length
@@ -267,18 +300,30 @@ export default function DashboardOverview() {
       <div className="card p-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <h3 className="font-semibold text-white">System Performance</h3>
+            <h3 className="font-semibold text-white">Host Telemetry — NodeTrace agents</h3>
             <p className="text-[10px] text-[hsl(var(--muted-foreground))] mt-0.5">
-              {chartData.length} plotted points · one sample per telemetry interval (~10s)
+              {chartData.length} samples · one every ~12s
               {chartHost === 'all' && hosts.length > 0 && ` · averaged across ${hosts.length} host${hosts.length > 1 ? 's' : ''}`}
-              {' · drag the strip below to zoom, scroll inside it to pan'}
+              {' · drag the strip below to zoom'}
+            </p>
+            <p className="text-[10px] mt-0.5">
+              {latestAge === null ? (
+                <span className="text-[hsl(var(--muted-foreground))]">no sample received yet</span>
+              ) : (
+                <span className={cn(latestAge < 40 ? 'text-emerald-400' : 'text-yellow-400')}>
+                  latest sample {latestAge}s ago{latestAge >= 40 ? ' — sensor may be stalled' : ''}
+                </span>
+              )}
+              <span className="text-[hsl(var(--muted-foreground))]">
+                {' '}· CPU/RAM come from the telemetry agent; the Guard sensor emits process events, which show up as alerts, not here.
+              </span>
             </p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             {hosts.length > 1 && (
               <select
                 value={chartHost}
-                onChange={e => setChartHost(e.target.value)}
+                onChange={e => { setChartHost(e.target.value); setZoomRange(null) }}
                 className="bg-[hsl(var(--secondary))] border border-[hsl(var(--border))] rounded-md text-xs text-white px-2 py-1.5 outline-none focus:border-[hsl(var(--primary)/0.5)] max-w-[200px]"
               >
                 <option value="all">All hosts ({hosts.length})</option>
@@ -289,7 +334,7 @@ export default function DashboardOverview() {
               {[{ l: '5m', v: 5 * 60_000 }, { l: '15m', v: 15 * 60_000 }, { l: '1h', v: 60 * 60_000 }, { l: 'All', v: 0 }].map(({ l, v }) => (
                 <button
                   key={l}
-                  onClick={() => setChartWindow(v)}
+                  onClick={() => { setChartWindow(v); setZoomRange(null) }}
                   className={cn('px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide transition-colors',
                     chartWindow === v ? 'bg-[hsl(var(--primary)/0.2)] text-[hsl(var(--primary))]' : 'text-[hsl(var(--muted-foreground))] hover:text-white hover:bg-[hsl(var(--secondary))]')}
                 >
@@ -322,7 +367,7 @@ export default function DashboardOverview() {
                     più sull'etichetta del minuto, e il tooltip dice l'istante esatto. */}
                 <XAxis dataKey="time" type="number" scale="time" domain={['dataMin', 'dataMax']}
                        tickFormatter={fmtClock} tick={{ fill: '#64748b', fontSize: 11 }}
-                       tickLine={false} axisLine={false} minTickGap={40} />
+                       tickLine={false} axisLine={false} minTickGap={90} />
                 <YAxis tick={{ fill: '#64748b', fontSize: 11 }} tickLine={false} axisLine={false} unit="%" domain={[0, 100]} width={32} />
                 <Tooltip
                   contentStyle={{ background: 'hsl(222,47%,8%)', border: '1px solid hsl(222,47%,14%)', borderRadius: '8px', fontSize: '12px' }}
@@ -331,18 +376,21 @@ export default function DashboardOverview() {
                   formatter={(v: any, name: any) => [`${Number(v).toFixed(1)}%`, name]}
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
+                {/* Niente punti sulla linea: 600 pallini facevano sembrare il
+                    grafico una serie di istanze fisse, e il brush che scorre
+                    non corrispondeva a nessuno di quei punti. La linea è
+                    continua, il valore puntuale lo dà il tooltip al passaggio. */}
                 <Area type="monotone" dataKey="cpu" stroke="#22d3ee" strokeWidth={2} fill="url(#cpu)"
-                      dot={chartData.length <= 150 ? { r: 1.5, fill: '#22d3ee' } : false}
-                      activeDot={{ r: 4 }} name="CPU" />
+                      dot={false} activeDot={{ r: 3 }} name="CPU" />
                 <Area type="monotone" dataKey="ram" stroke="#a855f7" strokeWidth={2} fill="url(#ram)"
-                      dot={chartData.length <= 150 ? { r: 1.5, fill: '#a855f7' } : false}
-                      activeDot={{ r: 4 }} name="RAM" />
+                      dot={false} activeDot={{ r: 3 }} name="RAM" />
                 {/* Brush = lo scroll che mancava: si restringe la finestra e si
                     torna indietro sui punti intermedi invece di vederli
                     compattati in una riga sola. */}
                 <Brush dataKey="time" height={24} travellerWidth={8}
                        stroke="#475569" fill="hsl(222,47%,8%)"
-                       tickFormatter={fmtClock} />
+                       tickFormatter={fmtClock}
+                       onChange={r => setZoomRange({ startIndex: r.startIndex ?? 0, endIndex: r.endIndex ?? 0 })} />
               </AreaChart>
             </ResponsiveContainer>
           ) : (

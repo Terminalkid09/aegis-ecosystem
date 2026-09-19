@@ -9,6 +9,13 @@ class Settings(BaseSettings):
     # App Config
     APP_NAME: str = "Aegis-Brain"
     DEBUG: bool = False
+    # Flag `Secure` sui cookie di sessione. Prima derivava da DEBUG
+    # (`secure=not DEBUG`), il che legava la sicurezza di un cookie alla
+    # verbosita' dei log: accendere il debug per una diagnosi toglieva il flag
+    # a un cookie di sessione in produzione. Se il deploy e' in HTTP (lab o
+    # pilot dietro un reverse proxy senza TLS) va messo a false ESPLICITAMENTE,
+    # sapendo cosa si sta facendo.
+    COOKIE_SECURE: bool = True
     ALLOWED_ORIGINS: str = "https://aegis.local,http://localhost:3000"
 
     # Database & Redis

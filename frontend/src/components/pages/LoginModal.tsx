@@ -104,7 +104,8 @@ export default function LoginModal() {
                 <input
                   className="input pl-9"
                   type="email"
-                  placeholder="admin@aegis.local"
+                  data-testid="login-email"
+                  placeholder="you@company.local"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   required
@@ -120,6 +121,7 @@ export default function LoginModal() {
                 <input
                   className="input pl-9 pr-10"
                   type={showPass ? 'text' : 'password'}
+                  data-testid="login-password"
                   placeholder="••••••••"
                   value={password}
                   onChange={e => setPassword(e.target.value)}

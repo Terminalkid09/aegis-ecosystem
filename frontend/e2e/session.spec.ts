@@ -17,10 +17,15 @@ const PASSWORD = process.env.E2E_PASSWORD ?? '';
 
 async function login(page: Page) {
   await page.goto('/');
-  await page.getByPlaceholder('admin@aegis.local').fill(EMAIL);
-  await page.getByPlaceholder('••••••••').fill(PASSWORD);
+  const sidebar = page.locator('#nav-dashboard');
+  const emailField = page.getByTestId('login-email');
+  // Sessione dal setup (storageState) oppure login: si aspetta quale compare.
+  await expect(sidebar.or(emailField).first()).toBeVisible({ timeout: 20000 });
+  if (await sidebar.isVisible().catch(() => false)) return;
+  await emailField.fill(EMAIL);
+  await page.getByTestId('login-password').fill(PASSWORD);
   await page.locator('form').getByRole('button', { name: 'Sign In' }).click();
-  await expect(page.locator('#nav-dashboard')).toBeVisible({ timeout: 20000 });
+  await expect(sidebar).toBeVisible({ timeout: 20000 });
 }
 
 test.describe('session', () => {
@@ -39,7 +44,7 @@ test.describe('session', () => {
     await page.reload();
     await expect(page.locator('#nav-dashboard')).toBeVisible({ timeout: 20000 });
     // Il login non deve ricomparire: era il sintomo riferito.
-    await expect(page.getByPlaceholder('admin@aegis.local')).toHaveCount(0);
+    await expect(page.getByTestId('login-email')).toHaveCount(0);
 
     // E le pagine devono caricare i dati, non solo la shell: un 401 che svuota
     // l'interfaccia e' indistinguibile da "serve riaccedere".
@@ -48,15 +53,25 @@ test.describe('session', () => {
     expect(failures, `richieste fallite dopo il reload: ${failures.join('; ')}`).toEqual([]);
   });
 
+});
+
+test.describe('session', () => {
+  test.skip(!EMAIL || !PASSWORD, 'E2E_EMAIL/E2E_PASSWORD non impostati');
+  // Il logout REVOCA il token. Se usasse la sessione condivisa del setup,
+  // tutti i test eseguiti dopo partirebbero con un token blacklistato e
+  // fallirebbero per un motivo che non c'entra con quello che verificano.
+  // Quindi questo test si crea una sessione propria.
+  test.use({ storageState: { cookies: [], origins: [] } });
+
   test('logging out returns to the login and a reload does not restore it', async ({ page }) => {
     await login(page);
     // Il logout vive nel menu del profilo/sidebar: clicco l'elemento che lo
     // espone senza dipendere dal testo esatto dell'icona.
     const logout = page.getByRole('button', { name: /sign out|logout|esci/i }).first();
     await logout.click();
-    await expect(page.getByPlaceholder('admin@aegis.local')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('login-email')).toBeVisible({ timeout: 15000 });
     await page.reload();
-    await expect(page.getByPlaceholder('admin@aegis.local')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('login-email')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('#nav-dashboard')).toHaveCount(0);
   });
 });

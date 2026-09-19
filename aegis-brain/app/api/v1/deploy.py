@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Header
+from fastapi import APIRouter, Depends, HTTPException, Request, Header, Query
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -30,7 +30,7 @@ from app.core.rate_limit import limiter
 
 router = APIRouter(tags=["Agent Deploy"])
 
-VALID_AGENT_TYPES = {"nodetrace", "aegis-guard", "unified"}
+VALID_AGENT_TYPES = {"nodetrace", "aegis-guard"}
 VALID_METHODS = {"ssh", "winrm", "oneline", "interactive"}
 
 
@@ -78,8 +78,10 @@ def _validate_targets(targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 class EnrollTokenRequest(BaseModel):
     label: Optional[str] = None
-    agent_type: str = Field(default="aegis-guard", pattern="^(nodetrace|aegis-guard|unified)$")
+    agent_type: str = Field(default="aegis-guard", pattern="^(nodetrace|aegis-guard|both)$")
     ttl_minutes: int = Field(default=15, ge=5, le=1440)
+    dashboard_remote: bool = True
+    dashboard_local: bool = False
 
 
 @router.post("/token")
@@ -90,6 +92,8 @@ async def create_enroll_token(
     user=Depends(get_current_user),
 ):
     _require_deploy_operator(user)
+    if payload.dashboard_local:
+        raise HTTPException(status_code=422, detail="Local dashboard packaging is not available yet")
     raw = secrets.token_urlsafe(32)
     rec = EnrollToken(
         token_hash=_hash_token(raw),
@@ -97,6 +101,7 @@ async def create_enroll_token(
         agent_type=payload.agent_type,
         created_by=user.id,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=payload.ttl_minutes),
+        install_config={"dashboard_remote": payload.dashboard_remote},
     )
     db.add(rec)
     await log_audit(
@@ -107,19 +112,15 @@ async def create_enroll_token(
     )
     await db.commit()
     base = settings.PUBLIC_BASE_URL.rstrip("/")
-    if payload.agent_type == "unified":
-        ps1 = f"irm {base}/api/v1/deploy/install.ps1?agent=unified -Headers @{{'X-Enroll-Token'='{raw}'}} | iex"
-        sh = f"curl -fsSL -H 'X-Enroll-Token: {raw}' '{base}/api/v1/deploy/install.sh?agent=unified' | sudo bash"
-    elif payload.agent_type == "aegis-guard":
-        ps1 = f"irm {base}/api/v1/deploy/install.ps1 -Headers @{{'X-Enroll-Token'='{raw}'}} | iex"
-        sh = f"curl -fsSL -H 'X-Enroll-Token: {raw}' {base}/api/v1/deploy/install.sh | sudo bash"
-    else:
-        ps1 = f"irm {base}/api/v1/deploy/install.ps1?agent=nodetrace -Headers @{{'X-Enroll-Token'='{raw}'}} | iex"
-        sh = f"curl -fsSL -H 'X-Enroll-Token: {raw}' '{base}/api/v1/deploy/install.sh?agent=nodetrace' | sudo bash"
+    query = f"?agent={payload.agent_type}"
+    ps1 = f"irm {base}/api/v1/deploy/install.ps1{query} -Headers @{{'X-Enroll-Token'='{raw}'}} | iex"
+    sh = f"curl -fsSL -H 'X-Enroll-Token: {raw}' '{base}/api/v1/deploy/install.sh{query}' | sudo bash"
     return {
         "token": raw,
         "expires_at": rec.expires_at.isoformat(),
-        "agent_type": payload.agent_type,
+            "agent_type": payload.agent_type,
+            "dashboard_remote": payload.dashboard_remote,
+            "dashboard_local": payload.dashboard_local,
         "oneline_windows": ps1,
         "oneline_linux": sh,
         "note": "Single-use, short-lived. Never commit it. Regenerate per rollout batch.",
@@ -157,12 +158,14 @@ async def revoke_enroll_token(token_id: int, request: Request, db: AsyncSession 
 # ─── one-liner install scripts (served, token validated at enroll time) ──
 
 INSTALL_PS1 = r"""# Aegis one-liner installer (Windows, admin PowerShell)
-param([string]$Agent = "aegis-guard")
+param([string]$Agent = "{AGENT}")
 $ErrorActionPreference = "Stop"
 $Token = $env:AEGIS_ENROLL_TOKEN
 if (-not $Token -and $Request.Headers) { $Token = $Request.Headers["X-Enroll-Token"] }
 # Token is passed via -Headers @{'X-Enroll-Token'='...'} | iex
 $Base = "{BASE}/api/v1"
+$EnrollToken = "{ENROLL_TOKEN}"
+$RemoteDashboard = {REMOTE_DASHBOARD}
 
 function Install-AegisAgent($TargetAgent) {
     $Dir = if ($TargetAgent -eq "nodetrace") { "C:\Aegis\NodeTrace" } else { "C:\Aegis\Guard" }
@@ -170,8 +173,16 @@ function Install-AegisAgent($TargetAgent) {
     Write-Host "[aegis] downloading $TargetAgent into $Dir ..."
     try {
         $pkg = "$Dir\agent.pkg"
-        Invoke-WebRequest -Uri "$Base/artifacts/$TargetAgent-latest.zip" -OutFile $pkg -UseBasicParsing
+        Invoke-WebRequest -Uri "$Base/deploy/bootstrap-artifacts/$TargetAgent-latest.zip" `
+            -Headers @{"X-Enroll-Token" = $EnrollToken} -OutFile $pkg -UseBasicParsing
         Expand-Archive -Path $pkg -DestinationPath $Dir -Force
+        if ($RemoteDashboard) {
+            [Environment]::SetEnvironmentVariable("AEGIS_BRAIN_URL", $Base, "Machine")
+            [Environment]::SetEnvironmentVariable("AEGIS_ENROLL_KEY", $EnrollToken, "Machine")
+            [Environment]::SetEnvironmentVariable("NODETRACE_REGISTER_URL", "$Base/register", "Machine")
+            [Environment]::SetEnvironmentVariable("NODETRACE_HEARTBEAT_URL", "$Base/heartbeat", "Machine")
+            [Environment]::SetEnvironmentVariable("NODETRACE_UPDATE_URL", "$Base/update", "Machine")
+        }
         Remove-Item -Force $pkg
     } catch {
         Write-Host "[aegis] failed to download $TargetAgent, ensure artifact is published."
@@ -179,15 +190,49 @@ function Install-AegisAgent($TargetAgent) {
     }
 }
 
-if ($Agent -eq "unified") {
+function Install-AegisService($TargetAgent) {
+    if (-not $RemoteDashboard) { return }
+    $service = if ($TargetAgent -eq "nodetrace") { "AegisNodeTrace" } else { "AegisGuard" }
+    $binary = if ($TargetAgent -eq "nodetrace") {
+        Get-ChildItem "C:\Aegis\NodeTrace" -Filter "nodetrace-agent.exe" -Recurse | Select-Object -First 1
+    } else {
+        Get-ChildItem "C:\Aegis\Guard" -Filter "aegis-guard.jar" -Recurse | Select-Object -First 1
+    }
+    if (-not $binary) { throw "No $TargetAgent runtime found after extraction" }
+    if ($TargetAgent -eq "aegis-guard") {
+        $java = (Get-Command java -ErrorAction SilentlyContinue).Source
+        if (-not $java) { throw "Java 21+ is required for Aegis-Guard service" }
+        $binPath = "`"$java`" -jar `"$($binary.FullName)`""
+    } else {
+        $binPath = "`"$($binary.FullName)`""
+    }
+    if (Get-Service $service -ErrorAction SilentlyContinue) {
+        Stop-Service $service -Force -ErrorAction SilentlyContinue
+        sc.exe delete $service | Out-Null
+        Start-Sleep -Milliseconds 500
+    }
+    New-Service -Name $service -BinaryPathName $binPath -DisplayName $service `
+        -Description "Aegis $TargetAgent agent" -StartupType Automatic | Out-Null
+    sc.exe failure $service reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
+    Start-Service $service
+    Write-Host "[aegis] $service service installed and started."
+}
+
+if ($Agent -eq "both") {
     Install-AegisAgent "nodetrace"
     Install-AegisAgent "aegis-guard"
+    Install-AegisService "nodetrace"
+    Install-AegisService "aegis-guard"
     Write-Host "[aegis] both agents installed."
 } else {
     Install-AegisAgent $Agent
+    Install-AegisService $Agent
     Write-Host "[aegis] installed."
 }
-Write-Host "[aegis] Enroll with your one-time token, then start the service."
+Write-Host "[aegis] Set AEGIS_BRAIN_URL=$Base and AEGIS_ENROLL_KEY before starting the agent."
+Write-Host "[aegis] For NodeTrace also set NODETRACE_REGISTER_URL=$Base/register,"
+Write-Host "        NODETRACE_HEARTBEAT_URL=$Base/heartbeat and NODETRACE_UPDATE_URL=$Base/update."
+Write-Host "[aegis] The agent will consume the single-use token during its first enrollment."
 Write-Host "[aegis] Docs: https://aegis.local/docs/agent-install"
 """
 
@@ -195,28 +240,87 @@ INSTALL_SH = """#!/usr/bin/env bash
 # Aegis one-liner installer (Linux, root)
 # usage: curl -fsSL -H 'X-Enroll-Token: <token>' https://aegis.local/api/v1/deploy/install.sh | sudo bash
 set -euo pipefail
-AGENT="${AGENT:-aegis-guard}"
+AGENT="{AGENT}"
 BASE="{BASE}/api/v1"
+ENROLL_TOKEN="{ENROLL_TOKEN}"
+REMOTE_DASHBOARD="{REMOTE_DASHBOARD}"
 
 install_agent() {
     local target_agent=$1
     local dir="/opt/aegis/${target_agent}"
     mkdir -p "$dir"
     echo "[aegis] downloading ${target_agent} into ${dir} ..."
-    curl -fsSL "$BASE/artifacts/${target_agent}-latest.tar.gz" -o /tmp/aegis-agent.pkg
+    curl -fsSL -H "X-Enroll-Token: $ENROLL_TOKEN" \
+        "$BASE/deploy/bootstrap-artifacts/${target_agent}-latest.tar.gz" -o /tmp/aegis-agent.pkg
     tar -xzf /tmp/aegis-agent.pkg -C "$dir"
+    if [ "$REMOTE_DASHBOARD" = "1" ]; then
+        cat > "$dir/aegis.env" <<EOF
+AEGIS_BRAIN_URL=$BASE
+AEGIS_ENROLL_KEY=$ENROLL_TOKEN
+NODETRACE_REGISTER_URL=$BASE/register
+NODETRACE_HEARTBEAT_URL=$BASE/heartbeat
+NODETRACE_UPDATE_URL=$BASE/update
+EOF
+        chmod 600 "$dir/aegis.env"
+    fi
     rm -f /tmp/aegis-agent.pkg
 }
 
-if [ "$AGENT" = "unified" ]; then
+install_service() {
+    local target_agent=$1
+    [ "$REMOTE_DASHBOARD" = "1" ] || return 0
+    local service_name="aegis-${target_agent}"
+    local exec_start
+    if [ "$target_agent" = "aegis-guard" ]; then
+        local jar
+        jar=$(find "/opt/aegis/${target_agent}" -name 'aegis-guard.jar' -type f | head -n 1)
+        [ -n "$jar" ] || { echo "[aegis] Guard JAR not found" >&2; return 1; }
+        command -v java >/dev/null 2>&1 || { echo "[aegis] Java 21+ is required for Guard" >&2; return 1; }
+        exec_start="/usr/bin/java -jar ${jar}"
+    else
+        local exe
+        exe=$(find "/opt/aegis/${target_agent}" -name 'nodetrace-agent' -type f | head -n 1)
+        [ -n "$exe" ] || { echo "[aegis] NodeTrace executable not found" >&2; return 1; }
+        chmod 755 "$exe"
+        exec_start="$exe"
+    fi
+    cat > "/etc/systemd/system/${service_name}.service" <<EOF
+[Unit]
+Description=Aegis ${target_agent} agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=${exec_start}
+EnvironmentFile=/opt/aegis/${target_agent}/aegis.env
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl enable --now "$service_name.service"
+    systemctl is-active --quiet "$service_name.service"
+    echo "[aegis] ${service_name} service installed and started."
+}
+
+if [ "$AGENT" = "both" ]; then
     install_agent "nodetrace"
     install_agent "aegis-guard"
+    install_service "nodetrace"
+    install_service "aegis-guard"
     echo "[aegis] both agents installed."
 else
     install_agent "$AGENT"
+    install_service "$AGENT"
     echo "[aegis] installed."
 fi
-echo "[aegis] Enroll with your one-time token, then: systemctl enable --now aegis-agent"
+echo "[aegis] Set AEGIS_BRAIN_URL=$BASE and AEGIS_ENROLL_KEY before starting the agent."
+echo "[aegis] For NodeTrace also set NODETRACE_REGISTER_URL=$BASE/register,"
+echo "        NODETRACE_HEARTBEAT_URL=$BASE/heartbeat and NODETRACE_UPDATE_URL=$BASE/update."
+echo "[aegis] The agent will consume the single-use token during its first enrollment."
 """
 
 
@@ -231,15 +335,37 @@ async def _validate_install_token(x_enroll_token: str, db: AsyncSession):
     return token
 
 @router.get("/install.ps1", response_class=PlainTextResponse)
-async def install_ps1(x_enroll_token: str = Header(None, alias="X-Enroll-Token"), db: AsyncSession = Depends(get_db)):
-    await _validate_install_token(x_enroll_token, db)
-    return INSTALL_PS1.replace("{BASE}", settings.PUBLIC_BASE_URL.rstrip("/"))
+async def install_ps1(
+    agent: str = Query("aegis-guard", pattern="^(nodetrace|aegis-guard|both)$"),
+    x_enroll_token: str = Header(None, alias="X-Enroll-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    token = await _validate_install_token(x_enroll_token, db)
+    if agent == "both" and token.agent_type != "both":
+        raise HTTPException(status_code=403, detail="Token does not allow both agents")
+    if agent != "both" and token.agent_type not in (agent, "both"):
+        raise HTTPException(status_code=403, detail="Token agent type does not match installer")
+    config = token.install_config or {}
+    return INSTALL_PS1.replace("{BASE}", settings.PUBLIC_BASE_URL.rstrip("/")).replace(
+        "{ENROLL_TOKEN}", x_enroll_token.strip()).replace("{AGENT}", agent).replace(
+        "{REMOTE_DASHBOARD}", "$true" if config.get("dashboard_remote", True) else "$false")
 
 
 @router.get("/install.sh", response_class=PlainTextResponse)
-async def install_sh(x_enroll_token: str = Header(None, alias="X-Enroll-Token"), db: AsyncSession = Depends(get_db)):
-    await _validate_install_token(x_enroll_token, db)
-    return INSTALL_SH.replace("{BASE}", settings.PUBLIC_BASE_URL.rstrip("/"))
+async def install_sh(
+    agent: str = Query("aegis-guard", pattern="^(nodetrace|aegis-guard|both)$"),
+    x_enroll_token: str = Header(None, alias="X-Enroll-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    token = await _validate_install_token(x_enroll_token, db)
+    if agent == "both" and token.agent_type != "both":
+        raise HTTPException(status_code=403, detail="Token does not allow both agents")
+    if agent != "both" and token.agent_type not in (agent, "both"):
+        raise HTTPException(status_code=403, detail="Token agent type does not match installer")
+    config = token.install_config or {}
+    return INSTALL_SH.replace("{BASE}", settings.PUBLIC_BASE_URL.rstrip("/")).replace(
+        "{ENROLL_TOKEN}", x_enroll_token.strip()).replace("{AGENT}", agent).replace(
+        "{REMOTE_DASHBOARD}", "1" if config.get("dashboard_remote", True) else "0")
 
 
 @router.get("/artifacts")
@@ -385,6 +511,30 @@ async def download_artifact(name: str, agent=Depends(get_current_agent)):
     return FileResponse(path, filename=safe)
 
 
+@router.get("/bootstrap-artifacts/{name}")
+async def download_bootstrap_artifact(
+    name: str,
+    x_enroll_token: str = Header(None, alias="X-Enroll-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve one published artifact before the agent has credentials.
+
+    The token is only checked here and is consumed later by /enroll, so a
+    failed download does not burn the operator's single-use enrollment.
+    """
+    token = await _validate_install_token(x_enroll_token, db)
+    safe = Path(name).name
+    if not safe or safe.startswith("."):
+        raise HTTPException(status_code=400, detail="Invalid artifact name")
+    expected_types = {token.agent_type} if token.agent_type != "both" else {"aegis-guard", "nodetrace"}
+    if not any(safe.startswith(f"{agent_type}-") for agent_type in expected_types):
+        raise HTTPException(status_code=403, detail="Token agent type does not match artifact")
+    path = Path(settings.ARTIFACT_DIR) / safe
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return FileResponse(path, filename=safe)
+
+
 class UpdateCommandRequest(BaseModel):
     agent_id: str = Field(..., max_length=64)
     version: str = Field(default="latest", max_length=50)
@@ -464,7 +614,7 @@ async def push_update_command(
 # ─── deploy jobs (mass rollout, server-side, no password storage) ──
 
 class DeployJobRequest(BaseModel):
-    agent_type: str = Field(default="nodetrace", pattern="^(nodetrace|aegis-guard|unified)$")
+    agent_type: str = Field(default="nodetrace", pattern="^(nodetrace|aegis-guard)$")
     agent_version: str = Field(default="latest", max_length=50)
     targets: List[Dict[str, Any]]
     username: Optional[str] = Field(default=None, max_length=255)

@@ -33,3 +33,19 @@ def test_installers_reference_signed_artifacts_only():
     for tpl in (INSTALL_PS1, INSTALL_SH):
         assert "artifacts/" in tpl
         assert "curl" in tpl or "Invoke-WebRequest" in tpl
+
+
+def test_installers_register_persistent_services_for_both_agents():
+    assert 'Install-AegisService "nodetrace"' in INSTALL_PS1
+    assert 'Install-AegisService "aegis-guard"' in INSTALL_PS1
+    assert 'install_service "nodetrace"' in INSTALL_SH
+    assert 'install_service "aegis-guard"' in INSTALL_SH
+    assert "SERVICE_AUTO_START" in INSTALL_PS1 or "-StartupType Automatic" in INSTALL_PS1
+    assert "systemctl enable --now" in INSTALL_SH
+
+
+def test_installers_do_not_embed_proxy_configuration():
+    for tpl in (INSTALL_PS1, INSTALL_SH):
+        assert "PROXY_URL" not in tpl
+        assert "HTTP_PROXY" not in tpl
+        assert "HTTPS_PROXY" not in tpl

@@ -39,11 +39,17 @@ const ERROR_BOUNDARY = 'This view hit an error';
 
 async function login(page: Page) {
   await page.goto('/');
-  await page.getByPlaceholder('admin@aegis.local').fill(EMAIL);
-  await page.getByPlaceholder('••••••••').fill(PASSWORD);
+  const sidebar = page.locator('#nav-dashboard');
+  const emailField = page.getByTestId('login-email');
+  // La sessione arriva dallo storageState del setup: se e' valida la sidebar
+  // compare e il form non esiste. Si attende quale delle due si presenta,
+  // invece di riautenticarsi sempre (un login per test esauriva il rate limit).
+  await expect(sidebar.or(emailField).first()).toBeVisible({ timeout: 20000 });
+  if (await sidebar.isVisible().catch(() => false)) return;
+  await emailField.fill(EMAIL);
+  await page.getByTestId('login-password').fill(PASSWORD);
   await page.locator('form').getByRole('button', { name: 'Sign In' }).click();
-  // La sidebar compare solo a sessione autenticata.
-  await expect(page.locator('#nav-dashboard')).toBeVisible({ timeout: 20000 });
+  await expect(sidebar).toBeVisible({ timeout: 20000 });
 }
 
 test.describe('page rendering', () => {

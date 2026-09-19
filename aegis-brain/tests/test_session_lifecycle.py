@@ -51,6 +51,29 @@ class TestCookieTTL:
         assert expiring, "nessun delete_cookie sul path legacy"
         assert any(f"Path=/" in h for h in expiring)
 
+    def test_secure_flag_follows_cookie_secure_not_debug(self, monkeypatch):
+        """`Secure` dipende dal deploy (HTTP o HTTPS), non da DEBUG.
+
+        Era `secure=not DEBUG`: accendere il debug per una diagnosi toglieva
+        il flag a un cookie di sessione in produzione. Questo test lega il flag
+        all'impostazione giusta e impedisce che ci ritorni.
+        """
+        monkeypatch.setattr(settings, "COOKIE_SECURE", True, raising=False)
+        monkeypatch.setattr(settings, "DEBUG", True, raising=False)
+        secure_on = " ".join(_set_cookie_headers(Response()))
+        resp = Response()
+        _set_auth_cookie(resp, "tok")
+        secure_on = " ".join(_set_cookie_headers(resp))
+        assert "Secure" in secure_on, "con COOKIE_SECURE=true il cookie deve essere Secure"
+
+        # Pilot in HTTP: il flag va via, altrimenti il browser non rimanda il
+        # cookie e il login sembra rotto.
+        monkeypatch.setattr(settings, "COOKIE_SECURE", False, raising=False)
+        resp = Response()
+        _set_auth_cookie(resp, "tok")
+        secure_off = " ".join(_set_cookie_headers(resp))
+        assert "Secure" not in secure_off, "con COOKIE_SECURE=false niente flag Secure"
+
 
 class TestSlidingRefresh:
     def _token(self, minutes_left: int) -> str:

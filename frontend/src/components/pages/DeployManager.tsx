@@ -25,6 +25,8 @@ export default function DeployManager() {
   // Token Form
   const [tokenLabel, setTokenLabel] = useState('')
   const [tokenAgent, setTokenAgent] = useState('aegis-guard')
+  const [dashboardRemote, setDashboardRemote] = useState(true)
+  const [dashboardLocal, setDashboardLocal] = useState(false)
   const [lastToken, setLastToken] = useState<any>(null)
   const [copied, setCopied] = useState('')
 
@@ -49,7 +51,12 @@ export default function DeployManager() {
 
   // Mutations
   const createTokenMut = useMutation({
-    mutationFn: () => deployAPI.createToken({ label: tokenLabel || undefined, agent_type: tokenAgent }),
+    mutationFn: () => deployAPI.createToken({
+      label: tokenLabel || undefined,
+      agent_type: tokenAgent,
+      dashboard_remote: dashboardRemote,
+      dashboard_local: dashboardLocal,
+    }),
     onSuccess: (res) => {
       setLastToken(res.data)
       setTokenLabel('')
@@ -140,8 +147,18 @@ export default function DeployManager() {
             <select value={tokenAgent} onChange={e => setTokenAgent(e.target.value)} className="input">
               <option value="aegis-guard">Aegis-Guard</option>
               <option value="nodetrace">NodeTrace</option>
-              <option value="unified">Unified (Guard + NodeTrace)</option>
+              <option value="both">Both agents</option>
             </select>
+          </div>
+          <div className="space-y-2 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] p-3 text-xs">
+            <label className="flex items-center gap-2 text-white">
+              <input type="checkbox" checked={dashboardRemote} onChange={e => setDashboardRemote(e.target.checked)} />
+              Connect agents to the remote dashboard
+            </label>
+            <label className="flex items-center gap-2 text-[hsl(var(--muted-foreground))]">
+              <input type="checkbox" checked={dashboardLocal} onChange={e => setDashboardLocal(e.target.checked)} disabled />
+              Install a local dashboard on the endpoint (not available yet)
+            </label>
           </div>
           <PermissionGate perms={['deploy']}>
             <button onClick={() => createTokenMut.mutate()} disabled={createTokenMut.isPending} className="btn btn-primary w-full">
@@ -187,14 +204,13 @@ export default function DeployManager() {
           </div>
         </div>
 
-        {/* Mass job */}
+        {/* Manual rollout tracking */}
         <div className="card p-5 space-y-4">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-[hsl(var(--muted-foreground))] flex items-center gap-2"><Play size={14} /> Mass Deploy Job</h3>
+          <h3 className="text-xs font-bold uppercase tracking-widest text-[hsl(var(--muted-foreground))] flex items-center gap-2"><Play size={14} /> Manual Rollout Tracking</h3>
           <div className="flex gap-2">
             <select value={agentType} onChange={e => setAgentType(e.target.value)} className="input flex-1">
               <option value="nodetrace">NodeTrace (Telemetry)</option>
               <option value="aegis-guard">Aegis-Guard (EDR)</option>
-              <option value="unified">Unified (Guard + NodeTrace)</option>
             </select>
             <select value={method} onChange={e => setMethod(e.target.value)} className="input">
               <option value="ssh" disabled>SSH (executor pending)</option>
@@ -223,12 +239,12 @@ export default function DeployManager() {
             </div>
           )}
           {method === 'oneline' && (
-            <p className="text-[10px] text-cyan-400 leading-tight">Remote password execution is disabled. Generate a short-lived enrollment token above and run the signed installer on the target host.</p>
+            <p className="text-[10px] text-cyan-400 leading-tight">This records a manual rollout. Generate a short-lived enrollment token above, run its signed installer on the target host, then track the agent heartbeat here.</p>
           )}
           
           <PermissionGate perms={['deploy']}>
             <button onClick={handleCreateJob} disabled={createJobMut.isPending} className="btn btn-primary w-full bg-purple-600 hover:bg-purple-500 border-purple-500 text-white shadow-purple-500/20">
-              {createJobMut.isPending ? 'Queuing...' : 'Start Rollout'}
+              {createJobMut.isPending ? 'Recording...' : 'Record Rollout'}
             </button>
           </PermissionGate>
           

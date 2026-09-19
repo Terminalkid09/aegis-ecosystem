@@ -121,3 +121,45 @@ def test_negative_seq_rejected():
             "event_type": "X",
             "seq": -5,
         })
+
+
+def test_nul_byte_stripped_at_the_schema_boundary():
+    """Lo strip sta qui perché `EventSchema` è l'ingresso di TUTTI i percorsi.
+
+    La telemetria passa da `sanitize_event`, ma i parser SIEM e il consumer
+    Redis costruiscono direttamente l'evento: se il filtro vivesse solo nel
+    primo, un NUL arriverebbe comunque al database da un log sorgente.
+    """
+    ev = EventSchema.model_validate({
+        "agent_id": "a",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "X",
+        "process_name": "bad\x00.exe",
+    })
+    assert ev.process_name == "bad.exe"
+    assert "stripped-ctrl" in (ev.quality or "")
+
+
+def test_nul_strip_does_not_set_quality_on_clean_event():
+    ev = EventSchema.model_validate({
+        "agent_id": "a",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "X",
+        "process_name": "good.exe",
+    })
+    assert ev.process_name == "good.exe"
+    assert not ev.quality
+
+
+def test_quality_marker_survives_with_truncation():
+    """Le due cause di alterazione convivono nello stesso campo."""
+    ev = EventSchema.model_validate({
+        "agent_id": "a",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "X",
+        "commandLine": "x\x00" + "y" * 5000,
+    })
+    assert ev.quality is not None
+    assert TRUNCATION_TAG in ev.quality
+    assert "stripped-ctrl" in ev.quality
+    assert len(ev.quality) <= 64

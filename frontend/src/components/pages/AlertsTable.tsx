@@ -4,15 +4,17 @@ import { AlertTriangle, CheckCircle2, Filter, Trash2, RefreshCw, ChevronDown, Ch
 import { alertsAPI } from '@/services/api'
 import { PermissionGate } from '@/components/common/PermissionGate'
 import { cn, severityBadge, timeAgo } from '@/lib/utils'
+import { useAppStore } from '@/store/appStore'
 
 export default function AlertsTable() {
   const qc = useQueryClient()
+  const setLiveStats = useAppStore(state => state.setLiveStats)
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
   const [filterSeverity, setFilterSeverity] = useState<string>('ALL')
   const [filterResolved, setFilterResolved] = useState<string>('UNRESOLVED')
 
-  const { data: alerts = [], isLoading } = useQuery({
+  const { data: alerts = [], isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: ['alerts', filterSeverity, filterResolved],
     queryFn: () => alertsAPI.getAlerts({
       severity: filterSeverity !== 'ALL' ? filterSeverity : undefined,
@@ -25,12 +27,47 @@ export default function AlertsTable() {
   const resolveMut = useMutation({
     mutationFn: ({ id, resolved }: { id: number; resolved: boolean }) =>
       alertsAPI.resolveAlert(id, resolved),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['alerts'] }),
+    onMutate: async ({ id, resolved }) => {
+      await qc.cancelQueries({ queryKey: ['alerts'] })
+      const previous = qc.getQueriesData({ queryKey: ['alerts'] })
+      qc.setQueriesData({ queryKey: ['alerts'] }, (current: any) => {
+        if (!Array.isArray(current)) return current
+        return current.map(alert => alert.id === id ? { ...alert, is_resolved: resolved } : alert)
+      })
+      return { previous }
+    },
+    onError: (_error, _variables, context) => {
+      context?.previous.forEach(([key, data]) => qc.setQueryData(key, data))
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['alerts'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+    },
   })
 
   const resolveAllMut = useMutation({
     mutationFn: () => alertsAPI.resolveAll(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['alerts'] }),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ['alerts'] })
+      const previous = qc.getQueriesData({ queryKey: ['alerts'] })
+      qc.setQueriesData({ queryKey: ['alerts'] }, (current: any) => {
+        if (!Array.isArray(current)) return current
+        return current.map(alert => ({ ...alert, is_resolved: true }))
+      })
+      const currentLiveStats = useAppStore.getState().liveStats
+      if (currentLiveStats) {
+        setLiveStats({ ...currentLiveStats, unresolved_alerts: 0,
+          current_critical_alerts: 0, current_high_alerts: 0, current_medium_alerts: 0 })
+      }
+      return { previous }
+    },
+    onError: (_error, _variables, context) => {
+      context?.previous.forEach(([key, data]) => qc.setQueryData(key, data))
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['alerts'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+    },
   })
 
   const deleteAllMut = useMutation({
@@ -67,17 +104,21 @@ export default function AlertsTable() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => qc.invalidateQueries({ queryKey: ['alerts'] })}
+            onClick={() => refetch()}
+            disabled={isFetching}
             className="btn btn-ghost"
+            title="Refresh alerts"
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={14} className={isFetching ? 'animate-spin' : undefined} />
           </button>
           <PermissionGate perms={['triage', 'rules']} mode="hide">
             <button
               onClick={() => { if (confirm('Resolve all unresolved alerts?')) resolveAllMut.mutate() }}
-              className="btn btn-ghost"
+              disabled={resolveAllMut.isPending}
+              className="btn btn-ghost disabled:opacity-50"
             >
-              <CheckCircle2 size={14} /> Resolve All
+              <CheckCircle2 size={14} className={resolveAllMut.isPending ? 'animate-pulse' : undefined} />
+              {resolveAllMut.isPending ? 'Resolving…' : 'Resolve All'}
             </button>
           </PermissionGate>
           <PermissionGate perms={['manage']} mode="hide">
@@ -90,6 +131,18 @@ export default function AlertsTable() {
           </PermissionGate>
         </div>
       </div>
+
+      {isError && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">
+          <span>Alerts could not be loaded. Your existing view is still available.</span>
+          <button onClick={() => refetch()} className="text-white underline underline-offset-2">Retry</button>
+        </div>
+      )}
+      {(resolveMut.isError || resolveAllMut.isError) && (
+        <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">
+          The change could not be saved. The alert state was restored.
+        </div>
+      )}
 
       {/* Filters */}
       <div className="card p-4 flex flex-wrap gap-3 items-center">

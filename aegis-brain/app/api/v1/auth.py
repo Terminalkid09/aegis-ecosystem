@@ -43,13 +43,13 @@ def _set_auth_cookie(response: Response, token: str):
     # repeated name: with a stale duplicate every request answered 401 until
     # the browser state was cleared by hand. Expire it on every login.
     response.delete_cookie(key=SESSION_COOKIE, path="/", httponly=True,
-                           samesite="strict", secure=not settings.DEBUG)
+                           samesite="strict", secure=settings.COOKIE_SECURE)
     response.set_cookie(
         key=SESSION_COOKIE,
         value=token,
         httponly=True,
         samesite="strict",
-        secure=not settings.DEBUG,  # True in production with HTTPS
+        secure=settings.COOKIE_SECURE,
         max_age=settings.JWT_EXPIRE_MINUTES * 60,
         path=SESSION_COOKIE_PATH,
     )
@@ -95,6 +95,10 @@ async def login(request: Request, payload: LoginRequest, response: Response, db:
         await record_login_failure(payload.email)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    # Account disattivato: non autentica, nemmeno con credenziali corrette.
+    if not user.active:
+        raise HTTPException(status_code=403, detail="Account disabled")
+
     await clear_login_failures(payload.email)
     
     if needs_rehash(user.password_hash):
@@ -135,7 +139,7 @@ async def logout(
             path=path,
             httponly=True,
             samesite="strict",
-            secure=not settings.DEBUG,
+            secure=settings.COOKIE_SECURE,
         )
     return {"status": "logged_out", "detail": "Token blacklisted and cookie cleared."}
 

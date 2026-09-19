@@ -10,7 +10,8 @@ from app.rules.rule_definitions import (
     rule_persistence_path, rule_dll_hijack_path, rule_lolbin_usage,
     rule_high_thread_count, rule_network_beacon, rule_persistence_autorun,
     rule_autorun_registry_write, rule_scheduled_task_creation,
-    rule_discovery_commands,
+    rule_discovery_commands, rule_security_control_tampering,
+    rule_event_log_clearing, rule_recovery_destruction,
     CREDENTIAL_TOOLS, SCANNER_TOOLS, EXPLOIT_TOOLS, POST_EXPLOIT_TOOLS,
     RAT_TOOLS, RANSOMWARE, EVASION_TOOLS, INFO_STEALERS,
     SUSPICIOUS_PATHS, SCRIPT_INTERPRETERS, SUSPICIOUS_PARENT_CHILD,
@@ -686,11 +687,174 @@ class TestRuleDiscoveryCommands:
             "whoami.exe", command_line="  whoami.exe    /all  ")).triggered
 
 
+# ── Manomissione dei controlli e distruzione delle evidenze ──────────────
+#
+# Questi test nascono da una batteria di tecniche "difficili": azioni di un
+# operatore reale (non nomi di tool), pensate per NON somigliare a quello che
+# una regola su stringhe note intercetta. Sei detection mancate su 18, e quattro
+# erano la stessa idea. Ogni test positivo qui è un caso che prima non
+# generava nulla, e ogni test negativo è un uso legittimo dello stesso binario
+# che NON deve allarmare (un detection che spara su `sc query` è rumore, e il
+# rumore brucia la fiducia nell'allarme).
+
+
+class TestRuleSecurityControlTampering:
+    def test_sc_config_disable_defender(self):
+        r = rule_security_control_tampering(make_event(
+            "cmd.exe", command_line="sc.exe config WinDefend start= disabled"))
+        assert r.triggered and r.severity == "CRITICAL"
+        assert r.mitre_technique_id == "T1562"
+
+    def test_net_stop_security_service(self):
+        assert rule_security_control_tampering(make_event(
+            "net.exe", command_line="net stop WinDefend")).triggered
+
+    def test_taskkill_on_av_process(self):
+        assert rule_security_control_tampering(make_event(
+            "taskkill.exe",
+            command_line="taskkill /F /IM MsMpEng.exe")).triggered
+
+    def test_defender_realtime_monitoring_disabled(self):
+        r = rule_security_control_tampering(make_event(
+            "powershell.exe",
+            command_line="Set-MpPreference -DisableRealtimeMonitoring $true"))
+        assert r.triggered and r.severity == "CRITICAL"
+
+    def test_defender_exclusion_added(self):
+        assert rule_security_control_tampering(make_event(
+            "powershell.exe",
+            command_line="Add-MpPreference -ExclusionPath C:\\Users\\Public"
+        )).triggered
+
+    def test_firewall_disabled(self):
+        assert rule_security_control_tampering(make_event(
+            "netsh.exe",
+            command_line="netsh advfirewall set allprofiles state off")).triggered
+
+    def test_audit_policy_cleared(self):
+        assert rule_security_control_tampering(make_event(
+            "auditpol.exe", command_line="auditpol /clear /y")).triggered
+
+    # --- controlli negativi: usi legittimi degli stessi binari ---------------
+    def test_sc_query_is_read_only(self):
+        assert not rule_security_control_tampering(make_event(
+            "sc.exe", command_line="sc.exe query WinDefend")).triggered
+
+    def test_security_service_reenabled_is_not_tampering(self):
+        """Riattivare una protezione non è un attacco: senza questo il SOC
+        riceve un CRITICAL da un intervento di manutenzione."""
+        assert not rule_security_control_tampering(make_event(
+            "sc.exe", command_line="sc.exe config WinDefend start= auto"
+        )).triggered
+
+    def test_taskkill_on_a_normal_app(self):
+        assert not rule_security_control_tampering(make_event(
+            "taskkill.exe", command_line="taskkill /F /IM notepad.exe"
+        )).triggered
+
+    def test_firewall_listing_not_flagged(self):
+        assert not rule_security_control_tampering(make_event(
+            "netsh.exe", command_line="netsh advfirewall firewall show rule name=all"
+        )).triggered
+
+    def test_empty_command_line_not_flagged(self):
+        assert not rule_security_control_tampering(make_event("cmd.exe")).triggered
+
+
+class TestRuleEventLogClearing:
+    def test_wevtutil_cl_security(self):
+        r = rule_event_log_clearing(make_event(
+            "wevtutil.exe", command_line="wevtutil.exe cl Security"))
+        assert r.triggered and r.severity == "CRITICAL"
+        assert r.mitre_technique_id == "T1070.001"
+
+    def test_clear_eventlog_powershell(self):
+        assert rule_event_log_clearing(make_event(
+            "powershell.exe", command_line="Clear-EventLog -LogName Application"
+        )).triggered
+
+    def test_log_disabled_is_also_clearing_traces(self):
+        """`wevtutil sl ... /e:false` disattiva il log: da lì in poi l'evidenza
+        non esiste più, che è lo stesso effetto della cancellazione."""
+        assert rule_event_log_clearing(make_event(
+            "wevtutil.exe", command_line="wevtutil sl Security /e:false"
+        )).triggered
+
+    def test_wevtutil_query_is_read_only(self):
+        assert not rule_event_log_clearing(make_event(
+            "wevtutil.exe", command_line="wevtutil qe Security /c:5 /f:text"
+        )).triggered
+
+    def test_unrelated_clear_of_a_file_is_not_log_clearing(self):
+        assert not rule_event_log_clearing(make_event(
+            "cmd.exe", command_line="del /f C:\\temp\\old.log"
+        )).triggered
+
+
+class TestRuleRecoveryDestruction:
+    def test_bcdedit_disable_recovery(self):
+        r = rule_recovery_destruction(make_event(
+            "bcdedit.exe", command_line="bcdedit /set {default} recoveryenabled no"))
+        assert r.triggered and r.severity == "CRITICAL"
+        assert r.mitre_technique_id == "T1490"
+
+    def test_wbadmin_delete_catalog(self):
+        assert rule_recovery_destruction(make_event(
+            "wbadmin.exe", command_line="wbadmin delete catalog -quiet"
+        )).triggered
+
+    def test_vssadmin_delete_shadows(self):
+        assert rule_recovery_destruction(make_event(
+            "vssadmin.exe", command_line="vssadmin delete shadows /all /quiet"
+        )).triggered
+
+    def test_wmic_shadowcopy_delete(self):
+        assert rule_recovery_destruction(make_event(
+            "wmic.exe", command_line="wmic shadowcopy delete"
+        )).triggered
+
+    def test_vssadmin_list_is_read_only(self):
+        assert not rule_recovery_destruction(make_event(
+            "vssadmin.exe", command_line="vssadmin list shadows"
+        )).triggered
+
+    def test_bcdedit_query_is_read_only(self):
+        assert not rule_recovery_destruction(make_event(
+            "bcdedit.exe", command_line="bcdedit /enum"
+        )).triggered
+
+    def test_backup_creation_is_not_destruction(self):
+        assert not rule_recovery_destruction(make_event(
+            "wbadmin.exe", command_line="wbadmin start backup -backupTarget:D: -allCritical"
+        )).triggered
+
+
+class TestParentChildInjectionBranch:
+    """Un'applicazione utente che lancia un binario di SISTEMA."""
+
+    def test_browser_spawning_svchost(self):
+        r = rule_suspicious_parent_child(make_event(
+            "svchost.exe", parent_process_name="chrome.exe"))
+        assert r.triggered
+        assert r.mitre_technique_id == "T1055"
+
+    def test_browser_spawning_lsass_is_critical(self):
+        r = rule_suspicious_parent_child(make_event(
+            "lsass.exe", parent_process_name="chrome.exe"))
+        assert r.triggered and r.severity == "CRITICAL"
+
+    def test_explorer_spawning_svchost_is_not_flagged(self):
+        """Controprova: il percorso legittimo non deve allarmare."""
+        assert not rule_suspicious_parent_child(make_event(
+            "svchost.exe", parent_process_name="services.exe")).triggered
+
+
 class TestNewRulesAreRegistered:
     def test_new_rule_ids_present(self):
         from app.rules.rule_definitions import STATIC_RULES, RULE_NOTES
         ids = {s.rule_id for s in STATIC_RULES}
-        for rid in ("AEGIS-S016", "AEGIS-S017", "AEGIS-S018"):
+        for rid in ("AEGIS-S016", "AEGIS-S017", "AEGIS-S018",
+                    "AEGIS-S019", "AEGIS-S020", "AEGIS-S021"):
             assert rid in ids, f"{rid} non registrata"
             assert rid in RULE_NOTES, f"{rid} senza note/eccezioni per la UI"
 

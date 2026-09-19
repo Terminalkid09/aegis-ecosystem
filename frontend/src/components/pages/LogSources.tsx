@@ -80,8 +80,8 @@ export default function LogSources() {
   const testParser = useMutation({
     mutationFn: () => {
       let payload: unknown = testPayload.payload
-      // NDJSON/JSON valido → oggetto; altrimenti la riga grezza (syslog, Zeek TSV…)
-      try { payload = JSON.parse(testPayload.payload) } catch { /* resta stringa */ }
+      // Parse NDJSON/JSON as an object; keep other formats as a raw line.
+      try { payload = JSON.parse(testPayload.payload) } catch { /* keep as string */ }
       return siemAPI.testParser({ parser: testPayload.parser, payload }).then(r => r.data)
     },
     onSuccess: data => setTestResult(data),
@@ -150,7 +150,7 @@ export default function LogSources() {
         </div>
       </div>
 
-      {/* Catalogo parser + form sorgente */}
+      {/* Parser catalog and source form */}
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="card p-5 space-y-3">
           <h2 className="font-semibold text-white flex items-center gap-2">
@@ -180,7 +180,7 @@ export default function LogSources() {
           </div>
           <input
             className="input"
-            placeholder="descrizione (opzionale)"
+            placeholder="description (optional)"
             value={newSource.description}
             onChange={e => setNewSource(s => ({ ...s, description: e.target.value }))}
           />
@@ -197,7 +197,7 @@ export default function LogSources() {
 
         <div className="card p-5 space-y-3">
           <h2 className="font-semibold text-white flex items-center gap-2">
-            <FlaskConical size={16} className="text-purple-400" /> Prova un parser
+            <FlaskConical size={16} className="text-purple-400" /> Test a parser
           </h2>
           <p className="text-xs text-[hsl(var(--muted-foreground))]">
 Nothing is stored: this only validates the format of a new source.
@@ -224,7 +224,7 @@ Nothing is stored: this only validates the format of a new source.
             onClick={() => testParser.mutate()}
           >
             {testParser.isPending ? <Loader2 size={14} className="animate-spin" /> : <FlaskConical size={14} />}
-            Analizza
+            Test parser
           </button>
           {testResult && (
             <div className="text-xs space-y-1">
@@ -248,10 +248,10 @@ Nothing is stored: this only validates the format of a new source.
         </div>
       </div>
 
-      {/* Coverage detection */}
+      {/* Detection coverage */}
       <div className="card p-5">
         <h2 className="font-semibold text-white flex items-center gap-2 mb-3">
-          <ShieldCheck size={16} className="text-emerald-400" /> Copertura detection
+          <ShieldCheck size={16} className="text-emerald-400" /> Detection coverage
         </h2>
         <div className="grid md:grid-cols-3 gap-4 text-sm">
           <div>
@@ -271,8 +271,8 @@ Nothing is stored: this only validates the format of a new source.
             </div>
           </div>
           <div>
-            <div className="text-xs uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-2">MITRE coperti</div>
-            <div className="text-white">{(coverage?.sigma?.mitre_techniques?.length || 0) + (coverage?.correlation?.mitre_techniques?.length || 0)} tecniche</div>
+            <div className="text-xs uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-2">MITRE techniques covered</div>
+            <div className="text-white">{(coverage?.sigma?.mitre_techniques?.length || 0) + (coverage?.correlation?.mitre_techniques?.length || 0)} techniques</div>
           </div>
         </div>
         {((coverage?.sigma?.excluded?.length || 0) + (coverage?.correlation?.excluded?.length || 0)) > 0 && (
@@ -283,7 +283,7 @@ Nothing is stored: this only validates the format of a new source.
         )}
       </div>
 
-      {/* Tabella sorgenti */}
+      {/* Sources table */}
       <div className="card overflow-hidden">
         {isLoading ? (
           <div className="py-16 flex items-center justify-center gap-3 text-[hsl(var(--muted-foreground))]">

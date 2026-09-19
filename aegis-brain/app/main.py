@@ -325,7 +325,7 @@ async def sliding_session_middleware(request: Request, call_next):
             value=fresh,
             httponly=True,
             samesite="strict",
-            secure=not settings.DEBUG,
+            secure=settings.COOKIE_SECURE,
             max_age=ttl_s,
             path=SESSION_COOKIE_PATH,
         )

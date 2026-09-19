@@ -198,6 +198,7 @@ public class AegisClient {
         JsonObject payload = new JsonObject();
         payload.addProperty("hostname", SystemInfoCollector.getHostname());
         payload.addProperty("os", System.getProperty("os.name"));
+        payload.addProperty("agent_type", "aegis-guard");
         payload.addProperty("enroll_key", enrollKey);
         
         request.setEntity(new StringEntity(gson.toJson(payload), ContentType.APPLICATION_JSON));

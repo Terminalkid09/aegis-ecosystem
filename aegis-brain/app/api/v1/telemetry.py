@@ -248,7 +248,12 @@ async def get_recent_telemetry(
     # Tetto alto apposta: la dashboard disegna una serie temporale (~10s per
     # campione), quindi 200 punti coprono pochi minuti e il grafico non può
     # tornare indietro. 2000 è la finestra massima che vale la pena disegnare.
-    limit: int = Query(50, ge=1, le=2000)
+    limit: int = Query(50, ge=1, le=2000),
+    # Modalità leggera per chi disegna serie e liste: senza i due blob JSON
+    # pesanti. Una riga completa pesa ~8 KB (network_flows ~2,6 KB + processes
+    # ~2 KB): 600 righe erano 4,9 MB e 1,1 s di CPU per una richiesta, e in
+    # parallelo affamavano l'unico worker. Il grafico usa quattro campi.
+    slim: bool = Query(False, description="Omit heavy JSON blobs (network flows, process list)"),
 ):
     stmt = (
         select(Telemetry, Agent)
@@ -259,8 +264,9 @@ async def get_recent_telemetry(
         stmt = stmt.where(Telemetry.device_id == agent_id)
     stmt = stmt.order_by(Telemetry.timestamp.desc()).limit(limit)
     result = await db.execute(stmt)
-    return [
-        {
+    rows = []
+    for telemetry, agent in result.all():
+        row = {
             "id": telemetry.id,
             "agent_id": str(telemetry.device_id),
             "hostname": agent.hostname,
@@ -270,16 +276,19 @@ async def get_recent_telemetry(
             "ram_usage": telemetry.ram_usage,
             "disk_free": telemetry.disk_free,
             "disk_total": telemetry.disk_total,
-            "network_sent": telemetry.network_sent,
-            "network_received": telemetry.network_received,
-            "processes": telemetry.processes,
-            "ip_local": telemetry.ip_local,
-            "ip_public": telemetry.ip_public,
-            "users": telemetry.users,
-            "network_flows": telemetry.network_flows,
         }
-        for telemetry, agent in result.all()
-    ]
+        if not slim:
+            row.update({
+                "network_sent": telemetry.network_sent,
+                "network_received": telemetry.network_received,
+                "processes": telemetry.processes,
+                "ip_local": telemetry.ip_local,
+                "ip_public": telemetry.ip_public,
+                "users": telemetry.users,
+                "network_flows": telemetry.network_flows,
+            })
+        rows.append(row)
+    return rows
 
 @router.get("/activity")
 async def get_activity(
@@ -422,10 +431,20 @@ async def agent_report_batch(
     if len(payload) > 100:
         raise HTTPException(status_code=413, detail="Max 100 events per batch")
     accepted, rejected, duplicates = 0, 0, 0
+    # L'id si legge UNA volta, prima del loop, e da qui in poi si usa solo la
+    # stringa. Motivo, verificato dal vivo: un commit fallito scade gli oggetti
+    # ORM della sessione, quindi `agent.agent_id` dopo un errore diventa un
+    # lazy-load su una sessione in corso di rollback. Nel ramo `except` quel
+    # lazy-load sollevava PendingRollbackError — cioè l'error path diventava
+    # esso stesso l'errore, e la richiesta rispondeva 500 invece di dichiarare
+    # l'evento come `rejected`. Un evento con un NUL nel nome processo bastava,
+    # e l'outbox dell'agente lo rigioca per sempre.
+    agent_id = agent.agent_id
+    agent_ref = str(agent_id)
     from app.core.age_validation import validate_age_header
-    inc("aegis_events_received_total", len(payload), f'agent="{agent.agent_id}",type="batch"')
-    if not await ingest_rate_guard.allow_async(str(agent.agent_id), len(payload)):
-        inc("aegis_events_dropped_total", len(payload), f'reason="rate_limited",agent="{agent.agent_id}"')
+    inc("aegis_events_received_total", len(payload), f'agent="{agent_ref}",type="batch"')
+    if not await ingest_rate_guard.allow_async(agent_ref, len(payload)):
+        inc("aegis_events_dropped_total", len(payload), f'reason="rate_limited",agent="{agent_ref}"')
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="rate exceeded")
     for raw in payload:
         try:
@@ -434,9 +453,9 @@ async def agent_report_batch(
             rejected += 1
             inc("aegis_events_dropped_total", 1, f'reason="schema",agent="{agent.agent_id}"')
             logger.warning("Evento fuori schema scartato nel batch (agent=%s): %s",
-                           agent.agent_id, exc.errors()[:2])
+                           agent_ref, exc.errors()[:2])
             continue
-        if str(agent.agent_id) != item.agent_id:
+        if agent_ref != item.agent_id:
             rejected += 1
             continue
         # Audit L7: la validazione di `Age` è per-evento e non può abortire
@@ -445,28 +464,32 @@ async def agent_report_batch(
             validate_age_header(request, item.timestamp)
         except HTTPException:
             rejected += 1
-            inc("aegis_events_dropped_total", 1, f'reason="stale_event",agent="{agent.agent_id}"')
+            inc("aegis_events_dropped_total", 1, f'reason="stale_event",agent="{agent_ref}"')
             continue
         event_dedup.SEQ.observe(item.agent_id, item.boot_id, item.seq)
         if await event_dedup.is_duplicate(item.agent_id, item.event_id):
             duplicates += 1
-            inc("aegis_events_duplicate_total", 1, f'agent="{agent.agent_id}"')
+            inc("aegis_events_duplicate_total", 1, f'agent="{agent_ref}"')
             continue
         try:
-            await telemetry_service.process_telemetry(db, agent.agent_id, sanitize_event(item.model_dump()))
+            await telemetry_service.process_telemetry(db, agent_id, sanitize_event(item.model_dump()))
             accepted += 1
         except Exception as exc:
             rejected += 1
-            inc("aegis_agent_errors_total", 1, f'agent="{agent.agent_id}",error="process_telemetry"')
             # Audit L2: senza rollback la sessione resta pending-rollback e
             # TUTTI gli eventi successivi del batch fallivano: un solo evento
             # rotto ne scartava fino a 99 sani.
+            # Ordine deliberato: rollback PRIMA di metrica e log. Il commit
+            # fallito ha già scaduto gli oggetti ORM; qualunque accesso a
+            # `agent.*` prima del rollback è un accesso al database che
+            # fallisce a sua volta.
             try:
                 await db.rollback()
             except Exception:
                 logger.exception("Rollback fallito durante l'ingestion batch")
-            logger.warning("Evento scartato nel batch (agent=%s): %s", agent.agent_id, exc)
-    set_gauge("aegis_queue_depth", accepted, f'agent="{agent.agent_id}",stage="ingest"')
+            inc("aegis_agent_errors_total", 1, f'agent="{agent_ref}",error="process_telemetry"')
+            logger.warning("Evento scartato nel batch (agent=%s): %s", agent_ref, exc)
+    set_gauge("aegis_queue_depth", accepted, f'agent="{agent_ref}",stage="ingest"')
     return {"status": "ok", "accepted": accepted, "rejected": rejected, "duplicates": duplicates}
 
 @router.post("/heartbeat")

@@ -10,12 +10,18 @@ public class Config {
             "AEGIS_AGENT_ID", "agent-gen-" + UUID.randomUUID().toString().substring(0, 8)
     );
 
-    public static final String GATEWAY_URL = getEnv(
-            "AEGIS_GATEWAY_URL", "https://aegis.local/api/v1/telemetry/report"
-    );
-
     public static final String BRAIN_URL = getEnv(
             "AEGIS_BRAIN_URL", "https://aegis.local/api/v1"
+    );
+
+    /**
+     * Endpoint di report eventi. Default DERIVATO da BRAIN_URL: l'installer
+     * imposta solo AEGIS_BRAIN_URL, quindi un default letterale qui sotto
+     * manderebbe l'agente a riportare a un host morto (bug reale trovato
+     * nell'audit del flusso deploy). Override esplicito resta possibile.
+     */
+    public static final String GATEWAY_URL = getEnv(
+            "AEGIS_GATEWAY_URL", BRAIN_URL + "/telemetry/report"
     );
 
     public static final String ENROLL_KEY = getEnvOrThrow(
@@ -63,6 +69,7 @@ public class Config {
     public static final String SERVER_CA_FILE = getEnv(
             "AEGIS_SERVER_CA", ""
     );
+
 
     private static String getEnv(String key, String defaultValue) {
         String val = System.getenv(key);

@@ -174,9 +174,16 @@ Build all agents with a single command:
 build.bat
 ```
 
+Maven takes the JDK from `JAVA_HOME`, and the guard is compiled for **Java 21** while the agent itself runs on a newer JDK. If `JAVA_HOME` still points at a JRE 8, `mvn test` fails with a confusing `class file version 65.0 ... only recognizes up to 52.0` error even though the compile step reports success (stale classes). Point it at a JDK 21+ before building:
+
+```cmd
+set JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-25.0.2.10-hotspot
+cd aegis-guard && mvn test
+```
+
 ## Authentication Model
 
-- **Dashboard**: Bearer JWT after `POST /api/v1/auth/login` or register. Telemetry, rules, VaultX, OSINT, AI, OCSF export and Aegis Total all require JWT.
+- **Dashboard**: Bearer JWT after `POST /api/v1/auth/login` (self-service register is disabled by default: with `ALLOW_OPEN_REGISTRATION=false` only an admin can create accounts). Telemetry, rules, VaultX, OSINT, AI, OCSF export and Aegis Total all require JWT.
 - **Roles**: `ROLE_PERMISSIONS` in `app/core/deps.py` maps `viewer`/`user`/`auditor`/`responder`/`analyst`/`admin` to permissions. The role is read from the database on **every** request, so a change applies without re-login. Registration always creates a `user`: privilege is granted from a shell, never from an exposed API.
 
   ```cmd
@@ -287,11 +294,12 @@ produrre metriche di detection su traffico reale.
 - **Network scan**: ARP + ICMP sweep + TCP connect scan — finds ALL devices on subnet, not just those with open ports
 - **MAC vendor lookup**: OUI database identifies device manufacturers (Samsung, Apple, Cisco, etc.)
 - **Agent status per IP**: `guard_status` and `nodetrace_status` columns show which agents are deployed/active on each host
-- **Signed one-line enrollment**: `POST /api/v1/deploy/token` issues a short-lived token; the generated `install.ps1` / `install.sh` executes a signed one-liner on the target. Credential-based WinRM/SSH deployment was **removed**, not disabled (see `docs/OPERATIONS.md`).
+- **Signed one-line enrollment**: `POST /api/v1/deploy/token` issues a short-lived token for Guard, NodeTrace, or both. The generated installer downloads the selected artifacts, registers Windows services or Linux systemd units, enables restart recovery, and consumes one enrollment slot per agent. Credential-based WinRM/SSH deployment was **removed**, not disabled (see `docs/OPERATIONS.md`).
 - **Synchronize agent status**: Button to sync DiscoveredHost agent states with live Agent table
 
 ### Detection Rules Engine
-- **MITRE ATT&CK metadata**: Each static rule carries tactic, technique, and technique ID (T1059, T1134, T1036, etc.)
+- **21 static rules**, deterministic and inspectable: process lineage and masquerading, execution from suspicious paths, persistence (autorun registry keys, scheduled tasks), security-control tampering (AV service stopped or killed, Defender exclusions, firewall off, audit policy cleared), event-log clearing, recovery destruction (backup catalog, shadow copies, recovery), local discovery. `GET /api/v1/rules/static` returns the live list and it is the single source of truth for the count.
+- **MITRE ATT&CK metadata**: Each static rule carries tactic, technique, and technique ID (T1059, T1134, T1036, T1562, T1070.001, T1490, etc.)
 - **Custom rules**: AND/OR multi-condition rules, whitelist (hostname/IP exclusions), auto-remediation actions
 - **Rule testing**: `POST /api/v1/rules/test` to test rules against sample event data
 
@@ -318,6 +326,8 @@ Docker containers come back on their own (`restart: unless-stopped`), but host a
 - **`python scripts/setup.py` registers them for you** when it runs elevated; if it is not, it prints the exact commands instead of leaving a silent gap. Use `--no-autostart` to force dev-mode agents only (two instances per endpoint are never started: either services **or** dev processes).
 - **No-admin fallback**: `powershell -ExecutionPolicy Bypass -File scripts/install-agents-autostart.ps1` registers Scheduled Tasks “at log on” (user context; elevated Guard actions unavailable). Remove with `-Remove`.
 - Logs: `logs\` — `nodetrace.txt`, `guard.txt`, `nodetrace-service.log`.
+- **Token installer**: when remote dashboard connectivity is selected, the installer performs the service registration itself and verifies the service is running before returning success. When it is disabled, artifacts are installed but services are not started because no enrollment target was selected.
+- **Local dashboard**: not currently shipped as an endpoint artifact. The dashboard remains a central web application; the deployment UI rejects the local-dashboard option instead of installing an incomplete or unauthenticated copy.
 - **Auto IP reputation**: OSINT results update the IP reputation database automatically
 - **Keys from the dashboard (Settings → Integrations)**: providers are discovered dynamically from the backend catalog, keys are stored encrypted at rest and take effect immediately — no restart. An env var set in `.env` **wins** over the DB value, so ops can still pin a key per deployment.
 - **Fallback order**: env var → DB (dashboard) → provider skipped with `api_key_not_configured` (never a hard failure)
@@ -451,6 +461,8 @@ Docker containers come back on their own (`restart: unless-stopped`), but host a
 | `POST /api/v1/auth/login` | none | Get JWT (rate-limited + per-account throttle) |
 | `POST /api/v1/auth/logout` | Bearer JWT | Blacklist token, clear cookie |
 | `GET /api/v1/auth/me` | Bearer JWT | Current user profile (rate-limited 30/min) |
+| `GET /api/v1/users` | `manage` (admin) | List dashboard accounts (email, role, active) |
+| `PATCH /api/v1/users/{id}` | `manage` (admin) | Enable/disable an account or change its role; disabled accounts are locked out of login and their existing JWTs stop working immediately; last-active-admin is protected (409) |
 | `GET /api/v1/telemetry/stats` | Bearer JWT | Dashboard counters (supports `?include_demo=true`) |
 | `GET /api/v1/telemetry/agents` | Bearer JWT | Agent inventory (supports `?include_demo=true`) |
 | `GET /api/v1/telemetry/alerts` | Bearer JWT | Alert list with filtering |

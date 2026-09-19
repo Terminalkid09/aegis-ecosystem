@@ -120,3 +120,76 @@ async def test_single_report_with_long_command_line_still_works(
                                       command_line="y" * 9000),
                           headers=agent_auth_headers)
     assert r.status_code == 200, r.text
+
+
+# ---------------------------------------------------------------------------
+# Audit: un evento che il database non puo' scrivere non deve diventare un 500
+# ---------------------------------------------------------------------------
+#
+# Misurato dal vivo: un batch contenente un NUL byte in un nome processo
+# rispondeva 500, non 200 con `rejected=1`. La causa non era il NUL in sé ma
+# l'error path dell'handler: il commit fallito scade gli oggetti ORM della
+# sessione, quindi toccare `agent.agent_id` PRIMA del rollback eseguiva un
+# lazy-load su una sessione che richiede rollback -> PendingRollbackError, e
+# l'error path diventava esso stesso l'errore. Poiché l'outbox rigioca il batch
+# respinto, un simile evento bloccava la telemetria dell'endpoint per sempre.
+
+
+@pytest.mark.asyncio
+async def test_nul_byte_event_is_not_fatal(
+        client, agent_auth_headers, test_agent):
+    """Il NUL si rimuove all'ingresso: nessun evento perso, nessun 500."""
+    payload = [
+        _event(str(test_agent.agent_id), pid=8001, process_name="sano.exe"),
+        _event(str(test_agent.agent_id), pid=8002, process_name="robust\x00.exe",
+               parent_process_name="explorer\x00.exe"),
+        _event(str(test_agent.agent_id), pid=8003, process_name="dopo.exe"),
+    ]
+    r = await client.post("/api/v1/telemetry/report/batch",
+                          json=payload, headers=agent_auth_headers)
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["accepted"] == 3, "l'evento col NUL è accettato, ripulito"
+    assert body["rejected"] == 0
+
+
+@pytest.mark.asyncio
+async def test_error_path_survives_a_failed_write(
+        client, agent_auth_headers, test_agent, monkeypatch):
+    """Un errore di scrittura REALE finisce in `rejected`, non in un 500.
+
+    Riproduce il meccanismo esatto: un commit che fallisce a flush, come
+    fallirebbe per un valore che il database rifiuta. Se in quel ramo si legge
+    un attributo ORM prima del rollback, il test fallisce con 500 — che è
+    quello che succedeva in esercizio.
+    """
+    from app.database.models import Alert
+    from app.services import telemetry_service
+
+    real = telemetry_service.process_telemetry
+    calls = {"n": 0}
+
+    async def flaky(db, agent_id, data):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # `severity` è NOT NULL: il flush fallisce e la sessione resta in
+            # stato "rollback necessario", con le istanze scadute.
+            db.add(Alert(agent_id=agent_id, severity=None, process_name="x",
+                         event_type="probe", description="probe"))
+            await db.commit()
+            return
+        return await real(db, agent_id, data)
+
+    monkeypatch.setattr(telemetry_service, "process_telemetry", flaky)
+
+    payload = [_event(str(test_agent.agent_id), pid=8101),
+               _event(str(test_agent.agent_id), pid=8102)]
+    r = await client.post("/api/v1/telemetry/report/batch",
+                          json=payload, headers=agent_auth_headers)
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["rejected"] == 1, "l'evento che ha fallito è dichiarato"
+    assert body["accepted"] == 1, \
+        "dopo il rollback la sessione torna usabile: l'evento sano passa"
