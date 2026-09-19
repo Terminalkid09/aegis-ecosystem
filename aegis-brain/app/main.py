@@ -126,6 +126,17 @@ async def lifespan(app: FastAPI):
                 logger.info("Retention scheduler avviato (dry-run=False, backup check attivo)")
         except Exception as e:
             logger.warning(f"Retention scheduler non avviato: {e}")
+        # Heartbeat Telegram: il bot che dice "Aegis e' vivo" anche quando la
+        # dashboard e' chiusa (solo se configurato: enable=true + token + chat).
+        try:
+            from app.database.connection import AsyncSessionLocal
+            from app.services import telegram_notifier
+            telegram_notifier.start_heartbeat(
+                AsyncSessionLocal,
+                lambda db: db.close(),
+            )
+        except Exception as e:
+            logger.warning(f"Telegram heartbeat non avviato: {e}")
         logger.info("Database initialized, RedisConsumer and auto-enrichment started.")
         yield
     except Exception as e:
@@ -144,6 +155,11 @@ async def lifespan(app: FastAPI):
         try:
             from app.services.retention import stop_retention_task
             stop_retention_task()
+        except Exception:
+            pass
+        try:
+            from app.services import telegram_notifier
+            await telegram_notifier.stop_heartbeat()
         except Exception:
             pass
         logger.info("Shutting down Aegis-Brain...")

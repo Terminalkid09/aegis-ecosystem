@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, vault, osint, ai, telemetry, nodetrace, enroll, history, rules, discovery, ws, playbooks, syslog, audit, deploy, total, incidents, ocsf, ingest, search, integrations, fim, yara, users
+from app.api.v1 import auth, vault, osint, ai, telemetry, nodetrace, enroll, history, rules, discovery, ws, playbooks, syslog, audit, deploy, total, incidents, ocsf, ingest, search, integrations, fim, yara, users, telegram
 
 api_router = APIRouter()
 
@@ -26,6 +26,7 @@ api_router.include_router(audit.router, prefix="/audit")
 api_router.include_router(integrations.router, prefix="/integrations")
 api_router.include_router(fim.router, prefix="/fim")
 api_router.include_router(yara.router, prefix="/yara")
+api_router.include_router(telegram.router, prefix="/telegram")
 # Gestione account (admin): il flag `active` ora è enforcement, non decorazione.
 api_router.include_router(users.router, prefix="/users")
 api_router.include_router(ws.router, prefix="/ws")

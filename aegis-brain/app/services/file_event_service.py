@@ -122,6 +122,12 @@ async def handle_file_event(db, event: EventSchema) -> None:
         logger.debug("Rate-limit alert %s su %s (evento comunque in SIEM store)", kind, path)
     else:
         db.add(alert)
+        await db.flush()  # timestamp/PK popolati prima della notifica
+        try:
+            from app.services.telegram_notifier import notify_alert
+            await notify_alert(db, alert)
+        except Exception:
+            logger.exception("telegram notification failed (file event)")
 
     # Evento nel SIEM store (ricercabile in Log Search, OCSF File Activity).
     # Sempre, anche se l'alert è stato rate-limitato.

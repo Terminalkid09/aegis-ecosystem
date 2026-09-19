@@ -227,6 +227,17 @@ async def process_events(db: AsyncSession, source_name: str, source_type: str,
             await db.rollback()
             logger.warning(f"Playbook non eseguiti: {exc}")
 
+        # Notifiche Telegram sugli alert SIEM nuovi: stesso motore degli agenti,
+        # fail-soft per contratto.
+        try:
+            from app.services.telegram_notifier import notify_alert
+            result = await db.execute(
+                select(Alert).where(Alert.id.in_(list(detection["alert_ids"])[:200])))
+            for alert in result.scalars().all():
+                await notify_alert(db, alert)
+        except Exception:
+            logger.exception("telegram notification failed (SIEM pipeline)")
+
     return {
         "accepted": len(events),
         "duplicates": duplicates,

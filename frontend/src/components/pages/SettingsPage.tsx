@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Bell, Lock, Zap, Shield, HelpCircle, Network, KeyRound, ExternalLink, RefreshCw, Sparkles, MonitorSmartphone } from 'lucide-react'
+import { Bell, Lock, Zap, Shield, HelpCircle, Network, KeyRound, ExternalLink, RefreshCw, Sparkles, MonitorSmartphone, Send } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
-import { aiAPI, devicesAPI, healthAPI, integrationsAPI } from '@/services/api'
+import { apiClient, aiAPI, devicesAPI, healthAPI, integrationsAPI } from '@/services/api'
 import { PermissionGate } from '@/components/common/PermissionGate'
 import { cn } from '@/lib/utils'
 
@@ -299,6 +299,121 @@ function AISection() {
   )
 }
 
+/** Notifiche Telegram: config live (chat_id, severita', heartbeat) + token
+ *  nella sezione Integrations. Il bottone Test verifica token+chat davvero,
+ *  senza aspettare il primo alert. */
+function TelegramSection() {
+  const [cfg, setCfg] = useState<any>(null)
+  const [draft, setDraft] = useState<any>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const load = async () => {
+    try {
+      const res = await apiClient.get('/telegram/settings')
+      setCfg(res.data)
+      setDraft({
+        enabled: res.data.enabled,
+        chat_id: res.data.chat_id || '',
+        min_severity: res.data.min_severity,
+        heartbeat_minutes: res.data.heartbeat_minutes,
+      })
+    } catch { setCfg(null) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const save = async () => {
+    setBusy(true); setMsg('')
+    try {
+      await apiClient.put('/telegram/settings', draft)
+      setMsg('Saved.')
+      await load()
+    } catch (e: any) {
+      setMsg(e?.response?.data?.detail || 'Save failed.')
+    } finally { setBusy(false) }
+  }
+
+  const sendTest = async () => {
+    setBusy(true); setMsg('')
+    try {
+      await apiClient.post('/telegram/test')
+      setMsg('Test message sent — check your Telegram chat.')
+    } catch (e: any) {
+      setMsg(e?.response?.data?.detail || 'Test failed.')
+    } finally { setBusy(false) }
+  }
+
+  if (!cfg) {
+    return (
+      <div className="card p-6 bg-[hsl(var(--secondary)/0.3)]">
+        <div className="flex items-center gap-3">
+          <Send size={20} className="text-cyan-400" />
+          <h3 className="text-lg font-bold text-white">Telegram Notifications</h3>
+        </div>
+        <p className="text-sm text-[hsl(var(--muted-foreground))] mt-3">Backend unreachable.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card p-6 space-y-4 bg-[hsl(var(--secondary)/0.3)]">
+      <div className="flex items-center gap-3 border-b border-[hsl(var(--border))] pb-4">
+        <Send size={20} className="text-cyan-400" />
+        <h3 className="text-lg font-bold text-white">Telegram Notifications</h3>
+      </div>
+      <p className="text-xs text-[hsl(var(--muted-foreground))]">
+        HIGH/CRITICAL alerts and a periodic heartbeat delivered to your Telegram,
+        even when the dashboard is closed. Put the bot token in
+        <span className="text-cyan-400"> Integrations &amp; API Keys</span> (from @BotFather),
+        then the chat id here (send any message to your bot and read it via the
+        getUpdates API, or use @userinfobot).
+      </p>
+      {msg && <p className="text-xs text-cyan-400">{msg}</p>}
+      {draft && (
+        <div className="space-y-3">
+          <label className="flex items-center gap-2 text-sm text-white cursor-pointer select-none">
+            <input type="checkbox" className="accent-[hsl(var(--primary))] w-4 h-4"
+              checked={draft.enabled}
+              onChange={e => setDraft({ ...draft, enabled: e.target.checked })} />
+            Enable Telegram notifications
+          </label>
+          <div>
+            <label className="text-[10px] font-bold text-[hsl(var(--muted-foreground))] uppercase tracking-widest mb-1 block">Chat ID</label>
+            <input className="input font-mono text-sm" placeholder="123456789 or @channelname"
+              value={draft.chat_id}
+              onChange={e => setDraft({ ...draft, chat_id: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] font-bold text-[hsl(var(--muted-foreground))] uppercase tracking-widest mb-1 block">Minimum severity</label>
+              <select className="input bg-[hsl(var(--background))] w-full text-sm"
+                value={draft.min_severity}
+                onChange={e => setDraft({ ...draft, min_severity: e.target.value })}>
+                <option value="HIGH">HIGH (default)</option>
+                <option value="CRITICAL">CRITICAL only</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-[hsl(var(--muted-foreground))] uppercase tracking-widest mb-1 block">Heartbeat (minutes)</label>
+              <input type="number" min={15} max={1440} className="input font-mono text-sm"
+                value={draft.heartbeat_minutes}
+                onChange={e => setDraft({ ...draft, heartbeat_minutes: parseInt(e.target.value || '60', 10) })} />
+            </div>
+          </div>
+          <div className="flex items-center gap-3 pt-1">
+            <button onClick={save} disabled={busy} className="btn btn-primary btn-sm">Save</button>
+            <button onClick={sendTest} disabled={busy} className="btn btn-ghost btn-sm border border-[hsl(var(--border))]">Send test message</button>
+            <span className="text-[10px] text-[hsl(var(--muted-foreground))]">
+              Bot token: {cfg.bot_token_configured ? 'configured' : 'NOT configured'}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Dispositivi fidati ("Mantieni l'accesso"): elenco e revoca individuale.
  *  Il logout da un PC condiviso senza revocare da qui lascerebbe il trust
  *  attivo: la revoca qui è il modo ufficiale per chiudere una sessione
@@ -463,13 +578,6 @@ export default function SettingsPage() {
               onChange={() => toggleSetting('autoRefresh')}
               highlight={settings.autoRefresh}
             />
-            <SettingCard
-              icon={Zap}
-              title="Sound Alarms"
-              description="Play alert sounds when threats are detected."
-              enabled={settings.soundAlerts}
-              onChange={() => toggleSetting('soundAlerts')}
-            />
           </div>
         </div>
 
@@ -479,6 +587,8 @@ export default function SettingsPage() {
           <ApiKeysSection />
 
           <TrustedDevicesSection />
+
+          <TelegramSection />
 
           <div className="card p-6 space-y-6 bg-[hsl(var(--secondary)/0.3)]">
             <div className="flex items-center gap-3 border-b border-[hsl(var(--border))] pb-4">

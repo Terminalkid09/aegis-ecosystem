@@ -56,6 +56,13 @@ PROVIDER_LABELS: Dict[str, str] = {
 KEY_PROVIDER = "ai.provider"
 KEY_MODEL = "ai.model"
 KEY_AUTOMATIC = "ai.automatic_enrich"
+
+# Notifiche Telegram (non segrete: il bot token sta in integration_settings).
+KEY_TG_ENABLED = "telegram.enabled"
+KEY_TG_CHAT = "telegram.chat_id"
+KEY_TG_MIN_SEV = "telegram.min_severity"
+KEY_TG_HEARTBEAT = "telegram.heartbeat_minutes"
+TELEGRAM_KEYS = (KEY_TG_ENABLED, KEY_TG_CHAT, KEY_TG_MIN_SEV, KEY_TG_HEARTBEAT)
 AI_KEYS = (KEY_PROVIDER, KEY_MODEL, KEY_AUTOMATIC)
 
 MAX_VALUE_LEN = 200
@@ -78,7 +85,7 @@ def validate_provider(value: str) -> bool:
 
 async def get_value(db: AsyncSession, key: str) -> Optional[str]:
     """Valore dal DB, o None se mai impostato (distinto da '')."""
-    if key not in AI_KEYS:
+    if key not in AI_KEYS and key not in TELEGRAM_KEYS:
         return None
     row = await db.get(AppSetting, key)
     return None if row is None else (row.value or "")
@@ -90,7 +97,7 @@ async def set_value(db: AsyncSession, key: str, value: str,
 
     Il chiamante committa: qui non si decide la transazione.
     """
-    if key not in AI_KEYS:
+    if key not in AI_KEYS and key not in TELEGRAM_KEYS:
         return False
     value = (value or "").strip()[:MAX_VALUE_LEN]
     row = await db.get(AppSetting, key)
@@ -104,6 +111,43 @@ async def set_value(db: AsyncSession, key: str, value: str,
     else:
         db.add(AppSetting(key=key, value=value, updated_by=updated_by))
     return True
+
+
+# ------------------------------------------------------------------ telegram
+
+_TG_CACHE: Dict[str, str] = {}
+
+
+def invalidate_telegram_cache() -> None:
+    _TG_CACHE.clear()
+
+
+def get_cached(key: str) -> Optional[str]:
+    """Valore telegram dalla cache del notifier (popolata lazy).
+
+    Il notifier gira nel request path dell'ingest: non puo' fare una query per
+    alert. La cache e' popolata al primo accesso e invalidata dalla UI (PUT
+    /telegram/settings -> invalidate_cache).
+    """
+    return _TG_CACHE.get(key)
+
+
+async def refresh_telegram_cache(db: AsyncSession) -> None:
+    """Ricarica i valori telegram dal DB nella cache del notifier."""
+    _TG_CACHE.clear()
+    for key in TELEGRAM_KEYS:
+        val = await get_value(db, key)
+        if val is not None:
+            _TG_CACHE[key] = val
+
+
+async def get_value_with_origin(db: AsyncSession, key: str,
+                                default: str = "") -> tuple[str, str]:
+    """Valore + origine ('database' | 'default') per la UI."""
+    val = await get_value(db, key)
+    if val is not None and val != "":
+        return val, "database"
+    return default, "default"
 
 
 # ------------------------------------------------------------------ resolve

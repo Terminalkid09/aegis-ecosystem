@@ -74,3 +74,35 @@ async def overview_socket(websocket: WebSocket):
                 pass
     except WebSocketDisconnect:
         return
+
+
+@router.websocket("/alerts")
+async def alerts_socket(websocket: WebSocket):
+    """Push realtime degli alert nuovi (bus in-process).
+
+    Autenticazione identica all'overview: cookie HttpOnly, mai token nell'URL.
+    Il client riceve {'type':'alert', ...} appena l'alert nasce; un client
+    lento non blocca gli altri (queue per-client, piena = skip per quel client).
+    """
+    token = websocket.cookies.get("aegis_token")
+    if not await _accept_token(token):
+        await websocket.close(code=1008)
+        return
+
+    from app.services import alert_bus
+    queue = alert_bus.subscribe()
+    await websocket.accept()
+    try:
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=25.0)
+                await websocket.send_json(event)
+            except asyncio.TimeoutError:
+                # keepalive: il client sa che il canale e' vivo
+                await websocket.send_text("ping")
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        return
+    finally:
+        alert_bus.unsubscribe(queue)

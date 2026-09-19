@@ -69,6 +69,14 @@ PROVIDERS: Dict[str, ProviderSpec] = {
                        "Azure, vLLM, LM Studio, your own server...)."),
             docs_url="https://platform.openai.com/api-keys",
         ),
+        ProviderSpec(
+            key="telegram_bot_token", label="Telegram Bot Token",
+            env_var="TELEGRAM_BOT_TOKEN",
+            help_text=("Token of the Telegram bot for alert notifications (from @BotFather). "
+                       "Pair it with a chat_id in Platform Settings; HIGH/CRITICAL alerts and "
+                       "the heartbeat are delivered there even when the dashboard is closed."),
+            docs_url="https://core.telegram.org/bots/tutorial#obtain-your-bot-token",
+        ),
     )
 }
 
@@ -152,6 +160,26 @@ async def get_key(db: AsyncSession, key: str) -> str:
     except Exception:
         return ""
     return "" if _placeholder(db_val) else db_val
+
+
+async def get_key_with_origin(db: AsyncSession, key: str) -> tuple[str, str]:
+    """Chiave + origine ('env' | 'database' | '') per la UI."""
+    spec = PROVIDERS.get(key)
+    if spec is None:
+        return "", ""
+    env_val = _env_value(spec)
+    if not _placeholder(env_val):
+        return env_val, "env"
+    row = await _db_row(db, key)
+    if not row:
+        return "", ""
+    try:
+        db_val = decrypt_value(row.value_encrypted).strip()
+    except Exception:
+        return "", ""
+    if _placeholder(db_val):
+        return "", ""
+    return db_val, "database"
 
 
 async def set_key(db: AsyncSession, key: str, value: str,

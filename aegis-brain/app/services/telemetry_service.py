@@ -505,6 +505,35 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
         except Exception:
             logger.exception("SOAR playbook execution failed")
 
+    # Notifica Telegram sugli alert appena creati (HIGH/CRITICAL): best-effort,
+    # fail-soft per contratto — mai nell'ingest. Il notifier filtra da solo su
+    # enable/severita'/cooldown, quindi la chiamata e' a costo zero se spento.
+    if created_alerts:
+        try:
+            from app.services.telegram_notifier import notify_alert
+            await db.flush()  # campi server (timestamp) popolati prima del formato
+            for alert in created_alerts:
+                await notify_alert(db, alert)
+        except Exception:
+            logger.exception("telegram notification failed")
+
+    # Push realtime agli overlay/notifiche browser (bus in-process, WS /ws/alerts).
+    if created_alerts:
+        try:
+            from app.services.alert_bus import publish
+            for alert in created_alerts:
+                publish({
+                    "id": alert.id,
+                    "severity": alert.severity,
+                    "event_type": alert.event_type,
+                    "process_name": alert.process_name,
+                    "description": alert.description,
+                    "agent_id": str(alert.agent_id),
+                    "timestamp": alert.timestamp.isoformat() if alert.timestamp else None,
+                })
+        except Exception:
+            logger.exception("alert bus publish failed")
+
     # Arricchimento (OSINT + AI) FUORI dal request path: qui siamo nel mezzo
     # di un POST /telemetry/report e ogni enrich fa HTTP esterne + LLM
     # (secondi/minuti) — sotto storm di eventi inchioderebbe l'ingestion.

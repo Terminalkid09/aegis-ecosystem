@@ -3,6 +3,7 @@ import { useSessionRenewal } from '@/hooks/useSessionRenewal'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAppStore } from '@/store/appStore'
 import { useLiveStats } from '@/hooks/useLiveStats'
+import { useAlertNotifications } from '@/hooks/useAlertNotifications'
 import { Sidebar } from '@/components/layout/Sidebar'
 import LoginModal from '@/components/pages/LoginModal'
 import DashboardOverview from '@/components/pages/DashboardOverview'
@@ -100,6 +101,7 @@ function AppShell() {
 
   // Start live WS stats
   useLiveStats()
+  useAlertNotifications()
 
   if (!user) return <LoginModal />
 
