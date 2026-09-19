@@ -26,7 +26,6 @@ export default function DeployManager() {
   const [tokenLabel, setTokenLabel] = useState('')
   const [tokenAgent, setTokenAgent] = useState('aegis-guard')
   const [dashboardRemote, setDashboardRemote] = useState(true)
-  const [dashboardLocal, setDashboardLocal] = useState(false)
   const [lastToken, setLastToken] = useState<any>(null)
   const [copied, setCopied] = useState('')
 
@@ -55,7 +54,6 @@ export default function DeployManager() {
       label: tokenLabel || undefined,
       agent_type: tokenAgent,
       dashboard_remote: dashboardRemote,
-      dashboard_local: dashboardLocal,
     }),
     onSuccess: (res) => {
       setLastToken(res.data)
@@ -154,10 +152,6 @@ export default function DeployManager() {
             <label className="flex items-center gap-2 text-white">
               <input type="checkbox" checked={dashboardRemote} onChange={e => setDashboardRemote(e.target.checked)} />
               Connect agents to the remote dashboard
-            </label>
-            <label className="flex items-center gap-2 text-[hsl(var(--muted-foreground))]">
-              <input type="checkbox" checked={dashboardLocal} onChange={e => setDashboardLocal(e.target.checked)} disabled />
-              Install a local dashboard on the endpoint (not available yet)
             </label>
           </div>
           <PermissionGate perms={['deploy']}>
