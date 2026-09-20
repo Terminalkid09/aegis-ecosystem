@@ -1,0 +1,206 @@
+import pytest
+from pydantic import ValidationError
+from app.api.schemas.common import EventSchema, TRUNCATION_TAG
+from app.core.redaction import redact_text
+
+
+def test_incomplete_event_missing_required_rejected():
+    with pytest.raises(ValidationError):
+        EventSchema.model_validate({"event_type": "PROCESS_CREATED"})
+
+
+def test_incomplete_event_missing_required_agent_id_rejected():
+    with pytest.raises(ValidationError):
+        EventSchema.model_validate({"timestamp": "2026-01-01T00:00:00Z", "event_type": "X"})
+
+
+def test_structured_anomaly_dict_accepted():
+    """Regressione: gli agenti nuovi mandano anomalie DICT (con evidence).
+
+    Con `anomalies: List[str]` il dict veniva respinto con 422 e il report
+    intero andava perso: telemetria cieca su ogni host con l'agente
+    aggiornato. Verificato end-to-end sul brain vivo, non solo dedotto.
+    """
+    ev = EventSchema.model_validate({
+        "agent_id": "00000000-0000-0000-0000-000000000001",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "METRICS_REPORT",
+        "anomalies": [{
+            "type": "HIGH_CONNECTION_COUNT_TO_IP",
+            "ip": "104.16.4.34",
+            "connection_count": 27,
+            "processes": [{"name": "chrome.exe", "connections": 20}],
+        }],
+    })
+    assert isinstance(ev.anomalies[0], dict)
+    assert ev.anomalies[0]["ip"] == "104.16.4.34"
+    # Formato vecchio (stringa) resta valido: nessuna rottura agli agenti in campo.
+    ev_legacy = EventSchema.model_validate({
+        "agent_id": "00000000-0000-0000-0000-000000000001",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "METRICS_REPORT",
+        "anomalies": ["HIGH_CONNECTION_COUNT_TO_IP: 1.2.3.4"],
+    })
+    assert isinstance(ev_legacy.anomalies[0], str)
+
+
+def test_anomaly_list_bounded():
+    """Un agente compromesso non deve poter gonfiare il DB: max 200 voci."""
+    with pytest.raises(ValidationError):
+        EventSchema.model_validate({
+            "agent_id": "00000000-0000-0000-0000-000000000001",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "event_type": "METRICS_REPORT",
+            "anomalies": [f"TAG: {i}" for i in range(201)],
+        })
+
+
+def test_long_command_line_truncated_not_rejected():
+    """Contratto invertito di proposito.
+
+    Prima un campo lungo faceva fallire la validazione e, poiché il batch
+    viene convalidato in blocco, faceva rispondere 422 all'intera richiesta:
+    un solo processo con una command line lunga scartava fino a 99 eventi
+    sani, e l'outbox che rigiocava il batch respinto restava bloccato per
+    sempre (telemetria del sensore a zero). La telemetria si tronca e si
+    dichiara, non si rifiuta.
+    """
+    ev = EventSchema.model_validate({
+        "agentId": "a" * 65,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "eventType": "PROCESS_CREATED",
+        "commandLine": "x" * 4097,
+    })
+    assert len(ev.command_line) == 4096
+    assert len(ev.agent_id) == 64
+    # La troncatura è visibile, non silenziosa.
+    assert TRUNCATION_TAG in (ev.quality or "")
+    assert "command_line" in (ev.quality or "")
+
+
+def test_truncation_marker_joins_existing_quality():
+    ev = EventSchema.model_validate({
+        "agentId": "a",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "eventType": "PROCESS_CREATED",
+        "commandLine": "x" * 5000,
+        "quality": "degraded:etw-disabled",
+    })
+    assert ev.quality.startswith("degraded:etw-disabled;truncated:")
+    assert len(ev.quality) <= 64
+
+
+def test_short_fields_untouched_and_quality_absent():
+    """Nessuna troncatura = nessun marcatore: il campo non deve sporcarsi."""
+    ev = EventSchema.model_validate({
+        "agentId": "a",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "eventType": "PROCESS_CREATED",
+        "commandLine": "notepad.exe",
+    })
+    assert ev.command_line == "notepad.exe"
+    assert ev.quality is None
+
+
+def test_process_path_truncated_to_its_own_limit():
+    ev = EventSchema.model_validate({
+        "agentId": "a",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "eventType": "PROCESS_CREATED",
+        "processPath": "C:\\" + "a" * 2000,
+    })
+    assert len(ev.process_path) == 1024
+    assert "process_path" in (ev.quality or "")
+
+
+def test_legacy_v1_event_accepts_optional_v2_fields():
+    ev = EventSchema.model_validate({
+        "agent_id": "agent-1",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "PROCESS_CREATED",
+        "pid": 1,
+    })
+    assert ev.event_id is None  # compat backward: v1 senza event_id è valido
+
+
+def test_camel_alias_backward_compat():
+    ev = EventSchema.model_validate({
+        "agentId": "agent-1",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "eventType": "X",
+        "parentPid": 2,
+        "commandLine": "--x",
+    })
+    assert ev.parent_pid == 2
+    assert ev.command_line == "--x"
+
+
+def test_future_unknown_fields_dropped_not_crash():
+    ev = EventSchema.model_validate({
+        "agent_id": "agent-1",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "X",
+        "some_future_field": {"nested": 1},
+    })
+    assert ev.event_type == "X"
+
+
+def test_bad_timestamp_rejected():
+    with pytest.raises(ValidationError):
+        EventSchema.model_validate({
+            "agent_id": "a",
+            "timestamp": "not-a-date",
+            "event_type": "X",
+        })
+
+
+def test_negative_seq_rejected():
+    with pytest.raises(ValidationError):
+        EventSchema.model_validate({
+            "agent_id": "a",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "event_type": "X",
+            "seq": -5,
+        })
+
+
+def test_nul_byte_stripped_at_the_schema_boundary():
+    """Lo strip sta qui perché `EventSchema` è l'ingresso di TUTTI i percorsi.
+
+    La telemetria passa da `sanitize_event`, ma i parser SIEM e il consumer
+    Redis costruiscono direttamente l'evento: se il filtro vivesse solo nel
+    primo, un NUL arriverebbe comunque al database da un log sorgente.
+    """
+    ev = EventSchema.model_validate({
+        "agent_id": "a",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "X",
+        "process_name": "bad\x00.exe",
+    })
+    assert ev.process_name == "bad.exe"
+    assert "stripped-ctrl" in (ev.quality or "")
+
+
+def test_nul_strip_does_not_set_quality_on_clean_event():
+    ev = EventSchema.model_validate({
+        "agent_id": "a",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "X",
+        "process_name": "good.exe",
+    })
+    assert ev.process_name == "good.exe"
+    assert not ev.quality
+
+
+def test_quality_marker_survives_with_truncation():
+    """Le due cause di alterazione convivono nello stesso campo."""
+    ev = EventSchema.model_validate({
+        "agent_id": "a",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "X",
+        "commandLine": "x\x00" + "y" * 5000,
+    })
+    assert ev.quality is not None
+    assert TRUNCATION_TAG in ev.quality
+    assert "stripped-ctrl" in ev.quality
+    assert len(ev.quality) <= 64

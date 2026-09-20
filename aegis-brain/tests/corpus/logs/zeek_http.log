@@ -1,0 +1,11 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	http
+#open	2026-09-15-12-00-00
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	method	host	uri	status_code	user_agent
+#types	time	string	addr	port	addr	port	string	string	string	count	string
+1789473601.123456	H1a2b3c4d5e6f7	10.10.0.20	51234	93.184.216.34	80	GET	evil.example.com	/payload.ps1	200	curl/8.4.0
+1789473605.223456	H2b3c4d5e6f7a8	10.10.0.20	51235	93.184.216.34	80	GET	cdn.example.com	/app/vendor.js	200	Mozilla/5.0
+1789473609.323456	H3c4d5e6f7a8b9	10.10.0.31	51236	93.184.216.34	80	POST	api.example.com	/v1/export	500	Mozilla/5.0

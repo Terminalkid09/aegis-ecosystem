@@ -1,17 +1,45 @@
 # Production-oriented overrides: do not publish Postgres/Redis to the host.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
+x-logging: &prod-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   aegis-postgres:
     ports: !reset []
+    logging: *prod-logging
 
   aegis-redis:
     ports: !reset []
+    logging: *prod-logging
 
   aegis-brain:
+    logging: *prod-logging
     environment:
       DEBUG: "false"
+      # Audit F-01: profilo prod chiude la registrazione (il brain rifiuta
+      # l'avvio altrimenti) e richiede mTLS via overlay dedicato.
+      ALLOW_OPEN_REGISTRATION: "false"
+      # Guard production P2.7: in prod MTLS_MODE=off è vietato - il brain
+      # non parte (usare l'overlay mTLS per MTLS_MODE=required).
+      ENTERPRISE_STRICT: "true"
+
+  aegis-link:
+    logging: *prod-logging
 
   aegis-frontend:
+    logging: *prod-logging
     environment:
       REACT_APP_API_URL: /api/v1
+
+  aegis-caddy:
+    logging: *prod-logging
+
+  aegis-backup:
+    logging: *prod-logging
+    environment:
+      # Post-audit: backup cifrati obbligatori in produzione (fail-fast).
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:?BACKUP_PASSPHRASE must be set in production}

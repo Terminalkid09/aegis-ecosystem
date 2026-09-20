@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
-from app.core.deps import get_optional_user, get_current_user
+from app.core.deps import get_current_user
 from app.services import osint_service
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -18,42 +18,47 @@ class BatchLookupRequest(BaseModel):
     ips: List[str]
 
 @router.get("/ip/{ip_address}")
-async def ip_lookup(ip_address: str, force: bool = False, db: AsyncSession = Depends(get_db), user=Depends(get_optional_user)):
+async def ip_lookup(ip_address: str, force: bool = False, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    # Audit S2: l'endpoint era anonimo e, con IP non in cache, eseguiva la
+    # chiamata REALE ai provider (VT/Shodan/AbuseIPDB): quota consumabile da
+    # chiunque e uso della piattaforma come probe gratuito. Ora serve un
+    # utente autenticato (il risultato in cache era già pubblico).
     try:
         ipaddress.ip_address(ip_address)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid IP address format")
 
-    if force and not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required for live OSINT scans")
-
     if not force:
         cached = await osint_service.get_cached_result(db, "ip", ip_address)
         if cached: return {"cached": True, "data": cached}
     
-    data = await osint_service.fetch_ip_info(ip_address)
+    data = await osint_service.fetch_ip_info(ip_address, db)
     await osint_service.save_osint_result(db, "ip", ip_address, data)
     return {"cached": False, "data": data}
 
 @router.get("/domain/{domain}")
-async def domain_lookup(domain: str, force: bool = False, db: AsyncSession = Depends(get_db), user=Depends(get_optional_user)):
+async def domain_lookup(domain: str, force: bool = False, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    # Audit S2: come /ip — nessuna enrichment live per anonimi.
     domain_regex = re.compile(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
     if not domain_regex.match(domain):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid domain format")
-
-    if force and not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required for live OSINT scans")
 
     if not force:
         cached = await osint_service.get_cached_result(db, "domain", domain)
         if cached: return {"cached": True, "data": cached}
 
-    data = await osint_service.fetch_domain_info(domain)
+    data = await osint_service.fetch_domain_info(domain, db)
     await osint_service.save_osint_result(db, "domain", domain, data)
     return {"cached": False, "data": data}
 
 @router.post("/batch")
-async def batch_ip_lookup(payload: BatchLookupRequest, db: AsyncSession = Depends(get_db), user=Depends(get_optional_user)):
+async def batch_ip_lookup(payload: BatchLookupRequest, db: AsyncSession = Depends(get_db),
+                          # Audit: il batch costa (Shodan/Abuse/VT) e scrive in DB:
+                          # solo utenti autenticati, mai anonimi.
+                          user=Depends(get_current_user)):
+    if len(payload.ips) > 50:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Max 50 IPs per batch")
     results = {}
     for ip in payload.ips[:50]:
         try:
@@ -62,7 +67,7 @@ async def batch_ip_lookup(payload: BatchLookupRequest, db: AsyncSession = Depend
             if cached:
                 results[ip] = {"cached": True, "data": cached}
             else:
-                data = await osint_service.fetch_ip_info(ip)
+                data = await osint_service.fetch_ip_info(ip, db)
                 await osint_service.save_osint_result(db, "ip", ip, data)
                 results[ip] = {"cached": False, "data": data}
         except ValueError:
@@ -75,17 +80,21 @@ async def auto_enrich(ip: str = Query(...), background_tasks: BackgroundTasks = 
         ipaddress.ip_address(ip)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid IP")
-    async def _enrich(ip: str, db: AsyncSession):
-        cached = await osint_service.get_cached_result(db, "ip", ip)
-        if not cached:
-            data = await osint_service.fetch_ip_info(ip)
-            await osint_service.save_osint_result(db, "ip", ip, data)
-            logger.info("Auto-enriched IP: %s", ip)
+    async def _enrich(ip: str):
+        # Fresh session: the request-scoped `db` is closed after response,
+        # so background work must open its own (was reusing `db` -> crash).
+        from app.database.connection import AsyncSessionLocal
+        async with AsyncSessionLocal() as fresh:
+            cached = await osint_service.get_cached_result(fresh, "ip", ip)
+            if not cached:
+                data = await osint_service.fetch_ip_info(ip)
+                await osint_service.save_osint_result(fresh, "ip", ip, data)
+                logger.info("Auto-enriched IP: %s", ip)
     if background_tasks:
-        background_tasks.add_task(_enrich, ip, db)
+        background_tasks.add_task(_enrich, ip)
         return {"status": "enrichment_scheduled", "ip": ip}
     else:
-        await _enrich(ip, db)
+        await _enrich(ip)
         return {"status": "enriched", "ip": ip}
 
 @router.get("/history")

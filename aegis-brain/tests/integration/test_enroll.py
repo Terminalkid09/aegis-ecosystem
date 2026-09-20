@@ -44,3 +44,18 @@ class TestEnrollment:
             "hostname": "test-host"
         })
         assert response.status_code == 422
+
+    async def test_reenroll_revoked_denied(self, client: AsyncClient, db_session,
+                                           test_agent, admin_auth_headers):
+        # Revoca -> il re-enroll autonomo deve fallire chiuso (niente bypass
+        # con token rubato). Riammissione solo manuale lato SOC.
+        rev = await client.post(f"/api/v1/enroll/agents/{test_agent.agent_id}/revoke",
+                                json={"reason": "test"}, headers=admin_auth_headers)
+        assert rev.status_code == 200
+        again = await client.post("/api/v1/enroll/enroll", json={
+            "hostname": test_agent.hostname,
+            "os": test_agent.os_type,
+            "enroll_key": settings.AGENT_ENROLL_KEY
+        })
+        assert again.status_code == 403
+        assert "revoked" in again.json()["detail"].lower()

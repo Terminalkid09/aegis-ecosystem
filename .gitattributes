@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Corpus detection: manifest sha256 calcolati su LF; checkout sempre LF
+# altrimenti ogni verifica hash fallisce su Windows (CRLF).
+aegis-brain/tests/corpus/** text eol=lf

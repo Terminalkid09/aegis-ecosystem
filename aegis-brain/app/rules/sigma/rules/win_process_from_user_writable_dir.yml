@@ -1,0 +1,39 @@
+title: Process Execution From User-Writable Directory
+id: 5b3c8a72-6d14-4f9e-8a37-1f9c2b4e6d58
+status: stable
+description: |
+  L'avvio di un processo da Temp/AppData/Downloads/Public è il tipico primo
+  stadio di un dropper: l'utente apre un allegato o scarica un file e il
+  payload parte da una cartella scrivibile, non da Program Files o System32.
+references:
+  - https://attack.mitre.org/techniques/T1204/002/
+author: Aegis Sigma bundle
+date: 2026/09/15
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  selection:
+    EventID: 4688
+    NewProcessName|contains:
+      - '\AppData\Local\Temp\'
+      - '\Windows\Temp\'
+      - '\Downloads\'
+      - '\Users\Public\'
+      - '\ProgramData\'
+  filter_signed_setup:
+    NewProcessName|endswith:
+      - 'msiexec.exe'
+      - '7zG.exe'
+      - 'setup.exe'
+  condition: selection and not filter_signed_setup
+fields:
+  - NewProcessName
+  - CommandLine
+  - ParentProcessName
+falsepositives:
+  - Installer interattivi avviati manualmente dall'utente
+level: medium
+tags:
+  - attack.execution
+  - attack.t1204.002

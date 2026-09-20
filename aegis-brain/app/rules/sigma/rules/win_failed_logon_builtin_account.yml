@@ -1,0 +1,34 @@
+title: Failed Logon Against Built-in Or Admin Account
+id: 9c1d4e27-8b56-4a3f-9d70-6e2b5f8a1c93
+status: stable
+description: |
+  Un tentativo di autenticazione fallito contro un account built-in o di
+  amministrazione è il segnale tipico di un tentativo di brute force mirato.
+  In volume è ulteriormente aggravato dalla regola di correlazione dedicata.
+references:
+  - https://attack.mitre.org/techniques/T1110/
+author: Aegis Sigma bundle
+date: 2026/09/15
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4625
+    TargetUserName|endswith:
+      - 'admin'
+      - 'administrator'
+      - 'root'
+      - 'Administrateur'
+      - 'svc'
+  condition: selection
+fields:
+  - TargetUserName
+  - IpAddress
+  - LogonType
+falsepositives:
+  - Servizi con credenziali scadute che ritentano in loop
+level: medium
+tags:
+  - attack.credential_access
+  - attack.t1110

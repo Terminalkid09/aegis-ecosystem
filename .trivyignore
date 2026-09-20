@@ -1,0 +1,100 @@
+# Trivy ignorefile — esclusioni DOCUMENTATE (fail-closed sul resto).
+# Formato: ogni gruppo ha metadati machine-parsabili (test_trivyignore.py).
+# Chiavi richieste per gruppo: group | package | image | reason | fix | owner | review | expiry.
+# Scaduta la data `expiry`, il test fallisce di proposito: rieseguire lo scan
+# (`docker run ... aquasec/trivy image <img> -f json`, controllare FixedVersion)
+# e rimuovere le CVE fixate oppure rinnovare la review con motivazione.
+# `apt-get upgrade` / `apk upgrade` al build time aggiornano gia' tutto il
+# disponibile: queste CVE restano perche' SENZA fix upstream (settembre 2026).
+
+# === group: caddy-go-binary ===
+# package: usr/bin/caddy (gobinary) in caddy:2-alpine
+# image: caddy:2-alpine
+# reason: HIGH nella stdlib Go del binario Caddy upstream (v2.11.4); Caddy qui e' SOLO reverse proxy interno (admin API non esposta, nessun handler custom), i vettori sono DoS via input patologico. Nessuna immagine alpine ricostruita con la fix al 2026-09-19: da rivalutare al prossimo upstream.
+# fix: none upstream (in attesa di rebuild dell'immagine caddy)
+# owner: platform
+# review: 2026-10-19
+# expiry: 2026-11-30
+CVE-2026-27145
+CVE-2026-33818
+CVE-2026-39821
+CVE-2026-39822
+CVE-2026-42504
+CVE-2026-46600
+CVE-2026-56852
+CVE-2026-56853
+CVE-2026-56854
+CVE-2026-56858
+CVE-2026-56859
+CVE-2026-56860
+CVE-2026-56862
+CVE-2026-84304
+CVE-2026-84445
+
+# === group: caddy-grpc-go ===
+# package: google.golang.org/grpc (gobinary) in caddy:2-alpine
+# image: caddy:2-alpine
+# reason: modulo gRPC-Go nel binario Caddy upstream (xDS RBAC/HTTP2, GHSA-hrxh-6v49-42gf); l'admin API gRPC non e' esposta (Caddy e' solo reverse proxy interno). Fix in grpc 1.82.1: da rivalutare quando upstream ricostruisce l'immagine.
+# fix: none upstream (in attesa di rebuild dell'immagine caddy)
+# owner: platform
+# review: 2026-10-19
+# expiry: 2026-11-30
+GHSA-hrxh-6v49-42gf
+
+# === group: util-linux ===
+# package: util-linux/mount/bsdutils/login 2.41.5-0+deb13u1
+# image: python:3.12-slim (Debian bookworm)
+# reason: tool di sistema non esposti al runtime (niente mount/setuid chiamato dal servizio)
+# fix: none upstream
+# owner: platform
+# review: 2026-10-12
+# expiry: 2026-12-31
+CVE-2026-76642
+CVE-2026-78408
+CVE-2026-78409
+CVE-2026-78410
+
+# === group: parsers ===
+# package: gzip, acl, sqlite3, libsystemd, pcre2, ncurses (yacc/parser)
+# image: python:3.12-slim (Debian bookworm)
+# reason: librerie di parsing di sistema; input telemetria validato da EventSchema prima dell'uso
+# fix: none upstream
+# owner: platform
+# review: 2026-10-12
+# expiry: 2026-12-31
+CVE-2026-41992
+CVE-2026-54369
+CVE-2026-11822
+CVE-2026-11824
+CVE-2026-16742
+CVE-2026-86145
+CVE-2026-89161
+CVE-2025-69720
+
+# === group: perl-base ===
+# package: perl-base 5.40.1-6+deb13u1 (incluso CRITICAL)
+# image: python:3.12-slim (Debian bookworm)
+# reason: perl non invocato dal servizio (dipendenza transitiva di sistema)
+# fix: none upstream su bookworm
+# owner: platform
+# review: 2026-10-12
+# expiry: 2026-12-31
+CVE-2026-13221
+CVE-2026-42496
+CVE-2026-42497
+CVE-2026-48962
+CVE-2026-57432
+CVE-2026-57433
+CVE-2026-8376
+CVE-2026-9538
+
+# === group: wget ===
+# package: wget 1.25.0-2
+# image: python:3.12-slim (Debian bookworm)
+# reason: usato solo dall'healthcheck del container, mai su input esterno
+# fix: none upstream
+# owner: platform
+# review: 2026-10-12
+# expiry: 2026-12-31
+CVE-2026-58471
+CVE-2026-58472

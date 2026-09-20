@@ -18,6 +18,8 @@ async def get_audit_logs(
     action: Optional[str] = None,
     resource: Optional[str] = None,
     username: Optional[str] = None,
+    exclude_test: bool = Query(False, description="Nasconde i record di test (is_test=true)"),
+    include_test: bool = Query(True, description="Include test tenant (default true per retrocompatibilità)"),
 ):
     stmt = select(AuditLog)
     if action:
@@ -26,6 +28,12 @@ async def get_audit_logs(
         stmt = stmt.where(AuditLog.resource.ilike(f"%{resource}%"))
     if username:
         stmt = stmt.where(AuditLog.username.ilike(f"%{username}%"))
+    if exclude_test or not include_test:
+        # Fase 6: isolamento vero via flag is_test, non solo username.
+        stmt = stmt.where(AuditLog.is_test == False)
+    elif not exclude_test and include_test:
+        # Default: mostra tutto, ma il frontend pilot usa exclude_test=true
+        pass
     stmt = stmt.order_by(desc(AuditLog.created_at)).offset(skip).limit(limit)
     result = await db.execute(stmt)
     logs = []
@@ -39,6 +47,7 @@ async def get_audit_logs(
             "resource_id": e.resource_id,
             "details": e.details,
             "ip_address": e.ip_address,
+            "is_test": bool(getattr(e, "is_test", False)),
             "created_at": e.created_at.isoformat() if e.created_at else None,
         })
     return logs

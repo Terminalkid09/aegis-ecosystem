@@ -1,0 +1,9 @@
+{"ts_ns":170527184458021,"pid":266393,"ppid":266389,"uid":0,"comm":"echo","filename":"/bin/echo","event_type":"PROCESS_CREATED"}
+{"ts_ns":170527184865484,"pid":266393,"ppid":0,"uid":0,"comm":"echo","filename":"","event_type":"PROCESS_EXITED","exit_code":0}
+{"ts_ns":170528093869656,"pid":266399,"ppid":266389,"uid":0,"comm":"whoami","filename":"/usr/bin/whoami","event_type":"PROCESS_CREATED"}
+{"ts_ns":170527181882315,"pid":266392,"ppid":0,"uid":0,"comm":"sleep","filename":"","event_type":"PROCESS_EXITED","exit_code":0}
+{"ts_ns":170527184865484,"pid":266393,"ppid":0,"uid":0,"comm":"echo","filename":"","event_type":"PROCESS_EXITED","exit_code":0}
+{"ts_ns":214646385565045,"pid":353568,"ppid":0,"uid":0,"comm":"bash","filename":"","event_type":"CONNECTION_ESTABLISHED","remote":"127.0.0.1:18923"}
+{"schema_version":2,"event_id":"3f2504e0-4f89-11d3-9a0c-0305e82c3301","agent_id":"agent-001","boot_id":"b8e65a9c-4f89-11d3-9a0c-0305e82c3301","seq":41,"ts_ns":170527184458021,"ts_wall_ns":170527184458021000,"pid":266400,"ppid":266389,"proc_start_ns":170527180000000,"uid":1000,"comm":"echo","filename":"/bin/echo","provenance":"ebpf-full","quality":"full","event_type":"PROCESS_CREATED"}
+{"schema_version":2,"event_id":"6f2504e0-4f89-11d3-9a0c-0305e82c3302","agent_id":"agent-001","boot_id":"b8e65a9c-4f89-11d3-9a0c-0305e82c3301","seq":42,"ts_ns":170527184865484,"ts_wall_ns":170527184865484000,"pid":266400,"ppid":0,"uid":1000,"comm":"echo","filename":"","event_type":"PROCESS_EXITED","exit_code":0}
+{"ts_ns":136945308253487,"pid":284908,"ppid":0,"uid":0,"comm":"wget","filename":"","event_type":"CONNECTION_ESTABLISHED","remote":"127.0.0.1:2019"}

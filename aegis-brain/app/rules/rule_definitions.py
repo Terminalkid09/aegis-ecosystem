@@ -3,6 +3,11 @@ from dataclasses import dataclass, field
 from typing import Optional
 from app.api.schemas.common import EventSchema
 
+# Default di RuleResult.confidence: usato come sentinel da stamp_result per
+# distinguere "la regola non ha pesato il contesto" da "l'ha pesato lei".
+_DEFAULT_CONFIDENCE = "medium"
+
+
 @dataclass
 class RuleResult:
     triggered: bool
@@ -12,6 +17,10 @@ class RuleResult:
     mitre_tactic: Optional[str] = None
     mitre_technique_id: Optional[str] = None
     mitre_technique: Optional[str] = None
+    # M4 Fase 5: identità e confidenza SEPARATA dalla severity.
+    rule_id: str = "custom"
+    version: str = "1.0"
+    confidence: str = _DEFAULT_CONFIDENCE
 
 @dataclass
 class StaticRule:
@@ -23,6 +32,13 @@ class StaticRule:
     mitre_technique_id: str
     fn: callable
     mitre_tactic_id: Optional[str] = None
+    # M4 Fase 5: identificatore stabile + versione + confidenza.
+    rule_id: str = ""
+    version: str = "1.0"
+    confidence: str = "medium"
+    # Fase 5: eccezioni e allowlist documentate per ogni detection (spiegabilità SOC).
+    exceptions: tuple = ()
+    allowlist: tuple = ()
 
 # ═══════════════════════════════════════════════════════════════════
 #  EXPANDED THREAT SIGNATURES (200+ entries across categories)
@@ -30,7 +46,7 @@ class StaticRule:
 
 # — Credential dumping / password recovery
 CREDENTIAL_TOOLS = {
-    "mimikatz.exe", "mimikatz", "wce.exe", "fgdump.exe", "pwdump.exe",
+    "mimikatz.exe", "mimikatz", "sekurlsa", "logonpasswords", "wce.exe", "fgdump.exe", "pwdump.exe",
     "gsecdump.exe", "lsadump.exe", "procdump.exe", "samdump2",
     "cachedump.exe", "creddump", "creddump7", "creddump8",
     "quarkspwdump.exe", "pwddump", "pwdump7.exe", "pwdump8.exe",
@@ -68,6 +84,11 @@ EXPLOIT_TOOLS = {
 }
 
 # — Post-exploitation / lateral movement
+# NOTA (audit FP): gli strumenti di amministrazione remota legittimi (ssh,
+# putty, mstsc/rdp, freerdp) NON stanno qui: per il solo nome non sono mai
+# indicatori di attacco — ssh.exe firmato da System32 veniva etichettato
+# "malware" CRITICAL. Stanno in REMOTE_ADMIN_TOOLS e vengono coperti dal
+# contesto (regola network tool, path, parent).
 POST_EXPLOIT_TOOLS = {
     "psexec.exe", "psexec64.exe", "psexecsvc.exe",
     "wmiexec", "wmiexec.exe", "wmic.exe", "wmic",
@@ -77,9 +98,13 @@ POST_EXPLOIT_TOOLS = {
     "impacket", "impacket.exe", "impacket_smb",
     "remcom", "pth-winexe", "winexe",
     "evil-winrm", "evil_winrm", "winrm.vbs",
-    "xfreerdp", "freerdp", "remmina",
-    "putty.exe", "plink.exe", "ssh.exe",
-    "mstsc.exe", "mstsc",
+}
+
+# Amministrazione remota legittima: nome solo = innocuo, il giudizio lo danno
+# path/parent/command_line. Esclusa dal matching "known attack tool".
+REMOTE_ADMIN_TOOLS = {
+    "putty.exe", "plink.exe", "ssh.exe", "ssh", "sshd", "sshd.exe",
+    "mstsc.exe", "mstsc", "xfreerdp", "freerdp", "remmina",
 }
 
 # — Living-off-the-land binaries (LOLBins)
@@ -177,20 +202,23 @@ SCRIPT_INTERPRETERS = {
     "powershell_ise.exe", "powershell_ise",
 }
 
-# — Suspicious execution paths (expanded)
+# — Suspicious execution paths (expanded; audit: normalizzati a slash "/"
+# perche' i sensori possono inviare "C:/Temp/x.exe"; niente wildcard "*"
+# letterali e niente "~" non espanso: match per sottostringa semplice)
 SUSPICIOUS_PATHS = {
-    "\\temp\\", "\\tmp\\", "\\appdata\\local\\temp\\",
-    "\\downloads\\", "\\desktop\\", "\\cache\\",
-    "\\recycle.bin\\", "\\$recycle.bin\\",
-    "\\programdata\\", "\\appdata\\roaming\\",
-    "\\users\\public\\", "\\perflogs\\",
-    "\\windows\\temp\\", "\\wINDOWS\\Temp\\",
-    "\\system32\\tasks\\", "\\system32\\spool\\drivers\\",
-    "\\system32\\spool\\servic\\",
-    "/tmp/", "/var/tmp/", "/dev/shm/",
+    "/temp/", "/tmp/", "/appdata/local/temp/",
+    "/downloads/", "/desktop/", "/cache/",
+    "/recycle.bin/", "/$recycle.bin/",
+    "/programdata/", "/appdata/roaming/",
+    "/users/public/", "/perflogs/",
+    "/windows/temp/",
+    "/system32/tasks/", "/system32/spool/drivers/",
+    "/system32/spool/servic/",
+    "/var/tmp/", "/dev/shm/",  # nosec B108 - detection indicator, not a filesystem operation
     "/var/cache/", "/var/spool/", "/var/www/",
-    "/home/*/.cache/", "/home/*/.local/share/Trash/",
+    "/.cache/", "/.local/share/trash/",
     "/run/user/", "/dev/pts/",
+    "library/launchagents/", "library/launchdaemons/",
 }
 
 # — Desktop apps that shouldn't run as root/system
@@ -206,7 +234,7 @@ NON_ROOT_PROCESSES = {
 # — Network tools (expanded)
 NETWORK_TOOLS = {
     "wireshark.exe", "wireshark", "tshark", "tcpdump",
-    "dumpcap", "tshark", "ethereal",
+    "dumpcap", "ethereal",
     "netstat", "arp.exe", "arp", "route.exe",
     "curl.exe", "curl", "wget", "wget.exe",
     "nc.exe", "ncat.exe", "ncat", "netcat", "socat",
@@ -254,6 +282,27 @@ SUSPICIOUS_PARENT_CHILD = [
      ("powershell", "cmd.exe", "wscript.exe", "cscript.exe",
       "sh", "bash", "python"),
      "CRITICAL", "System process spawning script interpreter: '{parent}' -> '{child}'.",
+     "TA0004", "Privilege Escalation", "Process Injection", "T1055"),
+
+    # Un browser che lancia un binario di SISTEMA e' la firma di un'iniezione o
+    # di un process hollowing. Mancava del tutto: la batteria "difficile" ha
+    # mostrato che `chrome.exe -> svchost.exe` non generava nulla, mentre il
+    # ramo inverso (system -> interprete) era gia' coperto. `lsass.exe` sta a
+    # parte perche' generarlo da un'app utente e' credenzial-theft, non
+    # anomalia di lineage.
+    (("chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe",
+      "iexplore.exe", "winword.exe", "excel.exe", "powerpnt.exe",
+      "acrord32.exe", "acrord64.exe", "outlook.exe"),
+     ("lsass.exe",),
+     "CRITICAL", "User application spawning lsass.exe: '{parent}' -> '{child}'.",
+     "TA0004", "Privilege Escalation", "Process Injection", "T1055"),
+
+    (("chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe",
+      "iexplore.exe", "winword.exe", "excel.exe", "powerpnt.exe",
+      "acrord32.exe", "acrord64.exe", "outlook.exe"),
+     ("svchost.exe", "services.exe", "wininit.exe", "winlogon.exe",
+      "csrss.exe", "smss.exe", "lsaiso.exe"),
+     "HIGH", "User application spawning a system process: '{parent}' -> '{child}'.",
      "TA0004", "Privilege Escalation", "Process Injection", "T1055"),
 
     (("explorer.exe", "explorer"),
@@ -309,24 +358,25 @@ MALWARE_FAMILIES = [
      "TA0006", "Credential Access", "T1003"),
 ]
 
-# — Persistence locations (for process_path matching)
+# — Persistence locations (for process_path matching; slash-normalized)
 PERSISTENCE_PATHS = {
-    "\\startup\\", "\\start menu\\programs\\startup\\",
-    "\\system32\\tasks\\", "\\system32\\drivers\\etc\\",
-    "\\windows\\system32\\tasks\\",
-    "\\appdata\\roaming\\microsoft\\windows\\start menu\\programs\\startup\\",
+    "/startup/", "/start menu/programs/startup/",
+    "/system32/tasks/", "/system32/drivers/etc/",
+    "/windows/system32/tasks/",
+    "/appdata/roaming/microsoft/windows/start menu/programs/startup/",
     "/etc/init.d/", "/etc/systemd/system/",
     "/etc/cron.d/", "/etc/cron.hourly/", "/etc/cron.daily/",
-    "/Library/LaunchAgents/", "/Library/LaunchDaemons/",
-    "~/Library/LaunchAgents/",
+    "/library/launchagents/", "/library/launchdaemons/",
+    "library/launchagents/",
 }
 
-# — Encoded command patterns (expanded)
+# — Encoded command patterns (expanded; audit: soglia {12,} non {20,}:
+# payload brevi reali ("-e SQBuAHYAbwBrAGEAAAA=") passavano inosservati)
 ENCODED_PATTERNS = [
-    r'-(enc|encodedcommand|e)\s+[A-Za-z0-9+/]{20,}={0,2}',
+    r'-(enc|encodedcommand|e)\s+[A-Za-z0-9+/]{12,}={0,2}',
     r'base64.+decode',
     r'frombase64string',
-    r'-e\s+[A-Za-z0-9+/]{20,}={0,2}',
+    r'-e\s+[A-Za-z0-9+/]{12,}={0,2}',
     r'iex\s*\(',
     r'invoke-expression',
     r'-ec\s+',
@@ -337,6 +387,50 @@ ENCODED_PATTERNS = [
 
 # — High thread count threshold (possible injection indicator)
 HIGH_THREAD_COUNT_THRESHOLD = 200
+
+# — LOLBin in standard path: scatta solo con argomenti di download/esecuzione.
+# (audit: certutil.exe legittimo in System32 non deve alertare da solo, ma
+# `certutil -urlcache -split -f http://evil/x` si'.)
+LOLBIN_SUSPICIOUS_ARGS = (
+    "-urlcache", "-split", "-f http", "http://", "https://",
+    "frombase64", "frombase64string", "invoke-expression", "iex(",
+    "-encodedcommand", "-enc ", "-e ", "-ec ", "downloadstring",
+    "webclient", "/transfer", "bitsadmin",
+)
+
+# — Standard system locations (slash-normalized): un LOLBin o un nome
+# simile-a-persistenza QUI da solo non basta per l'alert.
+_STANDARD_SYSTEM_PATHS = (
+    "/windows/system32/", "/windows/syswow64/", "/windows/",
+    "/usr/bin/", "/bin/", "/sbin/", "/usr/sbin/",
+    "/program files/", "/program files (x86)/",
+)
+
+
+def _norm_path(path: str | None) -> str:
+    """Path normalizzato per il matching: backslash->slash + lowercase."""
+    return (path or "").replace("\\", "/").lower()
+
+
+def _in_standard_path(path: str | None) -> bool:
+    return any(p in _norm_path(path) for p in _STANDARD_SYSTEM_PATHS)
+
+
+def _lev(a: str, b: str) -> int:
+    """Distanza di Levenshtein (stringhe corte: nomi processo)."""
+    if a == b:
+        return 0
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return 2
+    prev = list(range(lb + 1))
+    for i in range(1, la + 1):
+        cur = [i] + [0] * lb
+        for j in range(1, lb + 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1,
+                         prev[j - 1] + (a[i - 1] != b[j - 1]))
+        prev = cur
+    return prev[lb]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -349,24 +443,47 @@ def rule_known_attack_tool(event: EventSchema) -> RuleResult:
     name = event.process_name.lower().strip()
     name_noexe = name.replace(".exe", "").replace(".com", "").replace(".dll", "")
     combined = CREDENTIAL_TOOLS | SCANNER_TOOLS | EXPLOIT_TOOLS | POST_EXPLOIT_TOOLS | RAT_TOOLS | RANSOMWARE | EVASION_TOOLS | INFO_STEALERS
-    if name in combined or name_noexe in combined:
+    combined_stems = {_stem(x) for x in combined}
+    # Audit: il rename aggirava il match sul solo process_name. Si matcha
+    # anche sul basename del path (binario rinominato) e sui token della
+    # command_line (tool invocato con altro nome).
+    candidates = {_stem(name), _stem(_base(event.process_path or ""))}
+    if name in combined or name_noexe in combined or candidates & combined_stems:
         return RuleResult(
             triggered=True, severity="CRITICAL",
             description=f"Known attack tool / malware detected: '{event.process_name}'.",
             mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="User Execution",
             mitre_technique_id="T1204"
         )
+    if event.command_line:
+        tokens = set(re.findall(r"[a-z0-9][a-z0-9_.\-]*", event.command_line.lower()))
+        if tokens & {t.lower() for t in combined}:
+            return RuleResult(
+                triggered=True, severity="CRITICAL",
+                description=f"Known attack tool invoked via command line: '{event.process_name}'.",
+                mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="User Execution",
+                mitre_technique_id="T1204"
+            )
     return RuleResult(triggered=False)
 
 
 def rule_suspicious_execution_path(event: EventSchema) -> RuleResult:
     if not event.process_path:
         return RuleResult(triggered=False)
-    path_lower = event.process_path.lower()
+    path_lower = _norm_path(event.process_path)
     for suspicious in SUSPICIOUS_PATHS:
         if suspicious in path_lower:
+            # Un binario con firma valida (editore qualsiasi: OpenJS, curl Fdn,
+            # Microsoft...) che gira da Downloads/Desktop e' evidenza debole
+            # (installer legittimi, app portable, IDE): LOW, non HIGH. Il path
+            # resta utente-scrivibile, quindi la regola non si zittisce: cambia
+            # solo il peso. NON firmato da Downloads = HIGH.
+            from app.services.detection_context import is_signed_verified
+            trusted = is_signed_verified(event)
             return RuleResult(
-                triggered=True, severity="HIGH",
+                triggered=True,
+                severity="LOW" if trusted else "HIGH",
+                confidence="low" if trusted else "medium",
                 description=f"Process '{event.process_name}' executing from suspicious path: '{event.process_path}'.",
                 mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="Command and Scripting Interpreter",
                 mitre_technique_id="T1059"
@@ -420,11 +537,13 @@ def rule_double_extension(event: EventSchema) -> RuleResult:
 
 
 def rule_encoded_command(event: EventSchema) -> RuleResult:
-    if not event.process_path:
+    # Audit: il payload encoded vive in command_line, non in process_path.
+    # Si cerca in entrambi (path per retro-compatibilita' con vecchi sensori).
+    hay = ((event.command_line or "") + " " + (event.process_path or "")).lower()
+    if not hay.strip():
         return RuleResult(triggered=False)
-    path_lower = event.process_path.lower()
     for pattern in ENCODED_PATTERNS:
-        if re.search(pattern, path_lower):
+        if re.search(pattern, hay):
             return RuleResult(
                 triggered=True, severity="HIGH",
                 description=f"Encoded/obfuscated command detected in '{event.process_name}': possible payload.",
@@ -437,11 +556,13 @@ def rule_encoded_command(event: EventSchema) -> RuleResult:
 def rule_network_tool(event: EventSchema) -> RuleResult:
     if not event.process_name:
         return RuleResult(triggered=False)
-    name = event.process_name.lower().strip()
-    if name not in NETWORK_TOOLS:
+    # Audit: confronto sullo stem (senza estensione): "masscan.exe" deve
+    # matchare come "masscan", altrimenti la regola perde meta' dei casi.
+    name = _stem(event.process_name.lower().strip())
+    if name not in {_stem(t) for t in NETWORK_TOOLS}:
         return RuleResult(triggered=False)
     if event.process_path:
-        path_lower = event.process_path.lower()
+        path_lower = _norm_path(event.process_path)
         for suspicious in SUSPICIOUS_PATHS:
             if suspicious in path_lower:
                 return RuleResult(
@@ -453,15 +574,31 @@ def rule_network_tool(event: EventSchema) -> RuleResult:
     return RuleResult(triggered=False)
 
 
+def _stem(name: str) -> str:
+    """Basename senza estensione: 'powershell.exe' == 'powershell'."""
+    b = _base(name)
+    for ext in (".exe", ".com", ".dll", ".bat", ".ps1", ".scr"):
+        if b.endswith(ext):
+            b = b[: -len(ext)]
+            break
+    return b
+
+
+def _proc_match(name: str, pattern: str) -> bool:
+    return _stem(name) == _stem(pattern)
+
+
 def rule_suspicious_parent_child(event: EventSchema) -> RuleResult:
     if not event.parent_process_name or not event.process_name:
         return RuleResult(triggered=False)
-    parent = event.parent_process_name.lower().strip()
-    child = event.process_name.lower().strip()
+    # Stem matching: "C:\...\winword.exe" matcha "winword", ma
+    # "mywordviewer" non matcha più "word" (era FP col vecchio `in`).
+    parent = event.parent_process_name
+    child = event.process_name
 
     for parents, children, sev, desc, ta_tactic, tactic, technique, tech_id in SUSPICIOUS_PARENT_CHILD:
-        if any(p in parent for p in parents):
-            if any(c in child for c in children):
+        if any(_proc_match(parent, p) for p in parents):
+            if any(_proc_match(child, c) for c in children):
                 return RuleResult(
                     triggered=True, severity=sev,
                     description=desc.format(parent=event.parent_process_name, child=event.process_name),
@@ -478,12 +615,18 @@ def rule_malware_family(event: EventSchema) -> RuleResult:
     name_stripped = name.replace(".exe", "").replace(".dll", "").replace(".bat", "").replace(".ps1", "")
 
     for keyword, sev, desc, ta_tactic, tech, tech_id in MALWARE_FAMILIES:
-        if keyword in name or keyword in name_stripped:
+        # Audit: match solo a inizio token (niente FP tipo uploader/loader,
+        # bitcoin/coin, examiner/miner). " inject" -> "inject" (spazio morto).
+        # Audit MITRE: tactic_id = codice invariato (niente "Tactic 0002").
+        kw = keyword.strip()
+        if re.search(r"(?<![a-z0-9])" + re.escape(kw), name) or \
+           re.search(r"(?<![a-z0-9])" + re.escape(kw), name_stripped):
+            # La tupla e' (keyword, sev, desc, tactic_id, tactic_name, technique_id).
             return RuleResult(
                 triggered=True, severity=sev,
                 description=desc.format(name=event.process_name),
-                mitre_tactic_id=ta_tactic, mitre_tactic=ta_tactic.replace("TA", "Tactic "),
-                mitre_technique=tech, mitre_technique_id=tech_id,
+                mitre_tactic_id=ta_tactic, mitre_tactic=tech,
+                mitre_technique_id=tech_id,
             )
     return RuleResult(triggered=False)
 
@@ -491,7 +634,7 @@ def rule_malware_family(event: EventSchema) -> RuleResult:
 def rule_persistence_path(event: EventSchema) -> RuleResult:
     if not event.process_path:
         return RuleResult(triggered=False)
-    path_lower = event.process_path.lower()
+    path_lower = _norm_path(event.process_path)
     for p_path in PERSISTENCE_PATHS:
         if p_path in path_lower:
             return RuleResult(
@@ -503,21 +646,38 @@ def rule_persistence_path(event: EventSchema) -> RuleResult:
     return RuleResult(triggered=False)
 
 
+def _family_match(name: str) -> bool:
+    """True se il nome contiene una keyword malware a inizio token
+    (stessa semantica di rule_malware_family, riusabile)."""
+    for keyword, *_ in MALWARE_FAMILIES:
+        kw = keyword.strip()
+        if re.search(r"(?<![a-z0-9])" + re.escape(kw), name):
+            return True
+    return False
+
+
 def rule_dll_hijack_path(event: EventSchema) -> RuleResult:
-    if not event.process_path:
-        return RuleResult(triggered=False)
-    # DLL loaded from temp or user-writable path
-    path_lower = event.process_path.lower()
-    if not path_lower.endswith(".dll"):
-        return RuleResult(triggered=False)
-    for susp in SUSPICIOUS_PATHS:
-        if susp in path_lower:
+    def _susp_dll(path: str | None) -> bool:
+        pl = _norm_path(path)
+        return pl.endswith(".dll") and any(s in pl for s in SUSPICIOUS_PATHS)
+
+    # Via primaria (audit): moduli caricati dal sensore.
+    for mod in event.loaded_modules or []:
+        if _susp_dll(mod):
             return RuleResult(
                 triggered=True, severity="HIGH",
-                description=f"Possible DLL hijacking: '{event.process_name}' loaded from suspicious path.",
+                description=f"Possible DLL hijacking: '{mod}' loaded from suspicious path.",
                 mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="DLL Side-Loading",
                 mitre_technique_id="T1574"
             )
+    # Via legacy: processo .dll in esecuzione da path sospetto.
+    if event.process_path and _susp_dll(event.process_path):
+        return RuleResult(
+            triggered=True, severity="HIGH",
+            description=f"Possible DLL hijacking: '{event.process_name}' loaded from suspicious path.",
+            mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="DLL Side-Loading",
+            mitre_technique_id="T1574"
+        )
     return RuleResult(triggered=False)
 
 
@@ -525,16 +685,33 @@ def rule_lolbin_usage(event: EventSchema) -> RuleResult:
     if not event.process_name:
         return RuleResult(triggered=False)
     name = event.process_name.lower().strip()
-    if name in LOLBINS and event.process_path:
-        path_lower = event.process_path.lower()
-        # LOLBin in non-standard path
-        if "\\system32\\" not in path_lower and "\\syswow64\\" not in path_lower and "/usr/bin/" not in path_lower and "/bin/" not in path_lower:
-            return RuleResult(
-                triggered=True, severity="HIGH",
-                description=f"LOLBin '{event.process_name}' executed from non-standard path: '{event.process_path}'.",
-                mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Signed Binary Proxy Execution",
-                mitre_technique_id="T1218"
-            )
+    if name not in LOLBINS or not event.process_path:
+        return RuleResult(triggered=False)
+    path_lower = _norm_path(event.process_path)
+    # Standard: dir di sistema Windows ovunque nel path; dir Unix solo a radice
+    # ("mingw64/bin" o "/home/x/bin" NON sono standard: devono alertare).
+    is_standard = (
+        "/system32/" in path_lower or "/syswow64/" in path_lower
+        or path_lower.startswith(("/usr/bin/", "/bin/", "/sbin/", "/usr/sbin/"))
+    )
+    # LOLBin in non-standard path
+    if not is_standard:
+        return RuleResult(
+            triggered=True, severity="HIGH",
+            description=f"LOLBin '{event.process_name}' executed from non-standard path: '{event.process_path}'.",
+            mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Signed Binary Proxy Execution",
+            mitre_technique_id="T1218"
+        )
+    # Audit: LOLBin in path standard MA con argomenti di download/esecuzione:
+    # il caso classico (certutil -urlcache -f http://...) non deve passare.
+    cmd = (event.command_line or "").lower()
+    if any(a in cmd for a in LOLBIN_SUSPICIOUS_ARGS):
+        return RuleResult(
+            triggered=True, severity="HIGH",
+            description=f"LOLBin '{event.process_name}' with suspicious arguments: '{event.command_line}'.",
+            mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Signed Binary Proxy Execution",
+            mitre_technique_id="T1218"
+        )
     return RuleResult(triggered=False)
 
 
@@ -549,28 +726,59 @@ def rule_high_thread_count(event: EventSchema) -> RuleResult:
     return RuleResult(triggered=False)
 
 
+def _base(name: str) -> str:
+    """Basename minuscolo: evita match su path ('C:\\Tools\\x' -> 'x')."""
+    n = (name or "").lower().strip().replace("\\", "/")
+    return n.rsplit("/", 1)[-1]
+
+
 def rule_network_beacon(event: EventSchema) -> RuleResult:
     """
-    Detects processes making outbound connections to remote IPs.
-    At event-level, flags any process with active outbound connections
-    to public IPs (heuristic). Full beacon timing analysis in correlation_engine.
+    Outbound verso IP pubblici: da SOLO non basta (browser, updater = FP).
+    Scatta solo se il processo è anche ad alto rischio (attack tool, LOLBin,
+    malware family) o in path sospetto. L'analisi di periodicità vera resta
+    nel correlation_engine (variance su 5+ campioni).
     """
     if not event.network_connections:
         return RuleResult(triggered=False)
+    name = _base(event.process_name or "")
+    # Audit: confronto su stem (i set mescolano "anydesk" e "nmap.exe":
+    # "anydesk.exe" non matchava mai). Set completi (mancavano RAT/ransomware).
+    stem = _stem(name)
+    high_risk = (
+        name in LOLBINS or stem in {_stem(t) for t in LOLBINS}
+        or stem in {_stem(t) for t in CREDENTIAL_TOOLS}
+        or stem in {_stem(t) for t in SCANNER_TOOLS}
+        or stem in {_stem(t) for t in EXPLOIT_TOOLS}
+        or stem in {_stem(t) for t in POST_EXPLOIT_TOOLS}
+        or stem in {_stem(t) for t in RAT_TOOLS}
+        or stem in {_stem(t) for t in RANSOMWARE}
+        or stem in {_stem(t) for t in INFO_STEALERS}
+        or stem in {_stem(t) for t in EVASION_TOOLS}
+        or _family_match(stem)
+    )
+    if not high_risk:
+        if not event.process_path:
+            return RuleResult(triggered=False)
+        pl = _norm_path(event.process_path)
+        if not any(s in pl for s in SUSPICIOUS_PATHS):
+            return RuleResult(triggered=False)
     outbound = []
     for conn in event.network_connections:
-        remote = conn.get("remote", "")
-        state = conn.get("state", "")
-        if ":" in remote and state == "ESTABLISHED":
-            host, port = remote.rsplit(":", 1)
-            # Check for public IP (not private ranges)
-            if host and not _is_private_ip(host):
-                outbound.append(remote)
+        remote = (conn.get("remote", "") or "").strip().strip("[]")
+        state = (conn.get("state", "") or "").upper()
+        if ":" not in remote or state != "ESTABLISHED":
+            continue
+        host, port = remote.rsplit(":", 1)
+        host = host.strip().strip("[]")
+        # Check for public IP (not private ranges)
+        if host and not _is_private_ip(host):
+            outbound.append(remote)
     if outbound:
         remote_str = "; ".join(outbound[:3])
         return RuleResult(
             triggered=True, severity="MEDIUM",
-            description=f"Process '{event.process_name}' has {len(outbound)} outbound connections: {remote_str}.",
+            description=f"High-risk process '{event.process_name}' has {len(outbound)} outbound connections: {remote_str}.",
             mitre_tactic_id="TA0011", mitre_tactic="Command and Control", mitre_technique="Application Layer Protocol",
             mitre_technique_id="T1071"
         )
@@ -595,83 +803,615 @@ def rule_persistence_autorun(event: EventSchema) -> RuleResult:
             mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Boot or Logon Autostart Execution",
             mitre_technique_id="T1547"
         )
+    # Audit: varianti a 1 carattere (svch0sts.exe) aggiravano il set esatto.
+    # Scatta solo fuori dai path di sistema: il vero svchost.exe di System32
+    # (distanza 1 da svch0st) non deve mai alertare.
+    #
+    # Il path deve essere NOTO: `_in_standard_path("")` e' False, quindi con
+    # path vuoto il ramo fuzzy concludeva "fuori dai path di sistema" e
+    # segnalava il svchost.exe LEGITTIMO di Windows. Non e' teorico: il
+    # sensore non riesce a leggere il path dei processi di sistema (svchost
+    # gira come SYSTEM in un'altra sessione) e l'alert scattava ogni ora su
+    # ogni macchina Windows, una volta scaduta la soppressione. Il ramo fuzzy
+    # e' un'euristica su un'euristica: senza il dato del path non si accende.
+    stem = _stem(name)
+    if event.process_path and not _in_standard_path(event.process_path):
+        for bad in {_stem(b) for b in persistence_names} | {"svchost", "scvhosts"}:
+            if _lev(stem, bad) <= 1:
+                return RuleResult(
+                    triggered=True, severity="HIGH",
+                    description=f"Suspicious persistence-like process name (variant of '{bad}'): '{event.process_name}'.",
+                    mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Boot or Logon Autostart Execution",
+                    mitre_technique_id="T1547"
+                )
     return RuleResult(triggered=False)
+
+
+# ── Persistenza e discovery viste dalla COMMAND LINE ────────────────────
+# Perché servivano: la persistenza era coperta solo dallo snapshot read-only
+# all'avvio (evidenza, non alert) e dal match sul NOME del processo. Un Run key
+# scritto a runtime, o una scheduled task creata, non generavano nulla — e sono
+# i due modi piu' comuni di restare sulla macchina. L'azione sta negli
+# argomenti, non nel nome del binario: `reg.exe` e `schtasks.exe` sono binari di
+# sistema legittimi.
+
+_RUN_KEY_PATHS = (
+    "\\currentversion\\run",
+    "\\currentversion\\runonce",
+    "\\currentversion\\policies\\explorer\\run",
+)
+# Solo verbi che SCRIVONO: `reg query` (lettura) non deve scattare.
+_REG_WRITE_MARKERS = (
+    " add ", "set-itemproperty", "new-itemproperty", "reg import", "reg copy",
+)
+_TASK_WRITE_MARKERS = ("/create", "-create", "/change")
+# Azione della task che esegue codice invece di un programma: peggio.
+_TASK_SCRIPT_ACTIONS = (
+    "powershell", "pwsh", "cmd.exe", "cmd /c", "wscript", "cscript",
+    "mshta", "rundll32", "regsvr32", ".ps1", ".vbs", ".js",
+)
+# (sottostringa normalizzata, id tecnica, nome tecnica). Gli id sono espliciti
+# e non derivati dal nome: "Account Discovery" e' T1087, non T1069.
+_DISCOVERY_COMMANDS = (
+    ("whoami /all", "T1033", "System Owner/User Discovery"),
+    ("whoami /priv", "T1069", "Permission Groups Discovery"),
+    ("whoami /groups", "T1069", "Permission Groups Discovery"),
+    ("net user", "T1087", "Account Discovery"),
+    ("net group", "T1069", "Permission Groups Discovery"),
+    ("net localgroup", "T1069", "Permission Groups Discovery"),
+    ("net accounts", "T1087", "Account Discovery"),
+    ("quser", "T1033", "System Owner/User Discovery"),
+    ("query user", "T1033", "System Owner/User Discovery"),
+)
+
+
+def rule_autorun_registry_write(event: EventSchema) -> RuleResult:
+    """Scrittura di una chiave Run/RunOnce (persistenza a ogni logon).
+
+    La lettura (`reg query`) e gli altri usi del registro non scattano: serve
+    insieme la chiave di autorun E un verbo di scrittura. Gli installer
+    legittimi che scrivono un Run key sono elencati tra le eccezioni della
+    regola, perche' e' l'unico caso in cui questa detection fa rumore.
+    """
+    cmd = (event.command_line or "").lower()
+    if not cmd:
+        return RuleResult(triggered=False)
+    if not any(k in cmd for k in _RUN_KEY_PATHS):
+        return RuleResult(triggered=False)
+    if not any(w in cmd for w in _REG_WRITE_MARKERS):
+        return RuleResult(triggered=False)
+    return RuleResult(
+        triggered=True, severity="HIGH",
+        description=(f"Autorun registry key written by '{event.process_name}': "
+                     f"'{event.command_line[:200]}'."),
+        mitre_tactic_id="TA0003", mitre_tactic="Persistence",
+        mitre_technique="Registry Run Keys / Startup Folder",
+        mitre_technique_id="T1547.001",
+    )
+
+
+def rule_scheduled_task_creation(event: EventSchema) -> RuleResult:
+    """Creazione di una scheduled task: persistenza che non richiede riavvii.
+
+    `schtasks /query` (lettura) non scatta. Se l'azione lancia un interprete di
+    script o un LOLBin invece di un programma, la severity sale: una task che
+    esegue PowerShell e' il modo piu' diretto per sopravvivere alla chiusura
+    della sessione.
+    """
+    cmd = (event.command_line or "").lower()
+    if not cmd or not any(m in cmd for m in _TASK_WRITE_MARKERS):
+        return RuleResult(triggered=False)
+    script_action = any(a in cmd for a in _TASK_SCRIPT_ACTIONS)
+    return RuleResult(
+        triggered=True,
+        severity="CRITICAL" if script_action else "HIGH",
+        description=(f"Scheduled task created by '{event.process_name}'"
+                     f"{' running a script interpreter' if script_action else ''}: "
+                     f"'{event.command_line[:200]}'."),
+        mitre_tactic_id="TA0003", mitre_tactic="Persistence",
+        mitre_technique="Scheduled Task/Job",
+        mitre_technique_id="T1053.005",
+    )
+
+
+def rule_discovery_commands(event: EventSchema) -> RuleResult:
+    """Recon locale: enumerazione di utenti, gruppi e privilegi.
+
+    Da sola e' una ricognizione (MEDIUM): nel contesto di una catena di attacco
+    e' il passo che precede l'escalation. Un `whoami` nudo non scatta — lo
+    usano ovunque build e installer — servono le forme di enumerazione
+    (`/all`, `/priv`, `net user` senza argomenti).
+    """
+    # Normalizzazione: gli argomenti arrivano con l'estensione (`whoami.exe
+    # /all`), quindi senza toglierla nessun confronto scritto in modo naturale
+    # (`whoami /all`) matchava mai. Il collasso degli spazi copre gli attacchi
+    # di spaziatura banali (`whoami    /all`).
+    cmd = " ".join((event.command_line or "").lower().split())
+    cmd = re.sub(r"\.exe\b", "", cmd)
+    if not cmd:
+        return RuleResult(triggered=False)
+    name = (event.process_name or "").lower()
+    if name not in ("whoami.exe", "whoami", "net.exe", "net1.exe", "net",
+                    "quser.exe", "query.exe", "query"):
+        return RuleResult(triggered=False)
+    for needle, technique_id, technique in _DISCOVERY_COMMANDS:
+        if needle in cmd:
+            return RuleResult(
+                triggered=True, severity="MEDIUM",
+                description=(f"Reconnaissance command '{needle}' executed by "
+                             f"'{event.process_name}': '{event.command_line[:200]}'."),
+                mitre_tactic_id="TA0007", mitre_tactic="Discovery",
+                mitre_technique=technique,
+                mitre_technique_id=technique_id,
+            )
+    return RuleResult(triggered=False)
+
+
+# ── Manomissione dei controlli e distruzione delle evidenze ─────────────
+# Perché servono: la batteria di tecniche "difficili" (azioni di un operatore
+# reale, non nomi di tool noti) ha misurato 6 detection mancate su 18, e
+# quattro erano la stessa idea — spegnere ciò che osserva (AV, log, firewall)
+# o distruggere ciò da cui si ripristina (backup, shadow copy, recovery).
+# Non sono tecniche esotiche: sono il primo passo dopo l'accesso, e senza una
+# regola dedicata Aegis era cieco esattamente lì. L'azione sta negli argomenti:
+# `wevtutil`, `bcdedit`, `sc` sono binari di sistema legittimi.
+
+# Prodotti/servizi di sicurezza: si riconoscono dal nome del servizio, non dal
+# nome del processo che li tocca.
+_SECURITY_SERVICES = (
+    "windefend", "wdnissvc", "sense", "msmpeng", "mpssvc",
+    "csfalconservice", "csagent", "crowdstrike", "sophos", "savservice",
+    "mcshield", "mcafee", "ekrn", "avast", "avp", "avgnt", "trendmicro",
+    "carbonblack", "cbdefense", "sentinelone", "sentinelagent",
+)
+# Verbi che FERMANO o DISABILITANO un servizio. `sc config <svc> start= auto`
+# (riattivazione) non deve scattare: per quel verbo si pretende che il nuovo
+# stato sia disabled/demand.
+_SERVICE_STOP_MARKERS = (
+    "sc stop", "sc delete", "net stop", "stop-service", "set-service",
+    "remove-service",
+)
+_SECURITY_PROCESS_KILL = ("taskkill", "stop-process", "kill ")
+# Protezioni ed esclusioni di Defender.
+_DEFENDER_TAMPER_MARKERS = (
+    "disablerealtimemonitoring", "disableioavprotection",
+    "disablebehaviormonitoring", "disablescriptscanning",
+    "disableblockatfirstseen", "disableantispyware", "disableantivirus",
+    "-exclusionpath", "-exclusionprocess", "-exclusionextension",
+    "-disableintrusionpreventionsystem", "-disablesandbox",
+)
+# Cancellazione delle tracce nei log (T1070.001).
+_LOG_CLEAR_MARKERS = (
+    "wevtutil cl", "wevtutil clear-log", "clear-eventlog", "remove-eventlog",
+    "/e:false", "wevtutil sl",
+)
+# Distruzione del ripristino: backup, shadow copy, recovery (T1490).
+_RECOVERY_DESTRUCTION = (
+    "recoveryenabled no", "bootstatuspolicy ignoreallfailures",
+    "wbadmin delete catalog", "wbadmin delete systemstatebackup",
+    "vssadmin delete shadows", "vssadmin resize shadowstorage",
+    "delete shadows /all", "diskshadow",
+)
+
+
+def rule_security_control_tampering(event: EventSchema) -> RuleResult:
+    """Spegnere o accecare i controlli di sicurezza (T1562 Impair Defenses).
+
+    Copre i tre modi pratici: disabilitare/fermare il servizio di un prodotto
+    di sicurezza, ucciderne il processo, e togliere le protezioni o aggiungere
+    esclusioni a Defender. Il firewall spento e i criteri di audit azzerati
+    rientrano nella stessa tecnica.
+
+    Non scatta su un servizio di sicurezza *riattivato* (`sc config ... start=
+    auto`) né sull'ispezione dello stato (`sc query`, `net start` senza argomenti).
+    """
+    cmd = " ".join((event.command_line or "").lower().split())
+    cmd = re.sub(r"\.exe\b", "", cmd)
+    if not cmd:
+        return RuleResult(triggered=False)
+
+    def _fire(reason: str, severity: str = "HIGH") -> RuleResult:
+        return RuleResult(
+            triggered=True, severity=severity,
+            description=(f"Security control tampering ({reason}) by "
+                         f"'{event.process_name}': '{event.command_line[:200]}'."),
+            mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion",
+            mitre_technique="Impair Defenses", mitre_technique_id="T1562",
+        )
+
+    touches_security_product = any(s in cmd for s in _SECURITY_SERVICES)
+    if touches_security_product:
+        if any(m in cmd for m in _SERVICE_STOP_MARKERS):
+            return _fire("security service stopped/disabled", "CRITICAL")
+        if "sc config" in cmd and any(w in cmd for w in ("disabled", "demand")):
+            return _fire("security service set to disabled", "CRITICAL")
+        if any(k in cmd for k in _SECURITY_PROCESS_KILL):
+            return _fire("security product process terminated", "CRITICAL")
+
+    if "mppreference" in cmd and any(m in cmd for m in _DEFENDER_TAMPER_MARKERS):
+        return _fire("Defender protection disabled or exclusion added", "CRITICAL")
+
+    # Firewall: `netsh advfirewall set ... state off`, `netsh firewall set
+    # opmode disable`, `Set-NetFirewallProfile -Enabled false`.
+    if "firewall" in cmd or "netfirewallprofile" in cmd:
+        if "state off" in cmd or "opmode disable" in cmd or "-enabled false" in cmd \
+                or "-enabled 0" in cmd:
+            return _fire("host firewall disabled")
+
+    # Criteri di audit azzerati: senza audit policy gli eventi non vengono
+    # nemmeno generati (T1562.002), quindi è più grave di cancellarli.
+    if "auditpol" in cmd and ("/clear" in cmd or "remove" in cmd):
+        return _fire("audit policy cleared", "CRITICAL")
+
+    return RuleResult(triggered=False)
+
+
+def rule_event_log_clearing(event: EventSchema) -> RuleResult:
+    """Cancellazione o disattivazione dei log di Windows (T1070.001).
+
+    Distinta dal tampering: qui non si spegne il controllo, si distrugge
+    l'evidenza già raccolta. È il gesto che rende impossibile l'indagine, e per
+    questo è CRITICAL anche da solo.
+    """
+    cmd = " ".join((event.command_line or "").lower().split())
+    cmd = re.sub(r"\.exe\b", "", cmd)
+    if not cmd or not any(m in cmd for m in _LOG_CLEAR_MARKERS):
+        return RuleResult(triggered=False)
+    return RuleResult(
+        triggered=True, severity="CRITICAL",
+        description=(f"Windows event log cleared or disabled by "
+                     f"'{event.process_name}': '{event.command_line[:200]}'."),
+        mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion",
+        mitre_technique="Indicator Removal: Clear Windows Event Logs",
+        mitre_technique_id="T1070.001",
+    )
+
+
+def rule_recovery_destruction(event: EventSchema) -> RuleResult:
+    """Distruzione di backup e shadow copy (T1490 Inhibit System Recovery).
+
+    `bcdedit /set recoveryenabled no` toglie il ripristino, `wbadmin delete
+    catalog` elimina il catalogo dei backup e `vssadmin delete shadows` le
+    copie shadow. Insieme sono la preparazione di un ransomware: quando la
+    cifratura parte non esiste più nulla da cui recuperare.
+    """
+    cmd = " ".join((event.command_line or "").lower().split())
+    cmd = re.sub(r"\.exe\b", "", cmd)
+    if not cmd:
+        return RuleResult(triggered=False)
+    # `wmic shadowcopy delete` e l'equivalente WMI in PowerShell: serve sia il
+    # riferimento alla shadow copy sia il verbo di cancellazione.
+    wmi_shadow_delete = ("win32_shadowcopy" in cmd or "shadowcopy" in cmd) \
+        and ("delete" in cmd or "remove-wmiobject" in cmd)
+    if not wmi_shadow_delete and not any(m in cmd for m in _RECOVERY_DESTRUCTION):
+        return RuleResult(triggered=False)
+    return RuleResult(
+        triggered=True, severity="CRITICAL",
+        description=(f"System recovery destroyed (backup/shadow copy/recovery) by "
+                     f"'{event.process_name}': '{event.command_line[:200]}'."),
+        mitre_tactic_id="TA0040", mitre_tactic="Impact",
+        mitre_technique="Inhibit System Recovery", mitre_technique_id="T1490",
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════
 #  HELPERS
 # ═══════════════════════════════════════════════════════════════════
 
-_PRIVATE_RANGES = re.compile(r'^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|169\.254\.|0\.)')
+_PRIVATE_V4 = re.compile(r'^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|169\.254\.|0\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)')
+_PRIVATE_V6 = re.compile(r'^(::1$|::ffff:|fe80:|fc00:|fd[0-9a-f]{2}:|fec0:)', re.IGNORECASE)
+
 
 def _is_private_ip(ip: str) -> bool:
-    return bool(_PRIVATE_RANGES.match(ip))
+    """IPv4 (incl. CGNAT 100.64/10) + IPv6 (loopback, link-local, ULA).
+    Unica implementazione condivisa (audit: ce n'erano due divergenti)."""
+    s = (ip or "").strip().strip("[]").split("%")[0]
+    if not s:
+        return True
+    if ":" in s:
+        return bool(_PRIVATE_V6.match(s))
+    return bool(_PRIVATE_V4.match(s))
 
 # ═══════════════════════════════════════════════════════════════════
 #  STATIC RULES REGISTRY
 # ═══════════════════════════════════════════════════════════════════
 
 STATIC_RULES = [
-    StaticRule(name="Known Attack Tool", severity="CRITICAL",
+    StaticRule(rule_id="AEGIS-S001", version="1.0", confidence="high",
+               name="Known Attack Tool", severity="CRITICAL",
                description="Detects 200+ known attack tools, credential dumpers, scanners, RATs, ransomware, etc.",
                mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="User Execution",
                mitre_technique_id="T1204", fn=rule_known_attack_tool),
-    StaticRule(name="Suspicious Parent-Child", severity="CRITICAL",
+    StaticRule(rule_id="AEGIS-S002", version="1.0", confidence="high",
+               name="Suspicious Parent-Child", severity="CRITICAL",
                description="Anomalous process lineage: Office, browser, PDF reader spawning script interpreters.",
                mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="User Execution",
                mitre_technique_id="T1204", fn=rule_suspicious_parent_child),
-    StaticRule(name="Malware Family", severity="HIGH",
-               description="Process names matching known malware family patterns (trojan, backdoor, miner, ransomware, etc.).",
-               mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="User Execution",
+    StaticRule(rule_id="AEGIS-S003", version="1.0", confidence="high",
+               name="Malware Family", severity="HIGH",
+               description="Process names matching known malware family patterns (trojan, backdoor, miner, ransomware, etc.). MITRE varies per matched family at runtime (see alert fields).",
+               mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="Varies by family",
                mitre_technique_id="T1204", fn=rule_malware_family),
-    StaticRule(name="Suspicious Execution Path", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S004", version="1.0", confidence="medium",
+               name="Suspicious Execution Path", severity="HIGH",
                description="Processes executing from temp, downloads, cache, public, or other suspicious paths.",
                mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="Command and Scripting Interpreter",
                mitre_technique_id="T1059", fn=rule_suspicious_execution_path),
-    StaticRule(name="Privilege Escalation", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S005", version="1.0", confidence="medium",
+               name="Privilege Escalation", severity="HIGH",
                description="Desktop/user apps running with SYSTEM/root privileges.",
                mitre_tactic_id="TA0004", mitre_tactic="Privilege Escalation", mitre_technique="Access Token Manipulation",
                mitre_technique_id="T1134", fn=rule_privilege_escalation),
-    StaticRule(name="Double Extension", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S006", version="1.0", confidence="high",
+               name="Double Extension", severity="HIGH",
                description="Files with double extensions indicating masquerading attacks.",
                mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Masquerading",
                mitre_technique_id="T1036", fn=rule_double_extension),
-    StaticRule(name="Encoded Command", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S007", version="1.0", confidence="high",
+               name="Encoded Command", severity="HIGH",
                description="Base64 encoded or obfuscated commands indicating payload delivery.",
                mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Obfuscated Files or Information",
                mitre_technique_id="T1027", fn=rule_encoded_command),
-    StaticRule(name="Persistence Path", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S008", version="1.0", confidence="medium",
+               name="Persistence Path", severity="HIGH",
                description="Process executing from persistence locations (startup, cron, systemd, launchd).",
                mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Boot or Logon Autostart Execution",
                mitre_technique_id="T1547", fn=rule_persistence_path),
-    StaticRule(name="Script Interpreter Abuse", severity="MEDIUM",
+    StaticRule(rule_id="AEGIS-S009", version="1.0", confidence="low",
+               name="Script Interpreter Abuse", severity="MEDIUM",
                description="Script interpreters like PowerShell, cmd, bash, Python, Perl, etc. detected.",
                mitre_tactic_id="TA0002", mitre_tactic="Execution", mitre_technique="Command and Scripting Interpreter",
                mitre_technique_id="T1059", fn=rule_script_interpreter_abuse),
-    StaticRule(name="Network Tool in Suspicious Path", severity="MEDIUM",
+    StaticRule(rule_id="AEGIS-S010", version="1.0", confidence="low",
+               name="Network Tool in Suspicious Path", severity="MEDIUM",
                description="Network reconnaissance tools executed from suspicious directories.",
                mitre_tactic_id="TA0007", mitre_tactic="Discovery", mitre_technique="System Network Configuration Discovery",
                mitre_technique_id="T1016", fn=rule_network_tool),
-    StaticRule(name="DLL Hijacking", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S011", version="1.0", confidence="medium",
+               name="DLL Hijacking", severity="HIGH",
                description="DLL loaded from suspicious/user-writable path indicating possible DLL hijacking.",
                mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="DLL Side-Loading",
                mitre_technique_id="T1574", fn=rule_dll_hijack_path),
-    StaticRule(name="LOLBin Abuse", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S012", version="1.0", confidence="medium",
+               name="LOLBin Abuse", severity="HIGH",
                description="Living-off-the-land binary executed from non-standard path.",
                mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Signed Binary Proxy Execution",
                mitre_technique_id="T1218", fn=rule_lolbin_usage),
-    StaticRule(name="High Thread Count", severity="MEDIUM",
+    StaticRule(rule_id="AEGIS-S013", version="1.0", confidence="low",
+               name="High Thread Count", severity="MEDIUM",
                description="Process with abnormally high thread count indicating possible injection.",
                mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Process Injection",
                mitre_technique_id="T1055", fn=rule_high_thread_count),
-    StaticRule(name="Network Beacon", severity="MEDIUM",
+    StaticRule(rule_id="AEGIS-S014", version="1.0", confidence="low",
+               name="Network Beacon", severity="MEDIUM",
                description="Process with outbound connections to public IPs — possible C2 beacon.",
                mitre_tactic_id="TA0011", mitre_tactic="Command and Control", mitre_technique="Application Layer Protocol",
                mitre_technique_id="T1071", fn=rule_network_beacon),
-    StaticRule(name="Persistence Autorun", severity="HIGH",
+    StaticRule(rule_id="AEGIS-S015", version="1.0", confidence="medium",
+               name="Persistence Autorun", severity="HIGH",
                description="Process name mimics common persistence or masquerades as legitimate software.",
                mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Boot or Logon Autostart Execution",
                mitre_technique_id="T1547", fn=rule_persistence_autorun),
+    StaticRule(rule_id="AEGIS-S016", version="1.0", confidence="high",
+               name="Autorun Registry Write", severity="HIGH",
+               description="Run/RunOnce registry key written (runtime persistence, invisible to the startup snapshot).",
+               mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Registry Run Keys / Startup Folder",
+               mitre_technique_id="T1547.001", fn=rule_autorun_registry_write),
+    StaticRule(rule_id="AEGIS-S017", version="1.0", confidence="high",
+               name="Scheduled Task Creation", severity="HIGH",
+               description="Scheduled task created; CRITICAL when the action runs a script interpreter or LOLBin.",
+               mitre_tactic_id="TA0003", mitre_tactic="Persistence", mitre_technique="Scheduled Task/Job",
+               mitre_technique_id="T1053.005", fn=rule_scheduled_task_creation),
+    StaticRule(rule_id="AEGIS-S018", version="1.0", confidence="medium",
+               name="Discovery Commands", severity="MEDIUM",
+               description="Local account/group/privilege enumeration (whoami /all, net user, net localgroup, quser).",
+               mitre_tactic_id="TA0007", mitre_tactic="Discovery", mitre_technique="System Owner/User Discovery",
+               mitre_technique_id="T1033", fn=rule_discovery_commands),
+    StaticRule(rule_id="AEGIS-S019", version="1.0", confidence="high",
+               name="Security Control Tampering", severity="CRITICAL",
+               description="Security product/service disabled or killed, Defender exclusions added, host firewall turned off, audit policy cleared.",
+               mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Impair Defenses",
+               mitre_technique_id="T1562", fn=rule_security_control_tampering),
+    StaticRule(rule_id="AEGIS-S020", version="1.0", confidence="high",
+               name="Event Log Clearing", severity="CRITICAL",
+               description="Windows event log cleared or disabled (wevtutil cl, Clear-EventLog, wevtutil sl /e:false).",
+               mitre_tactic_id="TA0005", mitre_tactic="Defense Evasion", mitre_technique="Indicator Removal: Clear Windows Event Logs",
+               mitre_technique_id="T1070.001", fn=rule_event_log_clearing),
+    StaticRule(rule_id="AEGIS-S021", version="1.0", confidence="high",
+               name="Recovery Destruction", severity="CRITICAL",
+               description="Backup catalog, shadow copies or Windows recovery disabled/deleted (ransomware preparation).",
+               mitre_tactic_id="TA0040", mitre_tactic="Impact", mitre_technique="Inhibit System Recovery",
+               mitre_technique_id="T1490", fn=rule_recovery_destruction),
 ]
 
 ALL_RULES = [s.fn for s in STATIC_RULES]
+
+RULE_BY_FN = {s.fn: s for s in STATIC_RULES}
+
+
+def stamp_result(rule_fn, result: "RuleResult") -> "RuleResult":
+    """Timbro identità/versione/confidenza dal registry (default: custom)."""
+    meta = RULE_BY_FN.get(rule_fn)
+    if meta is not None and (not result.rule_id or result.rule_id == "custom"):
+        runtime_conf = result.confidence
+        result.rule_id = meta.rule_id
+        result.version = meta.version
+        # La regola puo' pesare il contesto a runtime (es. S004: 'low' se il
+        # binario e' firmato trusted, in Downloads). Il catalogo timbra solo
+        # quando la regola NON ha espresso un peso proprio — il sentinel e'
+        # il default del dataclass, confrontato per nome e non per stringa
+        # magica duplicata (un 'medium' esplicito della regola resta suo).
+        if runtime_conf == _DEFAULT_CONFIDENCE:
+            result.confidence = meta.confidence
+    return result
+
+
+def canary_rule_ids() -> set:
+    """ID regole in canary (log-only, niente alert) da env RULE_CANARY_IDS."""
+    try:
+        from app.core.config import settings
+        raw = getattr(settings, "RULE_CANARY_IDS", "") or ""
+    except Exception:
+        raw = ""
+    return {r.strip().upper() for r in raw.split(",") if r.strip()}
+
+
+def is_canary_rule(rule_id: str) -> bool:
+    return bool(rule_id) and rule_id.strip().upper() in canary_rule_ids()
+
+
+# Fase 5 — spiegaabilità SOC: per ogni regola, eccezioni note e allowlist
+# (casi "tranquilli" che NON devono generare alert). Serve al motore come
+# supporto doc e alla UI per mostrare il razionale della detection.
+RULE_NOTES: dict[str, dict] = {
+    "AEGIS-S001": {
+        "exceptions": ("Authorized administration/simulation tooling",
+                       "Analysis sandboxes and labs (explicit allowlist)"),
+        "allowlist": ("SOC-approved IT/pentest tooling",
+                      "Legitimate renamed/repackaged binaries with a valid signature and known build script"),
+    },
+    "AEGIS-S002": {
+        "exceptions": ("CI machines that run builds/packaging through an interpreter",
+                       "Already-approved Office macro automation"),
+        "allowlist": ("Interpreters launched by signed wrappers with a known relationship",
+                      "Red-team simulations covered by a canary rule"),
+    },
+    "AEGIS-S003": {
+        "exceptions": ("File names with 'trojan'/'miner' that are NOT executable (logs, text)",
+                       "Projects whose names contain the pattern (e.g. 'ProjectRansom')"),
+        "allowlist": ("Signed Microsoft binaries that contain 'password' in the name",
+                      "IT tools with overlapping names (e.g. license managers' 'loader')"),
+    },
+    "AEGIS-S004": {
+        "exceptions": ("Installers using %TEMP% as scratch space before copying into Program Files",
+                       "Browsers running update helpers from their cache"),
+        "allowlist": ("Approved working paths per department (documented per site)",
+                      "Known CI/CD staging directories"),
+    },
+    "AEGIS-S005": {
+        "exceptions": ("Desktop apps launched via RunAs from remote administration",
+                       "Kiosks and VDIs with an execution policy"),
+        "allowlist": ("Local 'operator' user profile with documented delegation",
+                      "Hosts with an approved legacy 'users-as-admin' configuration"),
+    },
+    "AEGIS-S006": {
+        "exceptions": ("Real double-extension files handled by the document management team"),
+        "allowlist": ("Double-extension file types validated by DLP and signed"),
+    },
+    "AEGIS-S007": {
+        "exceptions": ("Administrative encoded scripts already reviewed and approved",
+                       "Enterprise policy passing encoded parameters from official tooling"),
+        "allowlist": ("Known hashes of signed encoded scripts versioned by the SOC"),
+    },
+    "AEGIS-S008": {
+        "exceptions": ("Enterprise software with Startup auto-update (Adobe, Java, Chrome)",
+                       "Scheduled tasks created by managed software"),
+        "allowlist": ("Persistence paths of approved software (software inventory)"),
+    },
+    "AEGIS-S009": {
+        "exceptions": ("Administrators who routinely use PowerShell/scripting tools"),
+        "allowlist": ("Interpreters used by known patch manager/management processes"),
+    },
+    "AEGIS-S010": {
+        "exceptions": ("Network tooling used by the networking/sysadmin team under a change ticket"),
+        "allowlist": ("Approved monitoring suites (planned nmap) from known source IPs"),
+    },
+    "AEGIS-S011": {
+        "exceptions": ("Vendor side-by-side DLLs in AppData that are documented",
+                       "Plug-ins legitimately loaded from user folders"),
+        "allowlist": ("DLLs/hashes with a valid signature from approved vendors"),
+    },
+    "AEGIS-S012": {
+        "exceptions": ("LOLBins used by documented IT automation (certutil to verify, bitsadmin to patch)"),
+        "allowlist": ("Standard system32/syswow64/usr/bin paths (excluded) already handled",
+                      "Signed enterprise scripts invoking LOLBins from approved paths"),
+    },
+    "AEGIS-S013": {
+        "exceptions": ("Legitimate multithreaded processes (antivirus, databases, browsers)"),
+        "allowlist": ("Processes whose historical average thread count exceeds the threshold (local baseline)"),
+    },
+    "AEGIS-S014": {
+        "exceptions": ("Software updates/telemetry toward known public IPs",
+                       "Browsers with routine HTTPS connections"),
+        "allowlist": ("Domains/IPs for approved software updates (from inventory)"),
+    },
+    "AEGIS-S016": {
+        "exceptions": ("Signed installers and updaters that legitimately register an autostart entry",
+                       "Corporate software deployment that pins a Run key as part of the package"),
+        "allowlist": ("Change-management record for the Run key (owner, software, date)",
+                      "Publisher/signature of the writing process, when the sensor can resolve it"),
+    },
+    "AEGIS-S017": {
+        "exceptions": ("Task Scheduler actions configured by IT maintenance windows",
+                       "Backup/patch jobs created by signed management agents"),
+        "allowlist": ("Task names under the company's naming convention",
+                      "Signed management agent as the task creator"),
+    },
+    "AEGIS-S018": {
+        "exceptions": ("Help desk and support scripts that enumerate local users as part of triage",
+                       "Login scripts and monitoring agents"),
+        "allowlist": ("Approved administrative scripts versioned by the SOC",
+                      "Interactive operator sessions covered by a canary rule"),
+    },
+    "AEGIS-S015": {
+        "exceptions": ("Vendors using similar names (e.g. legitimate 'GoogleUpdate')"),
+        "allowlist": ("Process names of software installed through the software inventory"),
+    },
+    "AEGIS-S019": {
+        "exceptions": ("Endpoint management tooling that migrates or reconfigures the AV agent",
+                       "Help-desk hotfix that temporarily stops a security service"),
+        "allowlist": ("Change ticket naming the service, the host and the window",
+                      "Execution from a signed management agent on the management VLAN"),
+    },
+    "AEGIS-S020": {
+        "exceptions": ("Log-rotation scripts that export before clearing, run by a scheduled job",
+                       "Lab machines reset between exercises"),
+        "allowlist": ("Rotation job hash and the destination of the exported logs",
+                      "Hosts declared as disposable (lab image)"),
+    },
+    "AEGIS-S021": {
+        "exceptions": ("Backup software rotating its own catalog on schedule",
+                       "Lab rebuild scripts that drop shadow copies before imaging"),
+        "allowlist": ("Signed backup agent with a documented retention policy",
+                      "Hosts in the lab pool, excluded by site policy"),
+    },
+    "custom": {
+        "exceptions": ("No standard exceptions for custom rules"),
+        "allowlist": ("No standard allowlist for custom rules"),
+    },
+}
+
+
+def rule_exceptions(rule_id: str) -> tuple:
+    """Eccezioni documentate della regola (stringhe leggibili per il SOC)."""
+    notes = RULE_NOTES.get(rule_id or "custom", RULE_NOTES["custom"])
+    return tuple(notes.get("exceptions", ()))
+
+
+def rule_allowlist(rule_id: str) -> tuple:
+    """Allowlist documentata della regola (stringhe leggibili per il SOC)."""
+    notes = RULE_NOTES.get(rule_id or "custom", RULE_NOTES["custom"])
+    return tuple(notes.get("allowlist", ()))
+
+
+def rule_catalog() -> list[dict]:
+    """Catalogo regole per la UI/differenzazione: ID, versione, confidenza,
+    MITRE, eccezioni e allowlist. Nessuna logica di esecuzione qui."""
+    out = []
+    for s in STATIC_RULES:
+        notes = RULE_NOTES.get(s.rule_id, {})
+        out.append({
+            "rule_id": s.rule_id,
+            "name": s.name,
+            "version": s.version,
+            "confidence": s.confidence,
+            "severity": s.severity,
+            "mitre_tactic_id": s.mitre_tactic_id,
+            "mitre_tactic": s.mitre_tactic,
+            "mitre_technique_id": s.mitre_technique_id,
+            "mitre_technique": s.mitre_technique,
+            "description": s.description,
+            "exceptions": list(notes.get("exceptions", [])),
+            "allowlist": list(notes.get("allowlist", [])),
+        })
+    return out

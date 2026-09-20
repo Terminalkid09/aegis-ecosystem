@@ -60,6 +60,21 @@ public class GlobalExceptionHandler {
     }
 
     /*
+     * Header/parametri obbligatori assenti: errore client (400), mai 500.
+     * Senza questo handler finirebbero nel catch-all generico.
+     */
+    @ExceptionHandler({
+            org.springframework.web.bind.MissingRequestHeaderException.class,
+            org.springframework.web.bind.MissingServletRequestParameterException.class,
+            org.springframework.http.converter.HttpMessageNotReadableException.class})
+    public ResponseEntity<EventResponse> handleBadRequest(Exception ex) {
+        log.warn("Bad request: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(EventResponse.error("Validation failed: " + ex.getMessage()));
+    }
+
+    /*
      * Gestisce errori di runtime (es. Redis non raggiungibile).
      * Returns generic message to avoid information leakage.
      */

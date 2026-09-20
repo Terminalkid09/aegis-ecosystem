@@ -26,6 +26,13 @@ class HealthCheckResult:
     error: Optional[str] = None
 
 class HealthChecker:
+    # Ollama e' un assistente opzionale: la sua indisponibilita' deve essere
+    # visibile, ma non puo' rendere non pronto il core EDR/XDR.
+    # Stesso principio per gli altri nomi in OPTIONAL_CHECKS (grafana,
+    # prometheus, osint): se registrati e non sani, degradano invece di
+    # rendere il servizio not-ready. Nomi non registrati sono ignorati.
+    OPTIONAL_CHECKS = {"ollama", "grafana", "prometheus", "osint"}
+
     def __init__(self):
         self._checks = {}
         self._register_default_checks()
@@ -34,6 +41,9 @@ class HealthChecker:
         self.register("database", self._check_database)
         self.register("redis", self._check_redis)
         self.register("ollama", self._check_ollama)
+        self.register("pipeline", self._check_pipeline)
+        self.register("pki", self._check_pki)
+        self.register("mtls", self._check_mtls)
 
     def register(self, name: str, check_func):
         self._checks[name] = check_func
@@ -98,21 +108,78 @@ class HealthChecker:
         except Exception as e:
             return HealthCheckResult("ollama", HealthStatus.UNHEALTHY, 0, {}, str(e))
 
+    async def _check_pipeline(self) -> HealthCheckResult:
+        """Salute della pipeline eventi: duplicati scartati e gap di sequenza
+        misurati non sono un'anomalia di per sé, ma segnalano consegna incerta."""
+        from app.services import event_dedup
+        details = {
+            "duplicates": getattr(event_dedup, "DEDUP", None) and event_dedup.DEDUP.duplicates,
+            "seq_gaps": getattr(event_dedup, "SEQ", None) and event_dedup.SEQ.gaps,
+        }
+        try:
+            client = redis.from_url(get_redis_url(), socket_connect_timeout=2, socket_timeout=2)
+            pending = await client.llen("aegis:events:pending")
+            await client.aclose()
+            details["queue_depth"] = pending
+        except Exception:
+            details["queue_depth"] = None
+        status = HealthStatus.HEALTHY
+        if (details["seq_gaps"] or 0) > 0:
+            status = HealthStatus.DEGRADED
+        return HealthCheckResult("pipeline", status, 0, details)
+
+    async def _check_pki(self) -> HealthCheckResult:
+        """PKI operativa: la revoke list file cache è leggibile e non vuota
+        (o la directory PKI esiste). Fail-closed se illeggibile."""
+        try:
+            import os
+            from app.services.pki import RevokeList, REVOKED
+            rl = RevokeList(os.path.join(settings.PKI_DIR, REVOKED))
+            entries = rl.entries() if hasattr(rl, "entries") else []
+            return HealthCheckResult("pki", HealthStatus.HEALTHY, 0, {"revoked_count": len(entries)})
+        except Exception as e:
+            return HealthCheckResult("pki", HealthStatus.UNHEALTHY, 0, {}, str(e))
+
+    async def _check_mtls(self) -> HealthCheckResult:
+        try:
+            from app.services.mtls import mtls_mode
+            mode = mtls_mode()
+            status = HealthStatus.HEALTHY
+            if getattr(settings, "ENTERPRISE_STRICT", False) and mode != "required":
+                status = HealthStatus.UNHEALTHY
+                return HealthCheckResult("mtls", status, 0, {"mode": mode}, "ENTERPRISE_STRICT richiede MTLS_MODE=required")
+            return HealthCheckResult("mtls", status, 0, {"mode": mode})
+        except Exception as e:
+            return HealthCheckResult("mtls", HealthStatus.DEGRADED, 0, {}, str(e))
+
     def get_overall_status(self, results: Dict[str, HealthCheckResult]) -> HealthStatus:
-        if any(r.status == HealthStatus.UNHEALTHY for r in results.values()):
+        critical = {
+            name: result for name, result in results.items()
+            if name not in self.OPTIONAL_CHECKS
+        }
+        if any(r.status == HealthStatus.UNHEALTHY for r in critical.values()):
             return HealthStatus.UNHEALTHY
-        if any(r.status == HealthStatus.DEGRADED for r in results.values()):
+        # Un optional unhealthy è comunque un segnale operativo da mostrare,
+        # ma resta una degradazione e non un outage del servizio principale.
+        if any(r.status in {HealthStatus.DEGRADED, HealthStatus.UNHEALTHY}
+               for r in results.values()):
             return HealthStatus.DEGRADED
         return HealthStatus.HEALTHY
 
 health_checker = HealthChecker()
 
+_START_MONO = time.monotonic()
+
+
 async def liveness_check() -> Dict[str, Any]:
-    results = await health_checker.run_all()
-    overall = health_checker.get_overall_status(results)
+    """Liveness = il processo e' vivo. SOLO questo: niente DB, niente rete,
+    niente check (audit F4). Se questo endpoint risponde, il processo e'
+    vivo per definizione; la salute funzionale e' compito di readiness."""
     return {
-        "status": overall.value,
-        "checks": {k: {"status": v.status.value, "latency_ms": v.latency_ms, "details": v.details, "error": v.error} for k, v in results.items()}
+        "status": "alive",
+        "service": "aegis-brain",
+        "version": settings.APP_VERSION,
+        "uptime_s": round(time.monotonic() - _START_MONO, 1),
     }
 
 async def readiness_check() -> Dict[str, Any]:

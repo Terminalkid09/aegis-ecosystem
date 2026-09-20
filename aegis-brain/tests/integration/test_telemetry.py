@@ -55,6 +55,21 @@ class TestTelemetry:
         data = response.json()
         assert data["is_resolved"] is True
 
+    async def test_resolve_alert_viewer_forbidden(self, client: AsyncClient, user_auth_headers, db_session, test_agent):
+        # Audit: viewer/user (sola lettura) non puo' risolvere ne' killare.
+        alert = Alert(
+            agent_id=test_agent.agent_id, severity="HIGH", pid=1234,
+            process_name="malicious", event_type="PROCESS_CREATED",
+            description="Test alert", is_resolved=False
+        )
+        db_session.add(alert)
+        await db_session.commit()
+        await db_session.refresh(alert)
+
+        response = await client.patch(f"/api/v1/telemetry/alerts/{alert.id}/resolve",
+                                     json={"resolved": True}, headers=user_auth_headers)
+        assert response.status_code == 403
+
     async def test_get_agents(self, client: AsyncClient, admin_auth_headers, db_session, test_agent):
         response = await client.get("/api/v1/telemetry/agents", headers=admin_auth_headers)
         assert response.status_code == 200

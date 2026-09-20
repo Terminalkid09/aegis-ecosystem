@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from app.database.models import CustomRule
-from app.rules.rule_definitions import ALL_RULES, STATIC_RULES, RuleResult
+from app.rules.rule_definitions import ALL_RULES, STATIC_RULES, RuleResult, stamp_result
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -15,6 +15,27 @@ ALWAYS_ALLOW_PROCESS_NAMES = {
     "msedge_updater.exe", "brave_updater.exe", "opera_autoupdate.exe",
     "sophosupdate.exe", "sophosupdater.exe",
 }
+
+# Directory standard da cui un updater legittimo puo' girare. L'allowlist NON
+# si applica fuori da qui (audit: updater.exe in %TEMP% con mimikatz in
+# command_line passava inosservato).
+_ALLOW_SAFE_PATH_PREFIXES = (
+    "c:/program files/", "c:/program files (x86)/",
+    "c:/windows/system32/", "c:/windows/syswow64/",
+    "/usr/bin/", "/bin/", "/opt/",
+)
+
+
+def _allowlisted_and_safe(event: Any) -> bool:
+    """True solo se nome in allowlist E path in directory standard.
+
+    Il solo nome non basta mai: il malware si rinomina updater.exe.
+    """
+    proc_name = (getattr(event, "process_name", None) or getattr(event, "name", None) or "")
+    if proc_name.lower().strip() not in ALWAYS_ALLOW_PROCESS_NAMES:
+        return False
+    path = (getattr(event, "process_path", None) or "").replace("\\", "/").lower()
+    return path.startswith(_ALLOW_SAFE_PATH_PREFIXES)
 
 SEVERITY_WEIGHT = {
     "LOW":      1,
@@ -49,7 +70,16 @@ def _check_whitelist(rule: CustomRule, hostname: Optional[str], ip: Optional[str
     return True
 
 def _match_event_field(event: Any, field: str) -> Optional[str]:
-    return getattr(event, field, None) or getattr(event, field.lower(), None)
+    """Risoluzione campo con alias camelCase/snake_case (audit: "commandLine"
+    non matchava mai perche' `field.lower()` produce "commandline")."""
+    value = getattr(event, field, None)
+    if isinstance(value, str):
+        return value
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", field).lower()
+    value = getattr(event, snake, None)
+    if isinstance(value, str):
+        return value
+    return getattr(event, field.lower(), None)
 
 def _eval_condition(event: Any, cond: Dict) -> bool:
     field = cond.get("target_field", "")
@@ -71,15 +101,66 @@ def _eval_condition(event: Any, cond: Dict) -> bool:
         return value.lower() != pattern.lower()
     return False
 
+def is_regex_safe(pattern: str) -> Optional[str]:
+    """Rifiuta regex custom pericolose (audit ReDoS): ritorna il motivo del
+    rifiuto oppure None se accettabile. Controlli statici (niente timing
+    flaky): lunghezza, compilabilita', quantificatori annidati."""
+    if not isinstance(pattern, str) or not pattern:
+        return "empty pattern"
+    if len(pattern) > 200:
+        return "pattern too long (max 200)"
+    try:
+        re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        return f"invalid regex: {e}"
+    # Quantificatore dentro gruppo quantificato (o alternanza dentro gruppo
+    # ripetuto in modo illimitato): (a+)+, (x*)*, (a|b)+ — classici ReDoS.
+    # Le ripetizioni limitate ((a|b){2,4}) restano ammesse.
+    depth = 0
+    inner_complex = [False]
+    i = 0
+    n = len(pattern)
+    while i < n:
+        ch = pattern[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "(":
+            depth += 1
+            inner_complex.append(False)
+        elif ch == ")":
+            if depth <= 0:
+                return "unbalanced parenthesis"
+            inner = inner_complex.pop()
+            depth -= 1
+            nxt = pattern[i + 1] if i + 1 < n else ""
+            unbounded = nxt in "+*" or (
+                nxt == "{" and not _bounded_repeat(pattern[i + 1:])
+            )
+            if inner and unbounded:
+                return "nested quantifier (ReDoS risk)"
+        elif (ch in "+*{" or ch == "|") and depth > 0:
+            inner_complex[depth] = True
+        i += 1
+    if depth != 0:
+        return "unbalanced parenthesis"
+    return None
+
+
+def _bounded_repeat(tail: str) -> bool:
+    """True per {m,n} con entrambi numerici (ripetizione limitata)."""
+    return bool(re.match(r"\{\d+,\d+\}", tail))
+
+
 class HeuristicEngine:
     async def analyze(self, event: Any, db: Optional[AsyncSession] = None) -> AnalysisResult:
         result = AnalysisResult()
         triggered_rules: list[RuleResult] = []
         auto_remediation: Optional[str] = None
 
-        # Skip analysis for known legitimate processes
-        proc_name = getattr(event, "process_name", None) or getattr(event, "name", None)
-        if proc_name and proc_name.lower().strip() in ALWAYS_ALLOW_PROCESS_NAMES:
+        # Skip analysis for known legitimate processes SOLO da path sicuri
+        # (il solo nome e' aggirabile rinominando il malware).
+        if _allowlisted_and_safe(event):
             return result
 
         # 1. Evaluate Static Definitions
@@ -87,8 +168,15 @@ class HeuristicEngine:
             try:
                 rule_result = rule_fn(event)
                 if rule_result.triggered:
+                    stamp_result(rule_fn, rule_result)
                     triggered_rules.append(rule_result)
             except Exception as e:
+                try:
+                    from app.core.metrics import inc, fmt_labels
+                    inc("aegis_rule_errors_total", 1, fmt_labels(
+                        rule=getattr(rule_fn, "__name__", "unknown")))
+                except Exception:
+                    pass
                 logger.error("Error in static rule: %s", str(e))
 
         # 2. Evaluate Dynamic Database Rules (skip if no db session)
@@ -113,8 +201,8 @@ class HeuristicEngine:
                             else:
                                 matched = all(_eval_condition(event, c) for c in items)
                         else:
-                            # Single-field fallback
-                            field_val = getattr(event, crule.target_field, None)
+                            # Single-field fallback (con risoluzione alias)
+                            field_val = _match_event_field(event, crule.target_field)
                             if field_val and isinstance(field_val, str):
                                 matched = bool(re.search(crule.pattern, field_val, re.IGNORECASE))
 

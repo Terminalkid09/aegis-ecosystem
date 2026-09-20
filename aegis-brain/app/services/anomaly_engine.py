@@ -1,6 +1,7 @@
 import numpy as np
 import json
-from collections import deque
+import uuid
+import time
 from typing import Dict, List, Optional
 from app.core.logging import get_logger
 from app.core.config import settings
@@ -10,12 +11,12 @@ import redis.asyncio as redis
 logger = get_logger(__name__)
 
 class AnomalyEngine:
-    def __init__(self, window_size: int = 60, threshold: float = 4.0, min_samples: int = 60):
+    # Tuned for 10s heartbeat: 20 samples ≈ 3min to baseline (was 60 ≈ 10min,
+    # never reached in practice). Threshold 3.0 sigma + HIGH at 4.5.
+    def __init__(self, window_size: int = 60, threshold: float = 3.0, min_samples: int = 20):
         self.window_size = window_size
         self.threshold = threshold
         self.min_samples = min_samples
-        # In-memory cache for performance
-        self._cache: Dict[str, Dict[str, deque]] = {}
         self._redis_client = None
 
     async def _get_redis(self):
@@ -28,9 +29,10 @@ class AnomalyEngine:
         rc = await self._get_redis()
         key = f"anomaly:{agent_id}:{metric_name}"
         try:
-            # Get last window_size entries
-            data = await rc.zrange(key, -self.window_size, -1, withscores=True)
-            return [float(score) for _, score in data]
+            # Get all entries (already trimmed by zremrangebyrank)
+            members = await rc.zrange(key, 0, -1)
+            # member format is "value:uuid"
+            return [float(m.split(":")[0]) for m in members]
         except Exception as e:
             logger.warning(f"Failed to load anomaly history: {e}")
             return []
@@ -40,39 +42,29 @@ class AnomalyEngine:
         rc = await self._get_redis()
         key = f"anomaly:{agent_id}:{metric_name}"
         try:
-            await rc.zadd(key, {str(timestamp): value})
-            # Trim to window_size
+            # Use timestamp as score for correct chronological ordering and trimming
+            member = f"{value}:{uuid.uuid4().hex}"
+            await rc.zadd(key, {member: timestamp})
+            # Trim to window_size (remove lowest scores/oldest timestamps)
             await rc.zremrangebyrank(key, 0, -self.window_size - 1)
         except Exception as e:
             logger.warning(f"Failed to save anomaly value: {e}")
-
-    def _get_cache(self, agent_id: str, metric_name: str) -> deque:
-        if agent_id not in self._cache:
-            self._cache[agent_id] = {}
-        if metric_name not in self._cache[agent_id]:
-            self._cache[agent_id][metric_name] = deque(maxlen=self.window_size)
-        return self._cache[agent_id][metric_name]
 
     async def analyze(self, agent_id: str, metrics: Dict[str, float]) -> List[Dict[str, any]]:
         """
         Analyze metrics for a specific agent and return a list of detected anomalies.
         """
-        import time
         anomalies = []
         timestamp = time.time()
 
         for metric_name, value in metrics.items():
-            history_deque = self._get_cache(agent_id, metric_name)
-            
-            # If cache is empty, load from Redis
-            if not history_deque:
-                history_list = await self._load_history(agent_id, metric_name)
-                history_deque.extend(history_list)
+            # Load fresh from Redis (removes the buggy in-memory cache)
+            history_list = await self._load_history(agent_id, metric_name)
             
             # Check for anomaly if we have enough samples
-            if len(history_deque) >= self.min_samples:
-                mean = np.mean(history_deque)
-                std = np.std(history_deque, ddof=1)
+            if len(history_list) >= self.min_samples:
+                mean = np.mean(history_list)
+                std = np.std(history_list, ddof=1)
                 
                 if std > 0:
                     z_score = abs(value - mean) / std
@@ -82,12 +74,10 @@ class AnomalyEngine:
                             "metric": metric_name,
                             "value": value,
                             "z_score": round(z_score, 2),
+                            "threshold": self.threshold,
                             "severity": "HIGH" if z_score > self.threshold * 1.5 else "MEDIUM",
                             "summary": f"High {metric_name} detected: {value:.1f} (Z-Score: {z_score:.1f})"
                         })
-            
-            # Update cache
-            history_deque.append(value)
             
             # Persist to Redis
             await self._save_value(agent_id, metric_name, timestamp, value)

@@ -1,0 +1,46 @@
+title: Executable Or Script Download Through Web Proxy
+id: 2b6d9a38-5c14-4f70-9e82-3d1a6f4b8c95
+status: stable
+description: |
+  Un proxy che registra il download di un eseguibile o di uno script (exe, dll,
+  scr, ps1, vbs, hta, js) è un vettore di ingresso primario: il payload entra
+  dalla rete HTTP, non da una email, e molti controlli perimetrali non lo
+  vedono. Il canale vale come indicatore anche se il file poi non esegue.
+references:
+  - https://attack.mitre.org/techniques/T1105/
+author: Aegis Sigma bundle
+date: 2026/09/15
+logsource:
+  product: proxy
+detection:
+  selection_download:
+    url|endswith:
+      - '.exe'
+      - '.dll'
+      - '.scr'
+      - '.msi'
+      - '.bat'
+      - '.cmd'
+      - '.ps1'
+      - '.vbs'
+      - '.hta'
+      - '.js'
+      - '.jar'
+      - '.iso'
+      - '.img'
+  filter_known_good:
+    domain|endswith:
+      - '.microsoft.com'
+      - '.windowsupdate.com'
+      - '.apple.com'
+  condition: selection_download and not filter_known_good
+fields:
+  - url
+  - src_ip
+  - user_agent
+falsepositives:
+  - Repositories software interni e updater aziendali
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1105

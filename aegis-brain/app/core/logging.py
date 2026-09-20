@@ -2,7 +2,7 @@ import logging
 import sys
 import json
 import uuid
-import time
+from datetime import datetime, timezone
 from contextvars import ContextVar
 from typing import Any, Dict, Optional
 from pythonjsonlogger import jsonlogger
@@ -10,12 +10,15 @@ from pythonjsonlogger import jsonlogger
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 
+SERVICE_NAME = "aegis-brain"
+
 class StructuredFormatter(jsonlogger.JsonFormatter):
     def add_fields(self, log_record: Dict[str, Any], record: logging.LogRecord, message_dict: Dict[str, Any]) -> None:
         super().add_fields(log_record, record, message_dict)
-        log_record["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%S.%fZ", time.gmtime())
+        log_record["timestamp"] = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         log_record["level"] = record.levelname
         log_record["logger"] = record.name
+        log_record["service"] = SERVICE_NAME
         log_record["correlation_id"] = correlation_id_var.get("")
         log_record["request_id"] = request_id_var.get("")
         if record.exc_info:

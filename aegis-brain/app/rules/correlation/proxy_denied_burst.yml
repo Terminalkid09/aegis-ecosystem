@@ -1,0 +1,21 @@
+title: Repeated Blocked Requests Through Web Proxy
+id: corr-proxy-denied-burst
+type: threshold
+description: |
+  Dieci richieste bloccate dal proxy dallo stesso client in cinque minuti
+  indicano un host che insiste su destinazioni vietate: malware con un
+  C2 in blacklist, oppure un utente che aggira i controlli. In entrambi i casi
+  va guardato, non archiviato.
+severity: MEDIUM
+window_seconds: 300
+threshold: 10
+group_by:
+  - src_ip
+match:
+  event_type: proxy_denied
+source_types:
+  - web
+mitre:
+  - T1071.001
+tags:
+  - attack.command_and_control

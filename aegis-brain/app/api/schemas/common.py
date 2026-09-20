@@ -1,7 +1,14 @@
-from pydantic import BaseModel, ConfigDict, Field, alias_generators, BeforeValidator
+from annotated_types import MaxLen
+from pydantic import (BaseModel, ConfigDict, Field, alias_generators,
+                      BeforeValidator, model_validator)
 from typing import Optional, List, Dict, Any, Annotated
 from datetime import datetime
 from uuid import UUID
+
+from app.core.redaction import CONTROL_TAG, strip_control_chars
+
+# Marcatore di troncatura: finisce in `quality` (es. 'truncated:command_line').
+TRUNCATION_TAG = "truncated"
 
 # Helper to ensure UUIDs are treated as strings in responses
 UUIDStr = Annotated[UUID, BeforeValidator(lambda v: str(v) if isinstance(v, UUID) else v)]
@@ -38,6 +45,9 @@ class NoteOut(BaseSchema):
 class AlertResponse(BaseSchema):
     id: int
     agent_id: UUIDStr
+    # Nome host leggibile: senza, il triage vede "1fdcfa07" (prefisso UUID)
+    # e non sa su quale macchina sia scattato l'alert.
+    agent_hostname: Optional[str] = None
     timestamp: datetime
     severity: str
     pid: Optional[int] = None
@@ -47,11 +57,22 @@ class AlertResponse(BaseSchema):
     process_path: Optional[str] = None
     event_type: str
     description: str
+    # Contesto strutturato. DEVE stare qui e non solo nel dettaglio: la tabella
+    # alert renderizza dalle righe di LISTA, quindi senza questo campo il
+    # pannello "Evidence" non comparirebbe mai (bug trovato end-to-end: la
+    # response_model List[AlertResponse] scarta i campi non dichiarati).
+    evidence: Optional[Dict[str, Any]] = None
     is_resolved: bool
     mitre_tactic_id: Optional[str] = None
     mitre_technique_id: Optional[str] = None
     mitre_tactic_name: Optional[str] = None
     mitre_technique_name: Optional[str] = None
+
+
+class ResolveAlertResponse(AlertResponse):
+    """PATCH resolve: feedback esplicito sul muting (resolve che 'fa qualcosa')."""
+    triage_muted_seconds: int = 0
+    process_killed: bool = False
 
 class AgentResponse(BaseSchema):
     agent_id: UUIDStr
@@ -59,8 +80,14 @@ class AgentResponse(BaseSchema):
     ip_address: Optional[str] = None
     os_type: Optional[str] = None
     agent_type: Optional[str] = None
+    agent_version: Optional[str] = None
+    isolated: bool = False
     is_demo: bool = False
     last_seen: Optional[datetime] = None
+    # M7 Fase 8: sito (da meta), stato e capabilities (additivi, default sicuri).
+    site: str = "default"
+    status: str = "unknown"
+    capabilities: Optional[Any] = None
 
 class EventSchema(BaseModel):
     model_config = ConfigDict(
@@ -101,6 +128,128 @@ class EventSchema(BaseModel):
     # Security signals
     network_connections: Optional[List[Dict[str, Any]]] = Field(None, alias="networkConnections")
 
+    # Fleet management (Guard sends camelCase agentVersion, NodeTrace snake_case)
+    agent_version: Optional[str] = Field(None, max_length=50, alias="agentVersion")
+    capabilities: Optional[Any] = None
+
+    # Agent-side behavioral detection (Phase 5)
+    command_line: Optional[str] = Field(None, max_length=4096, alias="commandLine")
+    behavioral_tags: Optional[List[str]] = Field(None, alias="behavioralTags")
+    # Anomalie NodeTrace: gli agenti nuovi mandano dict strutturati
+    # ({"type": "HIGH_CONNECTION_COUNT_TO_IP", "ip": ..., "connection_count":
+    # ..., "processes": [...]}) per popolare Alert.evidence; gli agenti già
+    # installati mandano stringhe. Qui serve Any: con List[str] il dict veniva
+    # respinto con 422 e l'INTERO report veniva perso (telemetria cieca a ogni
+    # anomalia con l'agente aggiornato — verificato end-to-end sul brain vivo).
+    anomalies: Optional[List[Any]] = Field(None, max_length=200)
+    # Moduli caricati (audit: la S011 DLL-hijacking non puo' vedersi dal solo
+    # process_path; i sensori futuri popolano questa lista).
+    loaded_modules: Optional[List[str]] = Field(None, max_length=256, alias="loadedModules")
+
+    # Event identity + sequencing (schema v2, M1 Fase 2 — tutti opzionali:
+    # gli agenti legacy v1 continuano a funzionare senza questi campi).
+    event_id: Optional[str] = Field(
+        None, max_length=64, alias="eventId",
+        description="UUID per evento, chiave di idempotenza/dedup")
+    schema_version: Optional[int] = Field(None, alias="schemaVersion")
+    boot_id: Optional[str] = Field(None, max_length=64, alias="bootId")
+    seq: Optional[int] = Field(None, ge=0, description="Sequence per (agent_id, boot_id); negativo = corrotto, rifiutato")
+    ts_monotonic_ns: Optional[int] = Field(None, alias="tsMonotonicNs")
+    ts_wall_ns: Optional[int] = Field(None, alias="tsWallNs")
+    proc_start_ns: Optional[int] = Field(
+        None, alias="procStartNs",
+        description="Start monotonico processo: con pid risolve PID reuse")
+    session_id: Optional[str] = Field(None, max_length=128, alias="sessionId")
+    integrity_level: Optional[str] = Field(None, max_length=64, alias="integrityLevel")
+    signature: Optional[str] = Field(None, max_length=256)
+    publisher: Optional[str] = Field(None, max_length=256)
+    proto: Optional[str] = Field(None, max_length=16)
+    direction: Optional[str] = Field(None, max_length=16)
+    container_id: Optional[str] = Field(None, max_length=128, alias="containerId")
+    cgroup: Optional[str] = Field(None, max_length=512)
+    net_namespace: Optional[str] = Field(None, max_length=128, alias="netNamespace")
+    provenance: Optional[str] = Field(None, max_length=32)
+    quality: Optional[str] = Field(None, max_length=64)
+    sampling: Optional[str] = Field(None, max_length=32)
+    drop_reason: Optional[str] = Field(None, max_length=128, alias="dropReason")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _clamp_oversized_strings(cls, data: Any) -> Any:
+        """Tronca i campi stringa oltre il limite dichiarato invece di
+        rifiutare l'evento.
+
+        Perché: con la validazione stretta bastava UNA command line lunga —
+        un processo che si rilancia con un JSON di 12 KB in argv, esattamente
+        ciò che fa l'agente NodeTrace con curl — per far fallire con 422
+        l'INTERO batch. L'outbox dell'agente rigioca il batch, quindi falliva
+        per sempre: la telemetria di quell'endpoint non arrivava più al brain,
+        nessun processo, nessun alert, in silenzio.
+
+        La redazione a valle (`redact_text`) tronca già a 4096, ma gira DOPO
+        la validazione: non proteggeva nulla. Qui si applica prima, ai limiti
+        dichiarati dai campi stessi (quindi anche ai campi futuri, senza
+        doverli elencare) e lo si dichiara in `quality`, stessa convenzione di
+        'degraded:etw-disabled'. La telemetria non si butta: si tronca, e la
+        perdita è visibile.
+
+        Nello stesso passaggio si tolgono i caratteri di controllo non
+        memorizzabili (NUL): PostgreSQL non può contenere 0x00 in una colonna
+        text, quindi un evento con un NUL non era "sporco", era proprio non
+        scrivibile. Essendo `EventSchema` il punto d'ingresso di TUTTI i
+        percorsi (telemetria, parser SIEM, consumer Redis), filtrare qui copre
+        anche le sorgenti che non passano da `sanitize_event`.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        # Limite per ciascun campo, indicizzato sia col nome sia con l'alias
+        # accettato dall'agente (camelCase).
+        limits: dict[str, tuple[str, int]] = {}
+        for name, info in cls.model_fields.items():
+            max_len = next((meta.max_length for meta in info.metadata
+                            if isinstance(meta, MaxLen)), None)
+            if not max_len:
+                continue
+            limits[name] = (name, max_len)
+            if info.alias:
+                limits[info.alias] = (name, max_len)
+
+        clean = dict(data)
+        truncated: list[str] = []
+        stripped = False
+        for key, value in data.items():
+            # 1) Caratteri di controllo non memorizzabili (NUL): si tolgono su
+            #    OGNI stringa di primo livello, anche su un campo senza
+            #    max_length, perché il problema non è la lunghezza ma il byte.
+            #    Senza questo, un NUL in un nome processo arrivava fino alla
+            #    INSERT e PostgreSQL la rifiutava — e quel fallimento, lungo il
+            #    percorso dell'ingestion, diventava un 500.
+            if isinstance(value, str):
+                cleaned = strip_control_chars(value)
+                if cleaned != value:
+                    clean[key] = value = cleaned
+                    stripped = True
+            # 2) Troncamento ai limiti dichiarati dai campi stessi.
+            entry = limits.get(key)
+            if entry is None or not isinstance(value, str):
+                continue
+            field_name, max_len = entry
+            if len(value) > max_len:
+                clean[key] = value[:max_len]
+                if field_name != "quality":
+                    truncated.append(field_name)
+
+        markers = [CONTROL_TAG] if stripped else []
+        if truncated:
+            markers.append(TRUNCATION_TAG + ":" + ",".join(sorted(set(truncated))))
+        if markers:
+            existing = clean.get("quality")
+            merged = f"{existing};{';'.join(markers)}" if existing else ";".join(markers)
+            clean["quality"] = merged[: limits["quality"][1]]
+
+        return clean
+
 class StatsResponse(BaseModel):
     total_alerts: int
     unresolved_alerts: int
@@ -110,3 +259,11 @@ class StatsResponse(BaseModel):
     current_medium_alerts: int = 0
     current_low_alerts: int = 0
     demo_agents: int = 0
+    # Pipeline M1 Fase 2: duplicati scartati e gap di sequenza (perdite misurate).
+    events_duplicated: int = 0
+    events_seq_gaps: int = 0
+    events_seq_gap_events: int = 0
+    # Flotta M7 Fase 8: salute sensori (additivi).
+    isolated_agents: int = 0
+    stale_agents: int = 0
+    offline_agents: int = 0

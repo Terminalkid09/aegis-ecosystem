@@ -21,8 +21,20 @@ FILEPATH="${BACKUP_DIR}/${FILENAME}"
 export PGPASSWORD="$PGPASS"
 pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" --no-owner | gzip > "$FILEPATH"
 
-echo "Backup created: $FILEPATH ($(du -h "$FILEPATH" | cut -f1))"
+# Cifratura at-rest AUTENTICATA (GPG simmetrico AES256 + MDC integrity).
+# Niente AES-CBC nudo (malleabile) e niente `openssl enc` AEAD (non
+# supportato dai build minimali). BACKUP_PASSPHRASE obbligatoria in prod;
+# senza, il backup resta in chiaro e lo si dichiara nel log.
+if [ -n "${BACKUP_PASSPHRASE:-}" ]; then
+  printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+    --passphrase-fd 0 --symmetric --cipher-algo AES256 \
+    -o "${FILEPATH}.gpg" "$FILEPATH" && rm -f "$FILEPATH"
+  echo "Backup created (encrypted, AES256+MDC): ${FILEPATH}.gpg ($(du -h "${FILEPATH}.gpg" | cut -f1))"
+  echo "Restore: ./scripts/restore-db.sh <file>.gpg [db]"
+else
+  echo "WARNING: BACKUP_PASSPHRASE non impostata — backup IN CHIARO: $FILEPATH ($(du -h "$FILEPATH" | cut -f1))"
+fi
 
-# Rotate old backups
-find "$BACKUP_DIR" -name "aegis_db_*.sql.gz" -mtime +$RETENTION_DAYS -delete
+# Rotate old backups (sia .gz che .gz.gpg)
+find "$BACKUP_DIR" \( -name "aegis_db_*.sql.gz" -o -name "aegis_db_*.sql.gz.gpg" \) -mtime +$RETENTION_DAYS -delete
 echo "Old backups (>${RETENTION_DAYS} days) cleaned."

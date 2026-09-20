@@ -3,20 +3,25 @@
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
-up: ## Start aegis-brain with dependencies
-	docker compose -f ../../docker-compose.yml up -d aegis-postgres aegis-redis aegis-ollama aegis-brain
+# Il compose sta nella radice del repo: un solo livello sopra (prima era
+# ../../, cioe' FUORI dal repo: make up/down/logs erano comandi morti).
+# `up` non avvia ollama: l'AI locale e' opt-in (AEGIS_WITH_AI=1 o up-full).
+COMPOSE := docker compose -f ../docker-compose.yml
 
-up-full: ## Start full Aegis ecosystem
-	docker compose -f ../../docker-compose.yml up -d
+up: ## Start aegis-brain with dependencies (no ollama)
+	$(COMPOSE) up -d aegis-postgres aegis-redis aegis-brain
+
+up-full: ## Start full Aegis ecosystem (include ollama/AI locale)
+	$(COMPOSE) up -d --profile ollama
 
 down: ## Stop all services
-	docker compose -f ../../docker-compose.yml down
+	$(COMPOSE) down
 
 build: ## Build images only
-	docker compose -f ../../docker-compose.yml build aegis-brain
+	$(COMPOSE) build aegis-brain
 
 logs: ## Tail brain logs
-	docker compose -f ../../docker-compose.yml logs -f aegis-brain
+	$(COMPOSE) logs -f aegis-brain
 
 shell: ## Open a shell inside the brain container
 	docker exec -it aegis-brain bash
@@ -55,17 +60,19 @@ lint: ## Lint with ruff
 typecheck: ## Type check with mypy
 	mypy app/ --ignore-missing-imports
 
-migrate: ## Apply Alembic migrations
-	docker exec -it aegis-brain alembic upgrade head
+# Senza -it: questi target devono funzionare anche da script/CI, dove non c'e'
+# un terminale interattivo.
+migrate: ## Apply Alembic migrations (il brain le applica gia' all'avvio)
+	docker exec aegis-brain python -m alembic upgrade head
 
 migrate-new: ## Create a new Alembic migration (use: make migrate-new MSG="my change")
-	docker exec -it aegis-brain alembic revision --autogenerate -m "$(MSG)"
+	docker exec aegis-brain python -m alembic revision --autogenerate -m "$(MSG)"
 
 seed: ## Seed demo data
-	docker exec -it aegis-brain python scripts/check_test_db.py
+	docker exec aegis-brain python scripts/check_test_db.py
 
 health: ## Check health of all services
-	docker compose -f ../../docker-compose.yml ps
+	$(COMPOSE) ps
 	@echo "--- Brain Health ---"
 	@curl -sf http://localhost:8000/health/live | jq . || echo "Brain not responding"
 	@echo "--- Readiness ---"
@@ -74,5 +81,5 @@ health: ## Check health of all services
 	@curl -sf http://localhost:8000/health/circuit-breakers | jq .
 
 clean: ## Remove containers, volumes and build cache
-	docker compose -f ../../docker-compose.yml down -v --remove-orphans
+	$(COMPOSE) down -v --remove-orphans
 	docker system prune -f

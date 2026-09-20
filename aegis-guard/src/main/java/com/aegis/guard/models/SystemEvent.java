@@ -61,6 +61,82 @@ public class SystemEvent {
     @SerializedName("networkConnections")
     private com.google.gson.JsonElement networkConnections;
 
+    @SerializedName("agentVersion")
+    private String agentVersion;
+
+    // Matrice feature dichiarata dal'agente (fleet management): il brain la
+    // salva su Agent.capabilities e la UI la mostra nella pagina Agents.
+    @SerializedName("capabilities")
+    private com.google.gson.JsonElement capabilities;
+
+    @SerializedName("commandLine")
+    private String commandLine;
+
+    @SerializedName("behavioralTags")
+    private java.util.List<String> behavioralTags;
+
+    // Event identity + sequencing (schema v2, M1 Fase 2). Tutti opzionali:
+    // il brain accetta eventi v1 senza questi campi.
+    @SerializedName("eventId")
+    private String eventId;
+
+    @SerializedName("schemaVersion")
+    private int schemaVersion;
+
+    @SerializedName("bootId")
+    private String bootId;
+
+    @SerializedName("seq")
+    private Long seq;
+
+    @SerializedName("tsMonotonicNs")
+    private Long tsMonotonicNs;
+
+    @SerializedName("tsWallNs")
+    private Long tsWallNs;
+
+    @SerializedName("procStartNs")
+    private Long procStartNs;
+
+    @SerializedName("sessionId")
+    private String sessionId;
+
+    @SerializedName("integrityLevel")
+    private String integrityLevel;
+
+    @SerializedName("signature")
+    private String signature;
+
+    @SerializedName("publisher")
+    private String publisher;
+
+    @SerializedName("proto")
+    private String proto;
+
+    @SerializedName("direction")
+    private String direction;
+
+    @SerializedName("containerId")
+    private String containerId;
+
+    @SerializedName("cgroup")
+    private String cgroup;
+
+    @SerializedName("netNamespace")
+    private String netNamespace;
+
+    @SerializedName("provenance")
+    private String provenance;
+
+    @SerializedName("quality")
+    private String quality;
+
+    @SerializedName("sampling")
+    private String sampling;
+
+    @SerializedName("dropReason")
+    private String dropReason;
+
     public SystemEvent() {}
 
     public SystemEvent(String agentId, long pid, long parentPid, String parentProcessName,
@@ -80,6 +156,10 @@ public class SystemEvent {
         this.ipAddress = null;
         this.threadCount = 0;
         this.networkConnections = com.google.gson.JsonParser.parseString("[]");
+        this.commandLine = "";
+        this.behavioralTags = new java.util.ArrayList<>();
+        this.eventId = java.util.UUID.randomUUID().toString();
+        this.schemaVersion = 2;
     }
 
     // Getters e Setters
@@ -127,6 +207,85 @@ public class SystemEvent {
 
     public com.google.gson.JsonElement getNetworkConnections() { return networkConnections; }
     public void setNetworkConnections(String v) { this.networkConnections = com.google.gson.JsonParser.parseString(v); }
+
+    public String getAgentVersion() { return agentVersion; }
+    public void setAgentVersion(String v) { this.agentVersion = v; }
+    public void setCapabilities(com.google.gson.JsonElement c) { this.capabilities = c; }
+
+    public String getCommandLine() { return commandLine; }
+    public void setCommandLine(String commandLine) { this.commandLine = commandLine; }
+
+    public java.util.List<String> getBehavioralTags() { return behavioralTags; }
+    public void setBehavioralTags(java.util.List<String> behavioralTags) { this.behavioralTags = behavioralTags; }
+    public void addBehavioralTag(String tag) {
+        if (this.behavioralTags == null) {
+            this.behavioralTags = new java.util.ArrayList<>();
+        }
+        if (!this.behavioralTags.contains(tag)) {
+            this.behavioralTags.add(tag);
+        }
+    }
+
+    // Accessor schema v2 (tutti opzionali, mai obbligatori per il brain).
+    public String getEventId() { return eventId; }
+    public void setEventId(String v) { this.eventId = v; }
+
+    public int getSchemaVersion() { return schemaVersion; }
+    public void setSchemaVersion(int v) { this.schemaVersion = v; }
+
+    public String getBootId() { return bootId; }
+    public void setBootId(String v) { this.bootId = v; }
+
+    public Long getSeq() { return seq; }
+    public void setSeq(Long v) { this.seq = v; }
+
+    public Long getTsMonotonicNs() { return tsMonotonicNs; }
+    public void setTsMonotonicNs(Long v) { this.tsMonotonicNs = v; }
+
+    public Long getTsWallNs() { return tsWallNs; }
+    public void setTsWallNs(Long v) { this.tsWallNs = v; }
+
+    public Long getProcStartNs() { return procStartNs; }
+    public void setProcStartNs(Long v) { this.procStartNs = v; }
+
+    public String getSessionId() { return sessionId; }
+    public void setSessionId(String v) { this.sessionId = v; }
+
+    public String getIntegrityLevel() { return integrityLevel; }
+    public void setIntegrityLevel(String v) { this.integrityLevel = v; }
+
+    public String getSignature() { return signature; }
+    public void setSignature(String v) { this.signature = v; }
+
+    public String getPublisher() { return publisher; }
+    public void setPublisher(String v) { this.publisher = v; }
+
+    public String getProto() { return proto; }
+    public void setProto(String v) { this.proto = v; }
+
+    public String getDirection() { return direction; }
+    public void setDirection(String v) { this.direction = v; }
+
+    public String getContainerId() { return containerId; }
+    public void setContainerId(String v) { this.containerId = v; }
+
+    public String getCgroup() { return cgroup; }
+    public void setCgroup(String v) { this.cgroup = v; }
+
+    public String getNetNamespace() { return netNamespace; }
+    public void setNetNamespace(String v) { this.netNamespace = v; }
+
+    public String getProvenance() { return provenance; }
+    public void setProvenance(String v) { this.provenance = v; }
+
+    public String getQuality() { return quality; }
+    public void setQuality(String v) { this.quality = v; }
+
+    public String getSampling() { return sampling; }
+    public void setSampling(String v) { this.sampling = v; }
+
+    public String getDropReason() { return dropReason; }
+    public void setDropReason(String v) { this.dropReason = v; }
     
     @Override
     public String toString() {

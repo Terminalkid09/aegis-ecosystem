@@ -50,3 +50,15 @@ async def test_health_no_auth_required():
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_body_limit_total_upload_follows_settings(monkeypatch):
+    # Audit: l'upload Total ammette fino a TOTAL_MAX_* (prima il default
+    # 10MB uccideva file legittimi).
+    from app import main as main_mod
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "TOTAL_MAX_FILE_MB", 100)
+    monkeypatch.setattr(settings, "TOTAL_MAX_ZIP_MB", 200)
+    assert main_mod._body_limit_for("/api/v1/total/upload") == 200 * 1024 * 1024
+    assert main_mod._body_limit_for("/api/v1/telemetry/report") == 10 * 1024 * 1024
+    assert main_mod._body_limit_for("/unmatched") == main_mod.DEFAULT_BODY_LIMIT

@@ -2,8 +2,13 @@ import json
 import os
 import time
 
+from services.agent_home import agent_home
+
 class TokenService:
-    FILE = os.getenv("NODETRACE_TOKEN_FILE", "token.json")
+    # Path ASSOLUTO: con "token.json" relativo lo stesso device usava il token
+    # della cwd corrente (tre identita' diverse per un solo host -> 401 su ogni
+    # chiamata autenticata e agente cieco). Vedi services/agent_home.py.
+    FILE = os.getenv("NODETRACE_TOKEN_FILE") or os.path.join(agent_home(), "token.json")
 
     def _atomic_write(self, data):
         parent = os.path.dirname(os.path.abspath(self.FILE))
@@ -17,7 +22,12 @@ class TokenService:
                     json.dump(data, f)
                     f.flush()
                     os.fsync(f.fileno())
+                os.chmod(tmp_path, 0o600)
                 os.replace(tmp_path, self.FILE)
+                try:
+                    os.chmod(self.FILE, 0o600)
+                except OSError:
+                    pass
                 return
             except (OSError, PermissionError) as e:
                 last_err = e
@@ -29,20 +39,24 @@ class TokenService:
                 time.sleep(0.2 * (attempt + 1))
         raise last_err
 
-    def save(self, token, device_id):
-        self._atomic_write({"token": token, "device_id": device_id})
-
-    def clear(self):
-        for path in (self.FILE, self.FILE + ".tmp"):
-            if os.path.exists(path):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
+    def save(self, token, device_id, server_url=None):
+        data = {"token": token, "device_id": device_id}
+        if server_url:
+            data["server_url"] = server_url
+        self._atomic_write(data)
 
     def load(self):
         if not os.path.exists(self.FILE):
             return None, None
+        # Audit: file leggibile a tutti = secret esposto (umask larga o copia).
+        try:
+            if os.stat(self.FILE).st_mode & 0o077:
+                import sys as _sys
+                print("WARNING: token.json e' leggibile da altri utenti "
+                      "(permessi larghi): ripristinare 0600",
+                      file=_sys.stderr)
+        except OSError:
+            pass
         for attempt in range(5):
             try:
                 with open(self.FILE, "r", encoding="utf-8") as f:
@@ -57,3 +71,26 @@ class TokenService:
             except (OSError, PermissionError):
                 time.sleep(0.2 * (attempt + 1))
         return None, None
+
+    def load_server(self):
+        """URL server pinnato all'enrollment (None sui token legacy)."""
+        try:
+            with open(self.FILE, "r", encoding="utf-8") as f:
+                return json.load(f).get("server_url")
+        except (OSError, ValueError):
+            return None
+
+    @staticmethod
+    def check_server_pin(stored, current):
+        """Come ServerPin Java: None se ok, altrimenti errore fatale."""
+        current = (current or "").strip()
+        if not current:
+            return "register URL non configurato — refusing"
+        if not stored or not str(stored).strip():
+            return None  # legacy: pin da ora
+        s = str(stored).strip().rstrip("/")
+        c = current.rstrip("/")
+        if s.lower() == c.lower():
+            return None
+        return (f"Server cambiato (stored={s} current={c}): "
+                "re-enroll richiesto, rifiuto connessioni")

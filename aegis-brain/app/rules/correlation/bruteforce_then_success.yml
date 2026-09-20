@@ -1,0 +1,26 @@
+title: Successful Authentication After Repeated Failures
+id: corr-bruteforce-success
+type: sequence
+description: |
+  La sequenza più importante di un SOC: molti fallimenti e poi un successo
+  dallo stesso mittente. Non è un attacco tentato, è un accesso riuscito con
+  credenziali indovinate: va trattato come possibile compromissione, non come
+  rumore di scansione.
+severity: CRITICAL
+window_seconds: 600
+group_by:
+  - src_ip
+source_types:
+  - syslog
+steps:
+  - match:
+      event_type: auth_failure
+    count: 5
+  - match:
+      event_type: auth_success
+mitre:
+  - T1110
+  - T1078
+tags:
+  - attack.credential_access
+  - attack.initial_access

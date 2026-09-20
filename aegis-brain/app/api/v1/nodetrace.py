@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database.connection import get_db
@@ -10,6 +10,8 @@ from app.services import telemetry_service
 from app.api.schemas.common import EventSchema
 from pydantic import BaseModel, Field
 import json
+import secrets
+import uuid
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
@@ -21,6 +23,7 @@ class RegisterRequest(BaseModel):
     os: str
     enroll_key: str
     mac_address: Optional[str] = None
+    agent_type: str = "nodetrace"
 
 class TelemetryUpdate(BaseModel):
     device_id: str
@@ -38,51 +41,89 @@ class TelemetryUpdate(BaseModel):
     active_connections: Optional[int] = None
     users: List[Dict[str, Any]] = Field(default_factory=list)
     network_flows: List[Dict[str, Any]] = Field(default_factory=list)
+    agent_version: Optional[str] = Field(None, max_length=50)
+    capabilities: Optional[Any] = None
+    anomalies: List[str] = Field(default_factory=list)
 
 async def verify_nodetrace_agent(
     device_id: str,
     authorization: str = Header(..., alias="Authorization"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    request: Request = None,
+    x_client_cert: str | None = Header(None, alias="X-Client-Cert"),
 ) -> Agent:
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format")
+        raise HTTPException(status_code=401, detail="Invalid token format")
 
     try:
         agent_uuid = uuid.UUID(device_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid device_id format")
+        raise HTTPException(status_code=400, detail="Invalid device_id format")
 
     result = await db.execute(select(Agent).where(Agent.agent_id == agent_uuid))
     agent = result.scalars().first()
     if not agent or not agent.device_token_hash:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Agent not registered")
+        raise HTTPException(status_code=401, detail="Agent not registered")
 
     token = authorization[7:]
     if not verify_password(token, agent.device_token_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token")
+        raise HTTPException(status_code=401, detail="Invalid agent token")
+
+    # Post-audit gap-closing: le rotte legacy applicano lo stesso mTLS delle
+    # rotte /telemetry (altrimenti required sarebbe aggirabile).
+    from app.core.agent_deps import apply_agent_mtls
+    apply_agent_mtls(agent, request, x_client_cert, bootstrap=False)
 
     return agent
 
 @router.post("/register")
 async def register_agent(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    if payload.enroll_key != settings.AGENT_ENROLL_KEY:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid enrollment key")
+    # Static key (headless) OR single-use EnrollToken (one-liner) — same as /enroll.
+    # Audit: compare_digest anti-timing (prima `==`).
+    import hmac as _hmac
+    _key = (payload.enroll_key or "").strip()
+    _expected = (settings.AGENT_ENROLL_KEY or "").strip()
+    valid_static = bool(_expected) and _hmac.compare_digest(_key, _expected)
+    if not valid_static:
+        from app.services.enrollment import consume_enroll_token
+        await consume_enroll_token(db, payload.enroll_key, "nodetrace", payload.hostname)
 
     # Check for existing agent
     result = await db.execute(select(Agent).where(Agent.hostname == payload.hostname, Agent.os_type == payload.os))
     existing = result.scalars().first()
 
     if existing:
-        # Re-enroll: issue a fresh token so agent can authenticate again
-        new_token = f"nt-{uuid.uuid4().hex[:16]}"
+        # Come /enroll: revocato = niente re-enroll autonomo (fail-closed).
+        try:
+            from app.services import pki as _pki
+            import os as _os
+            _rl = _pki.RevokeList(_os.path.join(settings.PKI_DIR, _pki.REVOKED))
+            _rl.require_healthy()
+            if _rl.agent_revoked(str(existing.agent_id)):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                    detail="Agent revoked: contact SOC for re-admission")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail=f"PKI unavailable: {e}")
+        # Re-enroll: issue a fresh token so agent can authenticate again.
+        # Audit: 192 bit (prima 64: nt-uuid16). Lunghezza opaca agli agenti.
+        new_token = f"nt-{secrets.token_hex(24)}"
         existing.device_token_hash = hash_password(new_token)
         existing.last_seen = datetime.now(timezone.utc)
         await db.commit()
 
-        # Update redis cache
-        import redis.asyncio as aioredis
-        rc = aioredis.from_url(settings.REDIS_URL)
-        await rc.set(f"auth:agent:{new_token}", str(existing.agent_id))
+        # Update redis cache (best-effort; chiave = hash, mai secret in chiaro;
+        # TTL anti-crescita: la cache ricade sul DB).
+        try:
+            import hashlib as _hashlib
+            import redis.asyncio as aioredis
+            rc = aioredis.from_url(settings.REDIS_URL)
+            await rc.set(f"auth:agent:{_hashlib.sha256(new_token.encode()).hexdigest()}",
+                         str(existing.agent_id), ex=86400)
+        except Exception:
+            pass
 
         return {
             "device_id": str(existing.agent_id),
@@ -91,7 +132,7 @@ async def register_agent(payload: RegisterRequest, db: AsyncSession = Depends(ge
         }
 
     agent_id = uuid.uuid4()
-    token = f"nt-{uuid.uuid4().hex[:16]}"
+    token = f"nt-{secrets.token_hex(24)}"
 
     agent = Agent(
         agent_id=agent_id,
@@ -103,10 +144,15 @@ async def register_agent(payload: RegisterRequest, db: AsyncSession = Depends(ge
     db.add(agent)
     await db.commit()
 
-    # Also cache for link-style auth if needed
-    import redis.asyncio as redis
-    rc = redis.from_url(settings.REDIS_URL)
-    await rc.set(f"auth:agent:{token}", str(agent_id))
+    # Also cache for link-style auth if needed (best-effort; hash + TTL).
+    try:
+        import hashlib as _hashlib2
+        import redis.asyncio as redis
+        rc = redis.from_url(settings.REDIS_URL)
+        await rc.set(f"auth:agent:{_hashlib2.sha256(token.encode()).hexdigest()}",
+                     str(agent_id), ex=86400)
+    except Exception:
+        pass
 
     return {
         "device_id": str(agent_id),
@@ -118,7 +164,9 @@ async def register_agent(payload: RegisterRequest, db: AsyncSession = Depends(ge
 async def update_telemetry(
     payload: TelemetryUpdate,
     db: AsyncSession = Depends(get_db),
-    authorization: str = Header(..., alias="Authorization")
+    authorization: str = Header(..., alias="Authorization"),
+    request: Request = None,
+    x_client_cert: str | None = Header(None, alias="X-Client-Cert"),
 ):
     # Map NodeTrace payload to the universal EventSchema
     try:
@@ -126,7 +174,7 @@ async def update_telemetry(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid device_id format")
 
-    await verify_nodetrace_agent(payload.device_id, authorization, db)
+    await verify_nodetrace_agent(payload.device_id, authorization, db, request, x_client_cert)
 
     event = EventSchema(
         agent_id=payload.device_id,
@@ -153,6 +201,9 @@ async def update_telemetry(
         "geo_city": payload.geo_city,
         "users": payload.users,
         "network_flows": payload.network_flows,
+        "agent_version": payload.agent_version,
+        "capabilities": payload.capabilities,
+        "anomalies": payload.anomalies,
     })
     await telemetry_service.process_telemetry(db, agent_id_uuid, data)
     return {"status": "ok"}
@@ -161,17 +212,34 @@ async def update_telemetry(
 async def heartbeat(
     payload: dict,
     db: AsyncSession = Depends(get_db),
-    authorization: str = Header(..., alias="Authorization")
+    authorization: str = Header(..., alias="Authorization"),
+    request: Request = None,
+    x_client_cert: str | None = Header(None, alias="X-Client-Cert"),
 ):
+    from app.database.models import DiscoveredHost
     agent_id_str = payload.get("device_id")
     if agent_id_str:
         try:
-            await verify_nodetrace_agent(agent_id_str, authorization, db)
+            await verify_nodetrace_agent(agent_id_str, authorization, db, request, x_client_cert)
             agent_id = uuid.UUID(agent_id_str)
             result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
             agent = result.scalars().first()
             if agent:
                 agent.last_seen = datetime.now(timezone.utc)
+                # Parity col main heartbeat: versione/capabilities + discovery sync.
+                if isinstance(payload, dict):
+                    if payload.get("agent_version"):
+                        agent.agent_version = str(payload.get("agent_version"))[:50]
+                    if isinstance(payload.get("capabilities"), (dict, list)):
+                        agent.capabilities = payload.get("capabilities")
+                if agent.ip_address:
+                    hr = await db.execute(
+                        select(DiscoveredHost).where(DiscoveredHost.ip_address == agent.ip_address)
+                    )
+                    host = hr.scalars().first()
+                    if host:
+                        host.nodetrace_status = "active"
+                        host.last_seen = datetime.now(timezone.utc)
                 await db.commit()
         except ValueError:
             pass
@@ -181,9 +249,11 @@ async def heartbeat(
 async def get_commands(
     device_id: str,
     db: AsyncSession = Depends(get_db),
-    authorization: str = Header(..., alias="Authorization")
+    authorization: str = Header(..., alias="Authorization"),
+    request: Request = None,
+    x_client_cert: str | None = Header(None, alias="X-Client-Cert"),
 ):
-    await verify_nodetrace_agent(device_id, authorization, db)
+    await verify_nodetrace_agent(device_id, authorization, db, request, x_client_cert)
 
     import redis.asyncio as redis
     rc = redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -194,3 +264,31 @@ async def get_commands(
         return json.loads(command)
 
     return None
+
+
+@router.get("/commands/batch")
+async def get_commands_batch(
+    device_id: str,
+    n: int = 50,
+    db: AsyncSession = Depends(get_db),
+    authorization: str = Header(..., alias="Authorization"),
+    request: Request = None,
+    x_client_cert: str | None = Header(None, alias="X-Client-Cert"),
+):
+    await verify_nodetrace_agent(device_id, authorization, db, request, x_client_cert)
+    import redis.asyncio as redis
+    rc = redis.from_url(settings.REDIS_URL, decode_responses=True)
+    queue_name = f"aegis:commands:{device_id}"
+    out = []
+    try:
+        for _ in range(max(1, min(n, 100))):
+            raw = await rc.lpop(queue_name)
+            if not raw:
+                break
+            try:
+                out.append(json.loads(raw))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out

@@ -1,0 +1,407 @@
+name: Aegis CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "dev" ]
+
+jobs:
+  lint:
+    name: Lint & Analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Lint Frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run lint
+
+      - name: Audit Frontend (npm audit, fail on high+)
+        run: |
+          cd frontend
+          npm audit --audit-level=high
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Lint Brain
+        run: |
+          cd aegis-brain
+          pip install flake8 bandit
+          python -m compileall -q app tests
+          # The repository still contains legacy style debt; syntax and undefined-name
+          # errors remain blocking while the full style report is kept visible.
+          flake8 app/ tests/test_pki.py tests/test_replay.py tests/test_event_pipeline.py tests/test_incident_response.py tests/test_fleet.py tests/test_retention_config.py tests/test_deploy_security.py --select=E9,F63,F7,F82 --max-line-length=120 --exclude=__pycache__,migrations
+          flake8 app/ tests/test_pki.py tests/test_replay.py tests/test_event_pipeline.py tests/test_incident_response.py tests/test_fleet.py tests/test_retention_config.py tests/test_deploy_security.py --max-line-length=120 --exclude=__pycache__,migrations || echo "::warning::Legacy Python style findings are reported above; critical syntax/name checks passed"
+          bandit -r app/ -x app/tests -ll
+
+  contract:
+    name: Event Contract & Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Event schema v2 compatibility (M1)
+        run: |
+          python3 aegis-ebpf/check-contract.py
+
+      - name: Secret scan (tracked files only, MUST fail on hits)
+        run: |
+          fail=0
+          if git grep -n -E -- "-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----$" -- . ':(exclude).github/workflows/ci.yml'; then
+            echo "::error::private key material in tracked files"; fail=1
+          fi
+          if [ -n "$(git ls-files | grep -Eiv '^\.github/workflows/ci\.yml$|(^|/)\.env\.example$' | grep -Ei '\.pem$|\.key$|secret\.json$|(^|/)\.env$|(^|/)\.env\.(local|production|staging|test)$' || true)" ]; then
+            echo "::error::key/secret/env files tracked:"; git ls-files | grep -Eiv '^\.github/workflows/ci\.yml$|(^|/)\.env\.example$' | grep -Ei '\.pem$|\.key$|secret\.json$|(^|/)\.env$|(^|/)\.env\.(local|production|staging|test)$'; fail=1
+          fi
+          if git grep -n -E "sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|xox[bap]-[A-Za-z0-9-]{10,}" -- . ':(exclude).github/workflows/ci.yml'; then
+            echo "::error::token pattern in tracked files"; fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "secret scan clean"
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: NodeTrace unit tests
+        run: |
+          cd NodeTrace/agents/python
+          pip install -r requirements.txt
+          python -m unittest tests.test_ebpf tests.test_update tests.test_linux_probe -v
+
+
+  windows_installers:
+    name: Windows Installer Checks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Windows installer checks (syntax + lifecycle steps, no install)
+        shell: pwsh
+        run: ./scripts/test-installers.ps1
+
+  os_compat:
+    name: OS Compat (unit surface, no DB)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      # Superficie unitaria portabile: contract stdlib + replay detection +
+      # NodeTrace stdlib. Niente DB/rete: deve passare su ogni OS supportato.
+      - name: Event contract (stdlib only)
+        run: python aegis-ebpf/check-contract.py
+      - name: Install NodeTrace deps (pinned, wheels on win+linux)
+        run: pip install -r NodeTrace/agents/python/requirements.txt
+      - name: NodeTrace unit tests
+        run: |
+          cd NodeTrace/agents/python
+          python -m unittest tests.test_ebpf tests.test_update tests.test_linux_probe
+      - name: Install Brain (for portable replay)
+        run: pip install -r aegis-brain/requirements.txt
+      - name: Detection replay on all splits
+        run: python scripts/replay_report.py --all
+
+      - name: Setup Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: maven
+      - name: Guard unit tests (OS-gated, never crash off-Windows)
+        run: |
+          cd aegis-guard
+          mvn -B test
+
+  build_and_test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        env:
+          POSTGRES_DB: aegis_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Build Frontend
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Build Frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      # Build & Test Brain
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install Brain Dependencies
+        run: |
+          cd aegis-brain
+          pip install -r requirements.txt
+      - name: Wait for integration services
+        env:
+          DATABASE_URL: "postgresql://postgres:password@127.0.0.1:5432/aegis_test"
+          REDIS_URL: "redis://127.0.0.1:6379"
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+          import asyncpg
+          import redis.asyncio as redis
+
+          async def main():
+              last = None
+              for _ in range(30):
+                  try:
+                      conn = await asyncpg.connect(os.environ["DATABASE_URL"], timeout=2)
+                      await conn.close()
+                      client = redis.from_url(os.environ["REDIS_URL"])
+                      await client.ping()
+                      await client.aclose()
+                      print("integration services ready")
+                      return
+                  except Exception as exc:
+                      last = exc
+                      await asyncio.sleep(2)
+              raise SystemExit(f"integration services not ready: {type(last).__name__}")
+
+          asyncio.run(main())
+          PY
+      - name: Test Brain (Pytest, integrazione riproducibile)
+        env:
+          POSTGRES_USER: "postgres"
+          POSTGRES_PASSWORD: "password"
+          POSTGRES_DB: "aegis_test"
+          DATABASE_URL: "postgresql+asyncpg://postgres:password@localhost:5432/aegis_test"
+          REDIS_URL: "redis://localhost:6379"
+          JWT_SECRET: "ci_test_jwt_secret_key_32_chars_minimum"
+          AGENT_ENROLL_KEY: "ci_test_enrollment_key_16"
+          REQUIRE_INTEGRATION: "1"
+        run: |
+          python scripts/run_integration_tests.py --import-mode=importlib -v
+
+      # Build Java Guard
+      - name: Setup Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: maven
+      - name: Test Aegis Guard (unit, incl. interop Ed25519)
+        run: |
+          cd aegis-guard
+          mvn -B test
+      - name: Upload Guard surefire reports on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: guard-surefire
+          path: aegis-guard/target/surefire-reports/
+          if-no-files-found: warn
+      - name: Audit Guard (Maven, fail on high)
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          cd aegis-guard
+          if [ -z "$NVD_API_KEY" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+              echo "::error::NVD_API_KEY is required for release dependency scanning"
+              exit 1
+            fi
+            # Audit F-06: skip esplicito e visibile (non silenzioso). Le dipendenze
+            # Java restano coperte dal Trivy FS scan (pom.xml, senza chiave).
+            echo "::notice::NVD_API_KEY not configured; OWASP Dependency-Check skipped on branch builds (Trivy covers pom.xml)"
+            echo "Configure the protected NVD_API_KEY secret to enable the fail-on-high dependency scan."
+            exit 0
+          fi
+          mvn -B org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7 -Dnvd.api.key="$NVD_API_KEY"
+      - name: Build Aegis Guard
+        run: |
+          cd aegis-guard
+          mvn -B clean package -DskipTests
+
+      - name: Upload Guard Artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aegis-guard-jar
+          path: aegis-guard/target/*.jar
+
+  supply_chain:
+    name: Supply Chain (audit + SBOM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Dependency audit (pip-audit, MUST fail on vulnerabilities)
+        run: |
+          cd aegis-brain
+          pip install -r requirements.txt pip-audit
+          pip-audit --desc
+
+      - name: SBOM (brain + guard)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: ./
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aegis-sbom
+          path: sbom.spdx.json
+
+      - name: Container & FS scan (Trivy, fail on HIGH/CRITICAL)
+        # Docker-run pinned (no GitHub-release download flakiness).
+        run: |
+          docker run --rm -v $PWD:/scan aquasec/trivy:0.66.0 fs \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress \
+            --scanners vuln --ignorefile /scan/.trivyignore \
+            --format sarif --output /scan/trivy.sarif /scan
+
+      - name: Build images for Trivy image scan
+        # Dummy env: compose interpolates required vars at config time, but
+        # build needs no real secrets (no container is started here).
+        env:
+          POSTGRES_PASSWORD: ci-dummy
+          REDIS_PASSWORD: ci-dummy
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          AEGIS_API_KEY: ci-dummy-api-key
+          AGENT_ENROLL_KEY: ci-dummy-enroll-key
+          JWT_SECRET: ci-dummy-jwt-secret-32-chars-min
+          MASTER_KEY_B64: Q/wCZ5reU82bQpZppUc6Qq80sybBPz4Q276NbMBF97Q=
+        run: |
+          # Niente aegis-guard qui: e' un agente Windows, non un servizio
+          # compose (il suo Dockerfile non e' referenziato; le sue dipendenze
+          # sono coperte da Trivy FS su pom.xml + NVD sui tag).
+          docker compose build aegis-brain aegis-link
+          docker compose build aegis-frontend
+          # Caddy e Ollama sono immagini esterne pinnate per digest; le scansioniamo via fs già, ma per completezza
+          docker pull caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 || true
+          docker pull ollama/ollama:0.34.2@sha256:da6e0dc5651df159e45686fd663c4dbe1624a52c44d7280eeac1551d8f865532 || true
+      - name: Trivy image scan (all images, fail on HIGH/CRITICAL)
+        run: |
+          # Enforcement stretto sulle immagini che costruiamo noi. Caddy e
+          # Ollama sono immagini UPSTREAM (non ridefinibili da noi): sono
+          # scansionate in modalita' informativa (--exit-code 0) e i risultati
+          # restano nei log; i residui non-fixabili sono documentati in
+          # .trivyignore con owner/review/expiry (verificato da
+          # tests/test_trivyignore.py).
+          for img in aegis-ecosystem-aegis-brain:latest aegis-ecosystem-aegis-link:latest aegis-ecosystem-aegis-frontend:latest; do
+            echo "Scanning $img..."
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/scan aquasec/trivy:0.66.0 image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress --ignorefile /scan/.trivyignore "$img" || exit 1
+          done
+          for img in caddy:2-alpine ollama/ollama:0.34.2; do
+            echo "Scanning (informational) $img..."
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/scan aquasec/trivy:0.66.0 image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --no-progress --ignorefile /scan/.trivyignore "$img"
+          done
+      - name: Trivy image scan (brain, sarif for upload)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/scan \
+            aquasec/trivy:0.66.0 image \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress \
+            --ignorefile /scan/.trivyignore \
+            --format sarif --output /scan/trivy-image.sarif \
+            aegis-ecosystem-aegis-brain:latest
+
+      - name: Verify digests and signatures
+        run: |
+          grep -q "sha256:" docker-compose.yml || (echo "::error::images not pinned by digest" && exit 1)
+          grep -q "sha256:" .github/workflows/ci.yml || (echo "::error::actions not pinned by digest" && exit 1)
+          test -f sbom.spdx.json || (echo "::error::SBOM missing" && exit 1)
+          if grep -r "PRIVATE KEY" --include="*.jar" aegis-guard/target/ 2>/dev/null; then echo "::error::private key in artifact" && exit 1; fi
+          echo "digests and artifact checks passed"
+
+      - name: Upload Trivy SARIF
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aegis-trivy
+          path: trivy.sarif
+      - name: Upload Trivy Image SARIF
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aegis-trivy-image
+          path: trivy-image.sarif
+
+  release:
+    name: Release Artifacts
+    needs: [build_and_test, supply_chain]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: maven
+
+      - name: Build Release
+        run: |
+          cd aegis-guard
+          mvn clean package
+          cd ..
+          mkdir -p release
+          cp aegis-guard/target/aegis-guard-*.jar release/
+          sha256sum release/* > release/SHA256SUMS.txt
+
+      - name: Download SBOM
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aegis-sbom
+          path: release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: |
+            release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

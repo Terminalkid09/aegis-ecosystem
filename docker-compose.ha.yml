@@ -1,0 +1,39 @@
+# HA overlay (audit P4): prontezza multi-replica per i servizi stateless.
+# Uso: docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#        -f docker-compose.ha.yml up -d --scale aegis-brain=2 --scale aegis-link=2
+#
+# Cosa fa:
+# - rimuove container_name dai servizi stateless (blocca --scale altrimenti);
+# - limiti di memoria/CPU anti-OOM a cascata;
+# - restart confermato.
+# Caddy risolve "aegis-brain" via DNS round-robin: nessun cambio Caddyfile.
+# PG/Redis restano single-instance qui: per produzione vera usare Postgres
+# managed (replica) + Redis Sentinel/Cluster (vedi docs/HA.md).
+services:
+  aegis-brain:
+    container_name: !reset null
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  aegis-link:
+    container_name: !reset null
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  aegis-frontend:
+    container_name: !reset null
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G

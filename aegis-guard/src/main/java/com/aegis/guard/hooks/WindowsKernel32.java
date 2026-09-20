@@ -65,6 +65,25 @@ public interface WindowsKernel32 extends StdCallLibrary {
     // PID del processo corrente. 
     int GetCurrentProcessId();
 
+    @Structure.FieldOrder({"dwLowDateTime", "dwHighDateTime"})
+    class FILETIME extends Structure {
+        public int dwLowDateTime;
+        public int dwHighDateTime;
+
+        public long toLong() {
+            return ((long) dwHighDateTime << 32) | (dwLowDateTime & 0xFFFFFFFFL);
+        }
+
+        public static class ByReference extends FILETIME implements Structure.ByReference {}
+        public static class ByValue extends FILETIME implements Structure.ByValue {}
+    }
+
+    // Start time del processo (100-ns dal 1601-01-01): con il PID risolve il
+    // PID reuse (M2 Fase 3). Fallisce soft su processi protetti.
+    boolean GetProcessTimes(Pointer hProcess, FILETIME.ByReference lpCreationTime,
+            FILETIME.ByReference lpExitTime, FILETIME.ByReference lpKernelTime,
+            FILETIME.ByReference lpUserTime);
+
     // Helper JNA per puntatori a interi
     class IntByReference extends com.sun.jna.ptr.IntByReference {}
 }

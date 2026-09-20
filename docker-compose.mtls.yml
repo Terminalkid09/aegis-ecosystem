@@ -1,0 +1,24 @@
+# Aegis mTLS overlay (pilot): listener agent dedicato :8443 con client_auth.
+# Uso: docker compose -f docker-compose.yml -f docker-compose.mtls.yml up -d
+# PRIMA: PKI bootstrap (OPERATIONS.md §2) così pki_data contiene ca.crt,
+# altrimenti Caddy non parte (trusted_ca_cert_file mancante, fail-closed).
+# Effetti: :443 invariato (browser, niente cert), :8443 solo agent con
+# certificato device obbligatorio, brain con MTLS_MODE=required (doppia
+# verifica: handshake Caddy + header X-Client-Cert con revoche).
+# Rollback: riavviare senza questo overlay (MTLS_MODE torna a off).
+
+services:
+  aegis-caddy:
+    ports:
+      - "8443:8443"
+    # Lista volumi COMPLETA (niente !reset: azzererebbe i mount): sostituisce
+    # il Caddyfile col variant mTLS e aggiunge la CA persistente in sola lettura.
+    volumes:
+      - ./Caddyfile.mtls:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - pki_data:/etc/caddy/pki:ro
+
+  aegis-brain:
+    environment:
+      MTLS_MODE: "required"
