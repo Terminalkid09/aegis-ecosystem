@@ -75,6 +75,10 @@ _TELEMETRY_LIST_FIELDS = ("processes", "users", "network_flows")
 _TELEMETRY_LIST_MAX_ITEMS = 500
 _TELEMETRY_JSON_MAX_BYTES = 65536
 _CAPABILITIES_MAX_BYTES = 8192
+# Anomalie NodeTrace strutturate (dict con evidence): l'agente nuovo manda
+# oggetti, quindi servono bound propri — la lista finisce in Alert.evidence.
+_ANOMALY_MAX_ITEMS = 50
+_ANOMALY_MAX_BYTES = 4096
 
 
 def _bound_telemetry_data(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -485,7 +489,27 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
     }
 
     behavioral_tags = data.get("behavioral_tags") or data.get("behavioralTags") or []
-    agent_anomalies = data.get("anomalies") or []
+    # Bound anti DB-bloat: la lista arriva dall'agente e finisce in
+    # Alert.evidence. Voci fuori formato o troppo grandi si scartano (con
+    # log) invece di far fallire l'intera ingestione.
+    _raw_anomalies = data.get("anomalies") or []
+    if not isinstance(_raw_anomalies, list):
+        _raw_anomalies = []
+    agent_anomalies = []
+    for _an in _raw_anomalies[:_ANOMALY_MAX_ITEMS]:
+        if isinstance(_an, str):
+            agent_anomalies.append(_an[:512])
+        elif isinstance(_an, dict):
+            try:
+                if len(json.dumps(_an, default=str).encode("utf-8")) <= _ANOMALY_MAX_BYTES:
+                    agent_anomalies.append(_an)
+                else:
+                    logger.warning("Anomalia scartata: evidence oltre %dB", _ANOMALY_MAX_BYTES)
+            except Exception:
+                logger.warning("Anomalia scartata: non serializzabile")
+    if len(_raw_anomalies) > _ANOMALY_MAX_ITEMS:
+        logger.warning("Anomalie troncate a %d (ricevute %d)",
+                       _ANOMALY_MAX_ITEMS, len(_raw_anomalies))
 
     for tag in behavioral_tags:
         mapping = BEHAVIORAL_TAG_MITRE.get(tag)

@@ -49,7 +49,24 @@ async def get_alerts(
     
     stmt = stmt.order_by(Alert.timestamp.desc()).offset(skip).limit(limit)
     result = await db.execute(stmt)
-    return result.scalars().all()
+    alerts = result.scalars().all()
+
+    # Hostname in UNA query (non N+1): il triage deve vedere su quale macchina
+    # e' scattato l'alert. La response_model scarta i campi non dichiarati,
+    # quindi si costruisce esplicitamente l'oggetto di risposta.
+    hosts: dict = {}
+    agent_ids = {a.agent_id for a in alerts if a.agent_id}
+    if agent_ids:
+        rows = await db.execute(
+            select(Agent.agent_id, Agent.hostname).where(Agent.agent_id.in_(agent_ids))
+        )
+        hosts = {str(r[0]): r[1] for r in rows}
+    return [
+        AlertResponse.model_validate(a, from_attributes=True).model_copy(
+            update={"agent_hostname": hosts.get(str(a.agent_id))}
+        )
+        for a in alerts
+    ]
 
 @router.get("/alerts/{alert_id}")
 async def get_alert_detail(

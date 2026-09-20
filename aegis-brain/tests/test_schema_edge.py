@@ -14,6 +14,47 @@ def test_incomplete_event_missing_required_agent_id_rejected():
         EventSchema.model_validate({"timestamp": "2026-01-01T00:00:00Z", "event_type": "X"})
 
 
+def test_structured_anomaly_dict_accepted():
+    """Regressione: gli agenti nuovi mandano anomalie DICT (con evidence).
+
+    Con `anomalies: List[str]` il dict veniva respinto con 422 e il report
+    intero andava perso: telemetria cieca su ogni host con l'agente
+    aggiornato. Verificato end-to-end sul brain vivo, non solo dedotto.
+    """
+    ev = EventSchema.model_validate({
+        "agent_id": "00000000-0000-0000-0000-000000000001",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "METRICS_REPORT",
+        "anomalies": [{
+            "type": "HIGH_CONNECTION_COUNT_TO_IP",
+            "ip": "104.16.4.34",
+            "connection_count": 27,
+            "processes": [{"name": "chrome.exe", "connections": 20}],
+        }],
+    })
+    assert isinstance(ev.anomalies[0], dict)
+    assert ev.anomalies[0]["ip"] == "104.16.4.34"
+    # Formato vecchio (stringa) resta valido: nessuna rottura agli agenti in campo.
+    ev_legacy = EventSchema.model_validate({
+        "agent_id": "00000000-0000-0000-0000-000000000001",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "METRICS_REPORT",
+        "anomalies": ["HIGH_CONNECTION_COUNT_TO_IP: 1.2.3.4"],
+    })
+    assert isinstance(ev_legacy.anomalies[0], str)
+
+
+def test_anomaly_list_bounded():
+    """Un agente compromesso non deve poter gonfiare il DB: max 200 voci."""
+    with pytest.raises(ValidationError):
+        EventSchema.model_validate({
+            "agent_id": "00000000-0000-0000-0000-000000000001",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "event_type": "METRICS_REPORT",
+            "anomalies": [f"TAG: {i}" for i in range(201)],
+        })
+
+
 def test_long_command_line_truncated_not_rejected():
     """Contratto invertito di proposito.
 

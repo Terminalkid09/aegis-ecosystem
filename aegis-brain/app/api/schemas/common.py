@@ -45,6 +45,9 @@ class NoteOut(BaseSchema):
 class AlertResponse(BaseSchema):
     id: int
     agent_id: UUIDStr
+    # Nome host leggibile: senza, il triage vede "1fdcfa07" (prefisso UUID)
+    # e non sa su quale macchina sia scattato l'alert.
+    agent_hostname: Optional[str] = None
     timestamp: datetime
     severity: str
     pid: Optional[int] = None
@@ -54,6 +57,11 @@ class AlertResponse(BaseSchema):
     process_path: Optional[str] = None
     event_type: str
     description: str
+    # Contesto strutturato. DEVE stare qui e non solo nel dettaglio: la tabella
+    # alert renderizza dalle righe di LISTA, quindi senza questo campo il
+    # pannello "Evidence" non comparirebbe mai (bug trovato end-to-end: la
+    # response_model List[AlertResponse] scarta i campi non dichiarati).
+    evidence: Optional[Dict[str, Any]] = None
     is_resolved: bool
     mitre_tactic_id: Optional[str] = None
     mitre_technique_id: Optional[str] = None
@@ -127,7 +135,13 @@ class EventSchema(BaseModel):
     # Agent-side behavioral detection (Phase 5)
     command_line: Optional[str] = Field(None, max_length=4096, alias="commandLine")
     behavioral_tags: Optional[List[str]] = Field(None, alias="behavioralTags")
-    anomalies: Optional[List[str]] = None
+    # Anomalie NodeTrace: gli agenti nuovi mandano dict strutturati
+    # ({"type": "HIGH_CONNECTION_COUNT_TO_IP", "ip": ..., "connection_count":
+    # ..., "processes": [...]}) per popolare Alert.evidence; gli agenti già
+    # installati mandano stringhe. Qui serve Any: con List[str] il dict veniva
+    # respinto con 422 e l'INTERO report veniva perso (telemetria cieca a ogni
+    # anomalia con l'agente aggiornato — verificato end-to-end sul brain vivo).
+    anomalies: Optional[List[Any]] = Field(None, max_length=200)
     # Moduli caricati (audit: la S011 DLL-hijacking non puo' vedersi dal solo
     # process_path; i sensori futuri popolano questa lista).
     loaded_modules: Optional[List[str]] = Field(None, max_length=256, alias="loadedModules")
