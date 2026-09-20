@@ -51,13 +51,23 @@ function Remove-AegisTasks {
 }
 
 function Register-Task($name, $command) {
-    # /sc onlogon: parte al logon dell'utente, nello stesso contesto dei permessi.
-    schtasks /create /tn $name /tr $command /sc onlogon /f | Out-Null
+    # /sc onlogon + /rl HIGHEST: il task gira ELEVATO, senza prompt UAC a ogni
+    # logon. Windows non permette a un processo avviato dall'utente di elevarsi
+    # in silenzio, quindi l'elevazione si "paga" una volta sola qui: chi registra
+    # il task deve essere admin. Registrare a livello LIMITED significherebbe
+    # lasciare Guard senza telemetria kernel ETW e senza azioni di risposta
+    # complete per sempre, con l'unico vantaggio di non chiedere privilegi.
+    $level = if (Test-Elevated) { "HIGHEST" } else { "LIMITED" }
+    schtasks /create /tn $name /tr $command /sc onlogon /rl $level /f | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "  [+] Task $name registrato" -ForegroundColor Green
+        Write-Host "  [+] Task $name registrato (privilegi: $level)" -ForegroundColor Green
     } else {
         Write-Host "  [!] Registrazione $name fallita (prova da PowerShell elevato)" -ForegroundColor Yellow
     }
+}
+
+function Test-Elevated {
+    return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(544)
 }
 
 if ($Remove) {
@@ -69,12 +79,22 @@ if ($Remove) {
 Write-Host "[*] Configurazione autostart agenti Aegis..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
 
-# --- chiavi/URL dal .env (stessa precedenza di aegis.bat) --------------------
-$enrollKey = "aegis-enroll-e17f250567d35991aadc5e60"
+# --- chiavi/URL dal .env -----------------------------------------------------
+# La chiave di enrollment arrivava da un default HARDCODED in questo file: una
+# credenziale viva nel repository, con cui chiunque lo legga poteva arruolare
+# agenti verso il brain. Ora si legge solo dal .env e l'assenza e' un errore
+# esplicito (mai un default silenzioso).
 $envFile = Join-Path $root ".env"
+$enrollKey = $null
 if (Test-Path $envFile) {
     $line = Get-Content $envFile | Where-Object { $_ -match '^AGENT_ENROLL_KEY=' } | Select-Object -First 1
     if ($line) { $enrollKey = ($line -split '=', 2)[1].Trim() }
+}
+if (-not $enrollKey) {
+    Write-Error ("[X] AGENT_ENROLL_KEY non trovata in $envFile. " +
+        "Impostala (o rigenerala dal SOC) prima di registrare l'autostart: " +
+        "senza, gli agenti partono ma non si registrano.")
+    exit 1
 }
 $base = "http://127.0.0.1:8000/api/v1"
 
@@ -136,4 +156,10 @@ if (Get-Service "AegisGuard" -ErrorAction SilentlyContinue) {
     }
 }
 
-Write-Host "[OK] Al prossimo logon gli agenti ripartono da soli. Rimozione: -Remove" -ForegroundColor Green
+if (Test-Elevated) {
+    Write-Host "[OK] Al prossimo logon gli agenti ripartono da soli, ELEVATI (nessun prompt). Rimozione: -Remove" -ForegroundColor Green
+} else {
+    Write-Host "[!] Task registrati a privilegi LIMITATI: senza elevazione Guard non ha la" -ForegroundColor Yellow
+    Write-Host "    telemetria kernel ETW ne' le azioni di risposta complete." -ForegroundColor Yellow
+    Write-Host "    Via consigliata: 'aegis.bat services' (servizi NSSM come LocalSystem)." -ForegroundColor Yellow
+}

@@ -35,6 +35,10 @@ bin/
 mvn_temp/
 jre/
 jre-new/
+# Download temporanei del JDK portatile (install.ps1): se il download si
+# interrompe restano qui, e un archivio da ~120MB non deve poter finire in un commit.
+jre.zip
+jre_temp/
 *.class
 *.jar
 *.war

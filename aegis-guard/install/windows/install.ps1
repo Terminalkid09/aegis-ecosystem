@@ -5,7 +5,12 @@ $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $nssmPath = Join-Path $scriptPath "nssm.exe"
 $installDir = "C:\Program Files\Aegis\Guard"
 $jarPath = Join-Path $installDir "aegis-guard.jar"
-$envFile = Join-Path $scriptPath "..\..\.env"
+# $scriptPath = <repo>\aegis-guard\install\windows, quindi la radice del repo e'
+# tre livelli sopra (questo script e' stato spostato in install\windows ma i
+# path erano rimasti quelli della vecchia posizione: l'installer cercava .env e
+# il JAR in aegis-guard\install\ e falliva sempre, quindi la via "servizio" non
+# e' mai stata installabile davvero).
+$envFile = Join-Path $scriptPath "..\..\..\.env"
 $pomPath = Join-Path $scriptPath "..\..\pom.xml"
 
 Write-Host "============================================" -ForegroundColor Cyan
@@ -49,13 +54,27 @@ foreach ($bundled in @("$scriptPath\jre-new\bin\java.exe", "$scriptPath\jre\bin\
 $pathJava = (Get-Command java -ErrorAction SilentlyContinue).Source
 if ($pathJava) { $javaCandidates += $pathJava }
 
+# JDK installati sul sistema. Su Windows il primo `java` del PATH e' spessissimo
+# una JRE 8: senza questa ricerca l'installer non vedeva un JDK 21+ presente in
+# Program Files e scaricava ~200MB di JDK portatile pur avendolo in casa (o si
+# fermava con "installa Java 21+" a installazione gia' iniziata).
+foreach ($pattern in @("$env:ProgramFiles\Eclipse Adoptium\*\bin\java.exe",
+                        "$env:ProgramFiles\Java\jdk*\bin\java.exe",
+                        "$env:ProgramFiles\Microsoft\jdk*\bin\java.exe",
+                        "${env:ProgramFiles(x86)}\Java\jdk*\bin\java.exe")) {
+    $javaCandidates += @(Get-ChildItem $pattern -ErrorAction SilentlyContinue |
+                         Select-Object -ExpandProperty FullName)
+}
+Write-Host "  [i] Runtime Java trovati: $($javaCandidates.Count)" -ForegroundColor DarkGray
+
 $javaExe = $null
 foreach ($candidate in $javaCandidates) {
     if ((Get-JavaMajor $candidate) -ge $requiredMajor) { $javaExe = $candidate; break }
 }
 
 if (-not $javaExe) {
-    Write-Host "  *  Nessuna Java $requiredMajor+ trovata: scarico il JDK portatile..." -ForegroundColor Yellow
+    Write-Host "  *  Nessuna Java $requiredMajor+ trovata fra runtime inclusi, PATH e JDK installati:" -ForegroundColor Yellow
+    Write-Host "     scarico il JDK portatile (una volta sola, ~200MB)..." -ForegroundColor Yellow
     $jreZip = Join-Path $scriptPath "jre.zip"
     Invoke-WebRequest -Uri "https://aka.ms/download-jdk/microsoft-jdk-21-windows-x64.zip" -OutFile $jreZip
     $jreTemp = Join-Path $scriptPath "jre_temp"
@@ -133,7 +152,7 @@ Write-Host "  [OK] Environment loaded" -ForegroundColor Green
 # === BUILD / ARTIFACT CHECK ===
 Write-Host "`n[3/6] Verifying artifact..." -ForegroundColor Cyan
 
-$jarSource = Join-Path $scriptPath "..\target\aegis-guard.jar"
+$jarSource = Join-Path $scriptPath "..\..\target\aegis-guard.jar"
 if (-not (Test-Path $jarSource)) {
     Write-Error "[X] aegis-guard.jar not found at $jarSource`nPlease ensure the project is built or copy the pre-compiled JAR to the 'target' folder."
     exit 1
@@ -143,21 +162,39 @@ Write-Host "  [OK] Artifact found: aegis-guard.jar" -ForegroundColor Green
 # === INSTALLATION DIRECTORY ===
 Write-Host "`n[4/6] Creating installation directory..." -ForegroundColor Cyan
 
-New-Item -Path $installDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+# La cartella sta in Program Files: crearla richiede admin. Prima l'errore
+# veniva ingoiato (New-Item -ErrorAction SilentlyContinue) e lo script
+# proseguiva su un path inesistente, fallendo con un Get-Acl su null e senza
+# dire PERCHE' — l'installazione sembrava rotta nel punto sbagliato.
+if (-not (Test-Path $installDir)) {
+    try {
+        New-Item -Path $installDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Error ("[X] Impossibile creare $installDir ($($_.Exception.Message)). " +
+            "Serve PowerShell elevato: installare un servizio e scrivere in " +
+            "Program Files richiede privilegi di amministratore.")
+        exit 1
+    }
+}
 
-# Secure directory permissions (Administrators only)
-$acl = Get-Acl $installDir
-$acl.SetAccessRuleProtection($true, $false)
-$adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-    "Administrators", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
-)
-$acl.SetAccessRule($adminRule)
-Set-Acl $installDir $acl
+# Secure directory permissions (Administrators only). Best-effort: su volumi
+# senza supporto ACL la copia degli artefatti deve comunque procedere.
+try {
+    $acl = Get-Acl $installDir
+    $acl.SetAccessRuleProtection($true, $false)
+    $adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        "Administrators", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
+    )
+    $acl.SetAccessRule($adminRule)
+    Set-Acl $installDir $acl
+} catch {
+    Write-Host "  [i] ACL non applicabili a $installDir ($($_.Exception.Message)): continuo" -ForegroundColor DarkGray
+}
 
 Write-Host "  [OK] Directory created at $installDir" -ForegroundColor Green
 
 # Copy JAR
-$jarSource = Join-Path $scriptPath "..\target\aegis-guard.jar"
+$jarSource = Join-Path $scriptPath "..\..\target\aegis-guard.jar"
 if (-not (Test-Path $jarSource)) {
     Write-Error "[X] JAR file not found at $jarSource"
     exit 1
@@ -178,6 +215,8 @@ Write-Host "  [OK] JAR deployed" -ForegroundColor Green
 # il collector viene rifiutato (EtwPipeSource accetta solo path assoluti, per
 # non eseguire binari dal workdir) e l'ETW restava spento anche col file
 # deployato. Ora il path e' assoluto.
+# Path della sorgente: <repo>\aegis-ebpf (tre livelli sopra questo script).
+$etwSource = Join-Path $scriptPath "..\..\..\aegis-ebpf\aegis-etw.exe"
 $etwPath = Join-Path $installDir "aegis-etw.exe"
 $etwEnabled = "false"
 if (Test-Path $etwSource) {

@@ -17,6 +17,7 @@ if /i "%~2"=="batch" set "AEGIS_BATCH=1"
 
 if /i "%~1"=="start" goto start_platform
 if /i "%~1"=="agents" goto start_agents
+if /i "%~1"=="services" goto install_services
 if /i "%~1"=="pilot" goto pilot
 if /i "%~1"=="stop" goto stop
 if /i "%~1"=="clean" goto clean_db
@@ -38,6 +39,7 @@ echo  %GREEN%[5]%RESET% View Agent Logs
 echo  %RED%[6] Exit%RESET%
 echo.
 echo  %CYAN%[B] Build Agents (PyInstaller + Maven + JRE)%RESET%
+echo  %CYAN%[S] Installa gli agenti come SERVIZI Windows (admin, autostart, senza prompt)%RESET%
 if defined AI_PROFILE (
     echo  %GREEN%  [AI] Locale ON - !AEGIS_MODEL!%RESET%
 ) else (
@@ -54,6 +56,7 @@ if "%choice%"=="4" goto clean_db
 if "%choice%"=="5" goto view_logs
 if "%choice%"=="6" exit /b 0
 if /i "%choice%"=="b" goto build
+if /i "%choice%"=="s" goto install_services
 goto menu
 
 :install
@@ -186,15 +189,7 @@ if defined NEED_BUILD (
     )
 )
 
-echo  %YELLOW%[*] Stopping any previously running host agents...%RESET%
-taskkill /f /im nodetrace-agent.exe 2>nul
-
-:: Kill MIRATO di Guard: prima era `taskkill /f /im java.exe`, che su una
-:: workstation chiude OGNI processo Java dell'utente (IDE, tool, altri agenti).
-:: Qui si chiude solo il processo che ha aegis-guard.jar nella command line,
-:: con fallback sul vecchio comportamento se PowerShell non e' disponibile.
-powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*aegis-guard.jar*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
-call :sleep 2
+call :stop_host_agents
 
 :: Identita' degli agenti: PRESERVATA di default.
 :: Prima token.json/secret.json venivano cancellati a OGNI avvio: ogni start
@@ -202,7 +197,7 @@ call :sleep 2
 :: sbagliato). L'identita' va persa solo quando lo chiedi tu:
 ::   set AEGIS_RESET_IDENTITY=1  &&  aegis.bat agents
 if /i "%AEGIS_RESET_IDENTITY%"=="1" (
-    echo  %RED%  [!] AEGIS_RESET_IDENTITY=1: nuova identita' per entrambi gli agenti%RESET%
+    echo  %RED%  [X] AEGIS_RESET_IDENTITY=1: nuova identita' per entrambi gli agenti%RESET%
     if exist "%ROOT%NodeTrace\agents\python\token.json" del /q /f "%ROOT%NodeTrace\agents\python\token.json" 2>nul
     if exist "%ROOT%aegis-guard\secret.json" del /q /f "%ROOT%aegis-guard\secret.json" 2>nul
 )
@@ -217,9 +212,16 @@ if !errorlevel! neq 0 (
 )
 echo  %GREEN%[+] Backend reachable.%RESET%
 
-:: Read enroll key once, reuse for both agents
+:: Chiave di enrollment: SOLO dal .env. Qui c'era un default hardcoded, cioe'
+:: una credenziale viva scritta nel repository: chiunque leggesse il repo
+:: poteva arruolare agenti verso il brain. Meglio fermarsi con un errore chiaro.
 for /f "tokens=1,2 delims==" %%A in ('findstr /b "AGENT_ENROLL_KEY=" "%ROOT%.env" 2^>nul') do set "ENV_KEY=%%B"
-if not defined ENV_KEY set "ENV_KEY=aegis-enroll-e17f250567d35991aadc5e60"
+if not defined ENV_KEY (
+    echo  %RED%[X] AGENT_ENROLL_KEY non trovata in .env: gli agenti non possono registrarsi.%RESET%
+    echo  %YELLOW%    Impostala nel .env oppure rigenerala dal SOC, poi riprova.%RESET%
+    call :maybe_pause
+    goto menu_or_exit
+)
 
 set "AEGIS_ENROLL_KEY=!ENV_KEY!"
 
@@ -324,25 +326,97 @@ if /i "%confirm%"=="y" (
 call :maybe_pause
 goto menu_or_exit
 
+:stop_host_agents
+:: Chiusura degli agenti host avviati a mano. Windows: nodetrace per nome,
+:: Guard con un kill MIRATO (la command line contiene aegis-guard.jar) — prima
+:: era `taskkill /f /im java.exe`, che su una workstation chiude OGNI processo
+:: Java dell'utente, IDE compresi.
+taskkill /f /im nodetrace-agent.exe 2>nul
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*aegis-guard.jar*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
+call :sleep 2
+exit /b 0
+
+:install_services
+echo.
+echo  %PURPLE%=== Agenti come servizi Windows (autostart, admin) ===%RESET%
+:: La via professionale: la registrazione si fa UNA volta con privilegi e da
+:: quel momento gli agenti girano come LocalSystem = admin SEMPRE, senza alcun
+:: prompt, e ripartono da soli al boot. Prima bisognava sapere quali due .ps1
+:: lanciare, in quale ordine, da un PowerShell elevato: 40 passaggi per una cosa
+:: che deve fare il prodotto.
+set "ELEVATE_TARGET=services"
+call :maybe_self_elevate
+if !errorlevel! equ 3 exit /b 0
+
+:: Gli installer copiano gli artefatti: se non ci sono, si compilano prima.
+if not exist "%ROOT%aegis-guard\target\aegis-guard.jar" call "%ROOT%build.bat"
+if not exist "%ROOT%NodeTrace\agents\python\dist\nodetrace-agent\nodetrace-agent.exe" call "%ROOT%build.bat"
+
+echo  %YELLOW%[*] Registro il servizio Aegis-Guard (LocalSystem)...%RESET%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%aegis-guard\install\windows\install.ps1"
+set "SVC_GUARD=!errorlevel!"
+echo  %YELLOW%[*] Registro il servizio NodeTrace...%RESET%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%NodeTrace\install\windows\install.ps1"
+set "SVC_NT=!errorlevel!"
+
+if not "!SVC_GUARD!"=="0" goto services_failed
+if not "!SVC_NT!"=="0" goto services_failed
+
+:: Solo ORA si chiudono le istanze avviate a mano: se la registrazione fosse
+:: fallita prima, l'endpoint resterebbe senza nessun agente in esecuzione.
+:: Ogni endpoint deve avere UN agente: o il servizio o il processo dev.
+call :stop_host_agents
+
+echo.
+echo  %GREEN%[+] Servizi registrati: partono al boot come LocalSystem.%RESET%
+echo  %GREEN%    Da adesso NON usare piu' 'aegis.bat agents': sarebbe una seconda istanza per endpoint.%RESET%
+echo  %GREEN%    Telemetria kernel ETW attiva senza prompt (il servizio e' gia' elevato).%RESET%
+call :maybe_pause
+goto menu_or_exit
+
+:services_failed
+:: Un esito va dichiarato: prima si stampava "servizi registrati" anche quando
+:: entrambi gli installer erano falliti, e gli agenti a mano venivano chiusi
+:: lasciando l'endpoint senza nessuna telemetria.
+echo.
+:: Attenzione: con EnableDelayedExpansion un `[!]` letterale su una riga che usa
+:: !VARIABILI! fa espandere il testo come nome di variabile (l'esito veniva
+:: stampato come `[SVC_GUARDSVC_NT).`): qui si usa [X].
+echo  %RED%[X] Installazione servizi NON riuscita: Guard=!SVC_GUARD!, NodeTrace=!SVC_NT!.%RESET%
+echo  %YELLOW%    Gli agenti avviati a mano restano attivi: l'endpoint non e' scoperto.%RESET%
+echo  %YELLOW%    Motivo tipico: serve PowerShell elevato (i servizi richiedono admin).%RESET%
+echo  %YELLOW%    Alternativa senza privilegi: powershell -ExecutionPolicy Bypass -File "%ROOT%scripts\install-agents-autostart.ps1"%RESET%
+call :maybe_pause
+goto menu_or_exit
+
 :maybe_self_elevate
 :: Ritorna 3 quando il lavoro e' stato delegato a una istanza elevata.
-set "ETW_PRESENT="
-if exist "%ROOT%aegis-ebpf\aegis-etw.exe" set "ETW_PRESENT=1"
-if not defined ETW_PRESENT if exist "%ROOT%aegis-guard\aegis-etw.exe" set "ETW_PRESENT=1"
-if not defined ETW_PRESENT exit /b 0
+if not defined ELEVATE_TARGET set "ELEVATE_TARGET=agents"
+set "ELEVATE_PRESENT="
+if /i "!ELEVATE_TARGET!"=="services" set "ELEVATE_PRESENT=1"
+if not defined ELEVATE_PRESENT if exist "%ROOT%aegis-ebpf\aegis-etw.exe" set "ELEVATE_PRESENT=1"
+if not defined ELEVATE_PRESENT if exist "%ROOT%aegis-guard\aegis-etw.exe" set "ELEVATE_PRESENT=1"
+if not defined ELEVATE_PRESENT exit /b 0
 if /i "%AEGIS_NO_ELEVATE%"=="1" exit /b 0
 if /i "%AEGIS_ELEVATED%"=="1" exit /b 0
 powershell -NoProfile -Command "if(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(544)){exit 0}else{exit 1}" >nul 2>&1
 if !errorlevel! equ 0 exit /b 0
-echo  %YELLOW%[*] Telemetria kernel ETW: richiedo i privilegi di amministratore...%RESET%
-powershell -NoProfile -Command "$p=Start-Process -FilePath '%ROOT%aegis.bat' -ArgumentList 'agents','batch' -Verb RunAs -PassThru -Wait; exit $p.ExitCode"
+echo  %YELLOW%[*] Privilegi di amministratore richiesti (%ELEVATE_TARGET%)...%RESET%
+:: Windows non consente a un processo avviato dall'utente di elevarsi in
+:: silenzio: il consenso UAC e' obbligatorio. Per questo l'elevazione si fa una
+:: volta qui, oppure definitivamente con 'aegis.bat services' (servizio).
+powershell -NoProfile -Command "$p=Start-Process -FilePath '%ROOT%aegis.bat' -ArgumentList '%ELEVATE_TARGET%','batch' -Verb RunAs -PassThru -Wait; exit $p.ExitCode"
 if !errorlevel! neq 0 (
-    echo  %RED%  [!] Elevazione non concessa: gli agenti partono SENZA telemetria kernel.%RESET%
-    echo  %YELLOW%      Per averla: tasto destro su aegis.bat - Esegui come amministratore,%RESET%
-    echo  %YELLOW%      oppure installa Guard come servizio (parte come LocalSystem, senza UAC).%RESET%
+    echo  %RED%  [X] Elevazione non concessa.%RESET%
+    if /i "!ELEVATE_TARGET!"=="services" (
+        echo  %YELLOW%      I servizi NON sono stati registrati: senza privilegi e' impossibile.%RESET%
+    ) else (
+        echo  %YELLOW%      Gli agenti partono lo stesso, senza telemetria kernel ETW.%RESET%
+        echo  %YELLOW%      Per averla in modo permanente: aegis.bat services, un solo prompt.%RESET%
+    )
     exit /b 0
 )
-echo  %GREEN%  [+] Agenti avviati nella finestra elevata.%RESET%
+echo  %GREEN%  [+] L'istanza elevata ha completato il lavoro.%RESET%
 exit /b 3
 
 :deploy_etw
