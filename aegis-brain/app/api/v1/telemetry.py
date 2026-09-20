@@ -245,8 +245,18 @@ async def resolve_alert(
             pass
         muted_seconds = 0
 
+    was_resolved = alert.is_resolved
     alert.is_resolved = body.resolved
     await db.commit()
+    # Notifica di chiusura/riapertura: soltanto sulla TRANSIZIONE (risolvere due
+    # volte non rimanda il messaggio) e con la stessa soglia di severita' delle
+    # notifiche di apertura. Fail-soft: la triage non dipende da Telegram.
+    if was_resolved != body.resolved:
+        try:
+            from app.services.telegram_notifier import notify_alert_resolved
+            await notify_alert_resolved(db, alert, reopened=not body.resolved)
+        except Exception:
+            pass
     await log_audit(
         db, action="resolve_alert", resource="alert", resource_id=str(alert.id),
         details={

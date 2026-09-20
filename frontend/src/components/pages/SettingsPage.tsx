@@ -426,6 +426,16 @@ function TelegramSection() {
               Bot token: {cfg.bot_token_configured ? 'configured' : 'NOT configured'}
             </span>
           </div>
+          {/* Comandi del bot: il telefono serve a sapere "sta girando?"
+              senza aprire la dashboard. Documentati qui perche' l'unico modo
+              di scoprirli e' /help dal telefono: se non lo sai, non esiste. */}
+          <p className="text-[11px] text-[hsl(var(--muted-foreground))] leading-relaxed">
+            Remote commands (answered only to the chat ID above):{' '}
+            <code className="font-mono text-cyan-400">/status</code> agents, devices and last contact ·{' '}
+            <code className="font-mono text-cyan-400">/alerts</code> open alerts above your threshold ·{' '}
+            <code className="font-mono text-cyan-400">/help</code> this list.
+            Resolution notices use the same threshold as the alerts.
+          </p>
           {chats.length > 0 && (
             <div className="space-y-1 border border-[hsl(var(--border))] rounded p-3 bg-[hsl(var(--background))]">
               <p className="text-[10px] font-bold text-[hsl(var(--muted-foreground))] uppercase tracking-widest">Found chats — click to use</p>

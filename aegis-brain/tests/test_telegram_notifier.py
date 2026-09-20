@@ -37,12 +37,18 @@ def _alert(sev="HIGH", etype="PROCESS_CREATED", name="evil.exe", agent=None):
 @pytest.fixture(autouse=True)
 def _reset_notifier_state():
     telegram_notifier.invalidate_cache()
+    # Le chat scoperte sono stato di PROCESSO (le tiene il poll dei comandi,
+    # che le consuma da getUpdates): senza azzerarle ogni test si porta dietro
+    # le chat dei precedenti e i test di `detect` — che verificano cosa viene
+    # restituito ADESSO — falliscono su residui, non su un bug.
+    telegram_notifier._known_chats.clear()
     # Surface swallowed errors: il notifier e' fail-soft per contratto, ma in
     # test un'eccezione silenziosa e' un bug invisibile (gia' successo: su CI
     # i test positivi fallivano con sent==[] e nessun traceback nei log).
     logging.getLogger("aegis.telegram").propagate = True
     yield
     telegram_notifier.invalidate_cache()
+    telegram_notifier._known_chats.clear()
     logging.getLogger("aegis.telegram").propagate = False
 
 
