@@ -289,6 +289,14 @@ jobs:
           path: ./
           format: spdx-json
           output-file: sbom.spdx.json
+          # Su un tag l'azione prova ad allegare la SBOM alla release: senza
+          # contents:write il GITHUB_TOKEN (read-only di default) risponde
+          # "Resource not accessible by integration" e il job muore DOPO aver
+          # prodotto la SBOM. L'attachment lo fa gia' il job `release`, che
+          # scarica questo artefatto e lo carica con la release vera — quindi
+          # qui l'upload diretto e' un duplicato permesso-sensibile: spento.
+          upload-release-assets: false
+          upload-artifact: false
 
       - name: Upload SBOM
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -373,6 +381,11 @@ jobs:
     needs: [build_and_test, supply_chain]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    # Il minimo indispensabile per creare la release e caricare i file: i
+    # GITHUB_TOKEN sono read-only a meno che il job non dichiari cosa gli serve
+    # (least privilege, non "write-all" a livello di workflow).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
