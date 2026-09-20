@@ -88,7 +88,7 @@ function ApiKeysSection() {
               {p.active && <span className={cn('ml-2 px-1.5 py-0.5 rounded text-[9px] normal-case',
                 p.source === 'env' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                 : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20')}>
-                {p.source === 'env' ? `da env (${p.masked})` : `da dashboard (${p.masked})`}
+                {p.source === 'env' ? `from env (${p.masked})` : `from dashboard (${p.masked})`}
               </span>}
               {!p.active && <span className="ml-2 text-[9px] text-[hsl(var(--muted-foreground))] normal-case">not set</span>}
             </label>
@@ -307,6 +307,7 @@ function TelegramSection() {
   const [draft, setDraft] = useState<any>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [chats, setChats] = useState<any[]>([])
 
   const load = async () => {
     try {
@@ -344,6 +345,19 @@ function TelegramSection() {
     } finally { setBusy(false) }
   }
 
+  // Scopre i chat_id che hanno scritto al bot: niente indovinelli — il chat_id
+  // personale NON e' il @username del bot e il bot lo vede solo se gli scrivi.
+  const detectChats = async () => {
+    setBusy(true); setMsg('')
+    try {
+      const res = await apiClient.post('/telegram/detect')
+      setChats(res.data?.chats || [])
+      setMsg(res.data?.hint || (res.data?.chats?.length ? 'Click a chat below to use it.' : ''))
+    } catch (e: any) {
+      setMsg(e?.response?.data?.detail || 'Detect failed.')
+    } finally { setBusy(false) }
+  }
+
   if (!cfg) {
     return (
       <div className="card p-6 bg-[hsl(var(--secondary)/0.3)]">
@@ -363,11 +377,11 @@ function TelegramSection() {
         <h3 className="text-lg font-bold text-white">Telegram Notifications</h3>
       </div>
       <p className="text-xs text-[hsl(var(--muted-foreground))]">
-        HIGH/CRITICAL alerts and a periodic heartbeat delivered to your Telegram,
-        even when the dashboard is closed. Put the bot token in
-        <span className="text-cyan-400"> Integrations &amp; API Keys</span> (from @BotFather),
-        then the chat id here (send any message to your bot and read it via the
-        getUpdates API, or use @userinfobot).
+        Alerts at or above your chosen minimum severity, plus a periodic heartbeat,
+        delivered to your Telegram even when the dashboard is closed. Put the bot
+        token in <span className="text-cyan-400"> Integrations &amp; API Keys</span>
+        (from @BotFather, full format <span className="font-mono">123456789:ABC...</span>),
+        then detect your chat id here: send your bot any message and press Detect.
       </p>
       {msg && <p className="text-xs text-cyan-400">{msg}</p>}
       {draft && (
@@ -390,7 +404,10 @@ function TelegramSection() {
               <select className="input bg-[hsl(var(--background))] w-full text-sm"
                 value={draft.min_severity}
                 onChange={e => setDraft({ ...draft, min_severity: e.target.value })}>
-                <option value="HIGH">HIGH (default)</option>
+                <option value="INFO">INFO — everything</option>
+                <option value="LOW">LOW and above</option>
+                <option value="MEDIUM">MEDIUM and above</option>
+                <option value="HIGH">HIGH and above (default)</option>
                 <option value="CRITICAL">CRITICAL only</option>
               </select>
             </div>
@@ -404,10 +421,23 @@ function TelegramSection() {
           <div className="flex items-center gap-3 pt-1">
             <button onClick={save} disabled={busy} className="btn btn-primary btn-sm">Save</button>
             <button onClick={sendTest} disabled={busy} className="btn btn-ghost btn-sm border border-[hsl(var(--border))]">Send test message</button>
+            <button onClick={detectChats} disabled={busy} className="btn btn-ghost btn-sm border border-[hsl(var(--border))]">Detect chat ID</button>
             <span className="text-[10px] text-[hsl(var(--muted-foreground))]">
               Bot token: {cfg.bot_token_configured ? 'configured' : 'NOT configured'}
             </span>
           </div>
+          {chats.length > 0 && (
+            <div className="space-y-1 border border-[hsl(var(--border))] rounded p-3 bg-[hsl(var(--background))]">
+              <p className="text-[10px] font-bold text-[hsl(var(--muted-foreground))] uppercase tracking-widest">Found chats — click to use</p>
+              {chats.map(c => (
+                <button key={c.id}
+                  onClick={() => setDraft((d: any) => ({ ...d, chat_id: String(c.id) }))}
+                  className="block w-full text-left text-xs font-mono text-cyan-400 hover:text-cyan-300 py-0.5">
+                  {c.id} — {c.title || c.username || c.type}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

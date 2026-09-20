@@ -73,8 +73,11 @@ PROVIDERS: Dict[str, ProviderSpec] = {
             key="telegram_bot_token", label="Telegram Bot Token",
             env_var="TELEGRAM_BOT_TOKEN",
             help_text=("Token of the Telegram bot for alert notifications (from @BotFather). "
-                       "Pair it with a chat_id in Platform Settings; HIGH/CRITICAL alerts and "
-                       "the heartbeat are delivered there even when the dashboard is closed."),
+                       "Paste it WHOLE: the full format is '123456789:ABCdef...' — the part "
+                       "after the colon matters, it is not optional. Then pair a chat_id in "
+                       "Telegram Notifications (use the Detect button there); alerts at or "
+                       "above your chosen minimum severity and the heartbeat are delivered "
+                       "even when the dashboard is closed."),
             docs_url="https://core.telegram.org/bots/tutorial#obtain-your-bot-token",
         ),
     )

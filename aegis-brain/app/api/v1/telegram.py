@@ -14,6 +14,7 @@ from app.core.rate_limit import limiter
 from app.database.connection import get_db
 from app.database.models import User
 from app.services import app_settings, integration_settings, telegram_notifier
+from app.services.telegram_notifier import VALID_MIN_SEVERITIES
 
 router = APIRouter(tags=["Telegram"])
 
@@ -71,8 +72,11 @@ async def set_telegram_settings(
         changed["enabled"] = val == "true"
 
     if "chat_id" in payload:
-        chat_id = str(payload["chat_id"]).strip().lstrip("@")
-        # chat_id valido: numerico (anche negativo per gruppi) o @nomepubblico
+        # NIENTE lstrip("@"): prima toglieva il @ e poi validava "startswith(@)",
+        # condizione mai vera — qualsiasi @publicname veniva sempre rifiutato
+        # con l'errore che l'utente vedeva. Numerico (anche negativo per i
+        # gruppi) oppure @nomepubblico: entrambi accettati ora.
+        chat_id = str(payload["chat_id"]).strip()
         if chat_id and not (chat_id.lstrip("-").isdigit() or
                             (chat_id.startswith("@") and 5 <= len(chat_id) <= 64)):
             raise HTTPException(
@@ -83,10 +87,10 @@ async def set_telegram_settings(
 
     if "min_severity" in payload:
         sev = str(payload["min_severity"]).strip().upper()
-        if sev not in ("HIGH", "CRITICAL"):
+        if sev not in VALID_MIN_SEVERITIES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="min_severity must be HIGH or CRITICAL")
+                detail="min_severity must be one of: " + ", ".join(VALID_MIN_SEVERITIES))
         await app_settings.set_value(db, "telegram.min_severity", sev, user.id)
         changed["min_severity"] = sev
 
@@ -124,3 +128,26 @@ async def send_test(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
                             detail=result.get("error", "test failed"))
     return {"status": "sent", "detail": "Check your Telegram chat."}
+
+
+@router.post("/detect")
+@limiter.limit("5/minute")
+async def detect_chats(
+        request: Request,
+        db: AsyncSession = Depends(get_db),
+        user: User = Depends(get_current_user),
+):
+    """Chi ha scritto al bot: lista chat_id utilizzabili, senza indovinare.
+
+    Il chat_id personale non e' il @username del bot: il bot lo scopre solo
+    quando l'utente gli scrive. Questo endpoint legge getUpdates e restituisce
+    le chat trovate; la UI le propone cliccabili come chat_id.
+    """
+    if not has_perm(user.role, "manage"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Insufficient permissions")
+    result = await telegram_notifier.detect_chats(db)
+    if not result.get("ok"):
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail=result.get("error", "detect failed"))
+    return result

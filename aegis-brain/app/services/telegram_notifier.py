@@ -28,14 +28,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.database.models import Agent
 from app.services import integration_settings, app_settings
 
@@ -45,6 +44,16 @@ logger = logging.getLogger("aegis.telegram")
 # trasformarsi in raffica di messaggi (Telegram limitera' comunque a ~1 msg/s).
 _COOLDOWN_SECONDS = 600
 _last_sent: Dict[str, float] = {}
+
+# Scala di severita' degli alert: la soglia minima configurabile (`telegram.
+# min_severity`) filtra "sotto questo livello non chiamare". Prima la porta
+# era cablata a HIGH/CRITICAL e nessuna impostazione poteva aprirla: ora la
+# scelta e' dell'operatore, il default resta HIGH (zero rumore nuovo).
+SEVERITY_RANK: Dict[str, int] = {
+    "INFO": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4,
+}
+DEFAULT_MIN_SEVERITY = "HIGH"
+VALID_MIN_SEVERITIES = tuple(SEVERITY_RANK)
 
 _enabled: Optional[bool] = None
 _cache_loaded = False
@@ -67,7 +76,8 @@ async def _ensure_cache(db: AsyncSession) -> None:
 
 
 def _min_severity() -> str:
-    return (app_settings.get_cached("telegram.min_severity") or "HIGH").upper()
+    return (app_settings.get_cached("telegram.min_severity")
+            or DEFAULT_MIN_SEVERITY).upper()
 
 
 def _is_enabled() -> bool:
@@ -111,10 +121,10 @@ async def notify_alert(db: AsyncSession, alert: Any) -> None:
         if not _is_enabled():
             return
         sev = (getattr(alert, "severity", "") or "").upper()
-        if sev not in ("HIGH", "CRITICAL"):
-            return
-        min_sev = _min_severity()
-        if min_sev == "CRITICAL" and sev != "CRITICAL":
+        rank = SEVERITY_RANK.get(sev)
+        if rank is None:
+            return  # severita' ignota: non inventiamo, resta in dashboard
+        if rank < SEVERITY_RANK.get(_min_severity(), SEVERITY_RANK[DEFAULT_MIN_SEVERITY]):
             return
 
         token = await integration_settings.get_key(db, "telegram_bot_token")
@@ -186,8 +196,13 @@ async def send_test_message(db: AsyncSession) -> Dict[str, Any]:
     """Bottone 'Send test' dalla UI: verifica credenziali senza aspettare un alert."""
     token = await integration_settings.get_key(db, "telegram_bot_token")
     chat_id = (app_settings.get_cached("telegram.chat_id") or "").strip()
-    if not token or not chat_id:
-        return {"ok": False, "error": "bot token or chat_id missing"}
+    # Errore PRECISO, non ambiguo: prima diceva "token or chat_id missing" e
+    # l'operatore non sapeva QUALE dei due rimediare (e provava a risalvare
+    # il token che invece era corretto).
+    if not token:
+        return {"ok": False, "error": "bot token missing — save it in Integrations & API Keys (full format: 123456789:ABC...)"}
+    if not chat_id:
+        return {"ok": False, "error": "chat_id missing — use 'Detect chat ID' below after sending your bot a message"}
     try:
         await _ensure_cache(db)
         async with httpx.AsyncClient(timeout=10) as client:
@@ -200,6 +215,55 @@ async def send_test_message(db: AsyncSession) -> Dict[str, Any]:
         return {"ok": False, "error": f"telegram answered {resp.status_code}: {resp.text[:200]}"}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)[:200]}
+
+
+async def _get_updates(token: str) -> httpx.Response:
+    """getUpdates del Bot API (isolato per i test, come _send)."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        return await client.get(f"https://api.telegram.org/bot{token}/getUpdates")
+
+
+async def detect_chats(db: AsyncSession) -> Dict[str, Any]:
+    """Scopre i chat_id che hanno scritto al bot (bottone 'Detect chat ID').
+
+    Perche' serve: il chat_id personale NON e' il @username del bot e non
+    c'e' modo di indovinarlo — il bot lo scopre solo quando l'utente gli
+    scrive (getUpdates). Senza questo bottone l'operatore doveva chiamare
+    l'API a mano o usare @userinfobot.
+    """
+    token = await integration_settings.get_key(db, "telegram_bot_token")
+    if not token:
+        return {"ok": False,
+                "error": "bot token missing — save it in Integrations & API Keys"}
+    try:
+        resp = await _get_updates(token)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)[:200]}
+    if resp.status_code != 200:
+        return {"ok": False,
+                "error": f"telegram answered {resp.status_code}: {resp.text[:200]}"}
+
+    chats: Dict[int, Dict[str, Any]] = {}
+    try:
+        for update in resp.json().get("result", []):
+            msg = update.get("message") or update.get("channel_post") or {}
+            chat = msg.get("chat") or {}
+            cid = chat.get("id")
+            if cid is not None:
+                chats[cid] = {
+                    "id": cid,
+                    "type": chat.get("type", ""),
+                    "title": chat.get("title") or chat.get("first_name") or "",
+                    "username": chat.get("username") or "",
+                }
+    except Exception as exc:  # noqa: BLE001 — payload inatteso: mai 500
+        return {"ok": False, "error": f"unexpected telegram payload: {exc}"}
+
+    out = {"ok": True, "chats": sorted(chats.values(), key=lambda c: str(c["id"]))}
+    if not out["chats"]:
+        out["hint"] = ("No chats found. Open Telegram, send your bot ANY message "
+                       "(e.g. /start), then press Detect again.")
+    return out
 
 
 # ---------------------------------------------------------------------------

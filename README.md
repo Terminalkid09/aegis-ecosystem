@@ -105,7 +105,7 @@
 
 | Channel | Description |
 |---------|-------------|
-| **Telegram** | HIGH/CRITICAL alerts pushed to a bot chat the moment they are created, plus a periodic "Aegis is alive" heartbeat — the dashboard does not need to be open. Outbound HTTPS only: a fully local stack needs no open ports, no port forwarding, no cloud host. Setup: `@BotFather` → token in **Settings → Integrations & API Keys** → chat id in **Settings → Telegram Notifications** → **Send test message** verifies for real. Delivery is best-effort and fail-soft: detection and storage never depend on it |
+| **Telegram** | Alerts at or above your chosen minimum severity (INFO → CRITICAL, default HIGH) pushed to a bot chat the moment they are created, plus a periodic "Aegis is alive" heartbeat — the dashboard does not need to be open. Outbound HTTPS only: a fully local stack needs no open ports, no port forwarding, no cloud host. Setup: `@BotFather` → paste the whole token (`123456789:ABC...`) in **Settings → Integrations & API Keys** → **Detect chat ID** in **Settings → Telegram Notifications** lists the chats that messaged your bot → **Send test message** verifies for real. Delivery is best-effort and fail-soft: detection and storage never depend on it |
 | **Browser** | *Desktop Notifications* and *Audio Alarms* toggles are functional — native OS notifications (Notification API) and audio alerts (WebAudio), driven by the realtime stream |
 | **Realtime stream** | `/api/v1/ws/alerts` pushes every newly created alert to connected dashboards (HttpOnly-cookie auth, no tokens in URLs); alert lists and counters update instantly |
 
@@ -404,7 +404,7 @@ Full reference — all endpoints are under `/api/v1` unless noted.
 | `GET /audit/logs` | Bearer JWT | Audit log entries |
 | `POST /enroll/enroll` · `POST /register` · `POST /update` | enrollment key / agent token | Agent enrollment; NodeTrace compatibility registration; telemetry upload |
 | `POST /vault/notes` · `GET` · `GET /{id}` · `DELETE /{id}` | Bearer JWT | Encrypted notes CRUD (AES-256-GCM) |
-| `GET /telegram/settings` · `PUT` · `POST /telegram/test` | Bearer JWT (`manage` for writes) | Telegram notification config and live test message |
+| `GET /telegram/settings` · `PUT` · `POST /telegram/test` · `POST /telegram/detect` | Bearer JWT (`manage` for writes) | Telegram notification config, live test message, and chat-id discovery via getUpdates |
 
 ---
 
