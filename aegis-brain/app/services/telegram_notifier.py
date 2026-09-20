@@ -610,7 +610,8 @@ async def _handle_command(db: AsyncSession, text: str, chat_id: str) -> Optional
 
 async def _command_loop() -> None:
     """Long-poll dei comandi. Mai crash: un errore Telegram non tocca l'ingest."""
-    global _known_chats
+    # Nessun `global _known_chats` qui: la dict viene mutata da `_remember_chat`,
+    # e una dichiarazione global senza assegnamento e' solo rumore (flake8 F824).
     offset = 0
     while True:
         db = None

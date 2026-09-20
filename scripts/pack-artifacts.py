@@ -119,7 +119,6 @@ def pack_nodetrace(out_dir, version):
     if not os.path.isfile(os.path.join(NT_DIST, NT_EXE_NAME)):
         raise SystemExit(f"[X] {NT_EXE_NAME} non trovato in {NT_DIST}")
 
-    files = 0
     zpath = os.path.join(out_dir, f"nodetrace-{version}.zip")
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as zf:
         files = _add_tree(zf, NT_DIST, ".")
