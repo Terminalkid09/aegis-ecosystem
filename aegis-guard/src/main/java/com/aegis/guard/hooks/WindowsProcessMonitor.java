@@ -46,11 +46,27 @@ public class WindowsProcessMonitor implements ProcessMonitor {
     private volatile String coverageProvenance = "toolhelp";
     private volatile String coverageQuality = "full";
 
+    // Stream kernel ETW (consumer user-mode, nessun driver). Null finche' lo
+    // start non riesce. L'ETW NON sostituisce il polling: il polling resta la
+    // rete di sicurezza (persistenze, servizi, Defender, netstat) e l'ETW
+    // aggiunge gli eventi kernel con latenza di millisecondi invece che del
+    // ciclo di scan.
+    private volatile EtwPipeSource.EtwStream etwStream;
+    // Dedup ETW/polling: un processo visto dallo stream non deve essere
+    // rimandato dal ciclo Toolhelp che lo vede qualche istante dopo. La
+    // finestra copre il ritardo del polling (interval + jitter),
+    // ampiamente sotto i 15s anche con scan lenti su host carichi.
+    static final long ETW_DEDUP_MS = 15000;
+    private final Map<Long, Long> etwSeen = new java.util.concurrent.ConcurrentHashMap<>();
+
     private final String hostname;
     private final String ipAddress;
 
-    // Cache netstat: mappa PID → JSON array di connessioni
-    private Map<Long, String> netstatCache = new HashMap<>();
+    // Cache netstat: mappa PID → JSON array di connessioni.
+    // volatile: la mappa viene pubblicata dal thread di polling e letta anche
+    // dal thread dello stream ETW (la mappa non e' mai mutata dopo la
+    // pubblicazione: se ne crea una nuova a ogni refresh).
+    private volatile Map<Long, String> netstatCache = new HashMap<>();
     private long lastNetstatRefreshMs = -1;
 
     public WindowsProcessMonitor(AegisClient client, HashCalculator hasher, String agentId) {
@@ -91,20 +107,47 @@ public class WindowsProcessMonitor implements ProcessMonitor {
         outbox = new com.aegis.guard.network.EventOutbox(client);
         outbox.start();
 
-        // Copertura reale: probe ETW (mai crash) + snapshot persistenze (read-only).
-        // Audit: probe-ok NON significa streaming (nessuno startStream esiste):
-        // la provenance resta "toolhelp" onesta, ETW e' solo capability nota.
+        // Copertura reale: stream ETW (mai crash) + snapshot persistenze (read-only).
+        // Audit: prima questa era solo una PROBE — il collector veniva
+        // approvato e poi mai usato (nessuno chiamava startStream), quindi la
+        // provenance restava "toolhelp" e la telemetria kernel non arrivava
+        // mai al brain. Ora lo stream viene avviato sul serio e alimenta la
+        // stessa pipeline di eventi del polling.
         try {
             EtwPipeSource etw = new EtwPipeSource(agentId, Config.AGENT_VERSION);
-            if (etw.probe()) {
-                coverageProvenance = "toolhelp";
-                coverageQuality = "full";
-                log.info("ETW disponibile (collector presente, ingest via polling Toolhelp)");
-            } else {
+            if (!etw.probe()) {
                 coverageProvenance = "toolhelp";
                 coverageQuality = "degraded:etw-" + etw.degradedReason();
                 log.info("ETW non disponibile ({}): polling Toolhelp32 come fallback dichiarato",
                         etw.degradedReason());
+            } else {
+                EtwPipeSource.EtwStream stream = etw.startStream(this::ingestEtwEvent);
+                // Attesa breve: un collector senza privilegi amministrativi
+                // stampa il motivo ed esce in pochi ms. Senza questo check lo
+                // stream risulterebbe "vivo" per un istante e la dashboard
+                // direbbe ETW attivo mentre non arriva nessun evento.
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+                if (stream.isRunning()) {
+                    etwStream = stream;
+                    coverageProvenance = "etw";
+                    coverageQuality = "etw+toolhelp";
+                    log.info("ETW kernel stream ATTIVO (Kernel-Process/Kernel-Network, "
+                            + "consumer user-mode, nessun driver): eventi con provenance=etw");
+                } else {
+                    String why = etw.lastDiagnostic();
+                    coverageProvenance = "toolhelp";
+                    coverageQuality = "degraded:etw-stream-"
+                            + (why.isEmpty() ? "ended" : why.replace(' ', '_'));
+                    log.warn("ETW: il collector e' terminato subito ({}). La telemetria "
+                            + "kernel richiede privilegi amministrativi: avvia Guard elevato "
+                            + "o installalo come servizio. Polling Toolhelp32 come fallback.",
+                            why.isEmpty() ? "nessuna diagnostica" : why);
+                    stream.close();
+                }
             }
         } catch (Exception e) {
             coverageQuality = "degraded:etw-probe-failed";
@@ -159,11 +202,18 @@ public class WindowsProcessMonitor implements ProcessMonitor {
 
                 List<SystemEvent> current = scanProcesses();
                 Set<String> currentKeys = new HashSet<>();
+                pruneEtwSeen();
                 for (SystemEvent event : current) {
                     Long startNs = cachedStartNs(event.getPid());
                     String key = WindowsSensorKit.pidReuseKey(event.getPid(), startNs);
                     currentKeys.add(key);
                     if (!knownKeys.contains(key)) {
+                        // Gia' riportato dallo stream ETW con latenza di ms:
+                        // il polling non duplica (e non lo riarricchisce).
+                        if (recentlyReportedByEtw(event.getPid())) {
+                            knownKeys.add(key);
+                            continue;
+                        }
                         // Arricchimento costoso SOLO sui nuovi: path + hash
                         // (in scanProcesses() per non rompere il contratto)
                         enrichNewEvent(event);
@@ -204,7 +254,66 @@ public class WindowsProcessMonitor implements ProcessMonitor {
     @Override
     public void stopMonitoring() {
         running = false;
+        EtwPipeSource.EtwStream s = etwStream;
+        if (s != null) {
+            s.close();
+            etwStream = null;
+        }
         if (outbox != null) outbox.stop();
+    }
+
+    @Override
+    public boolean etwStreamActive() {
+        EtwPipeSource.EtwStream s = etwStream;
+        return s != null && s.isRunning();
+    }
+
+    /**
+     * Evento proveniente dal collector ETW: stessa pipeline del polling
+     * (path/hash/firma/command-line + euristica) ma con provenance {@code etw}
+     * e senza il ritardo del ciclo di scan. Chiamato dal thread dello stream.
+     */
+    private void ingestEtwEvent(SystemEvent event) {
+        if (event == null || !running) return;
+        try {
+            long pid = event.getPid();
+            event.setProvenance("etw");
+            if (event.getQuality() == null) event.setQuality("etw");
+            event.setHostname(hostname);
+            event.setIpAddress(ipAddress);
+
+            if ("PROCESS_CREATED".equals(event.getEventType()) && pid > 0) {
+                etwSeen.put(pid, System.currentTimeMillis());
+                enrichNewEvent(event);
+                Long startNs = cachedStartNs(pid);
+                if (startNs != null && startNs > 0) {
+                    event.setProcStartNs(startNs);
+                } else {
+                    event.setQuality(event.getQuality() + ";pid-reuse-unknown");
+                }
+                String conns = netstatCache.getOrDefault(pid, "[]");
+                event.setNetworkConnections(conns);
+                log.info("New process detected (ETW): {}", event);
+            }
+            // PROCESS_EXITED / CONNECTION_ESTABLISHED: nessun arricchimento
+            // processuale, ma restano eventi kernel validi da inoltrare.
+            outbox.add(event);
+        } catch (Exception e) {
+            log.debug("Ingest evento ETW fallito: {}", e.getMessage());
+        }
+    }
+
+    /** True se lo stream ETW ha gia' riportato questo PID da poco. */
+    boolean recentlyReportedByEtw(long pid) {
+        Long t = etwSeen.get(pid);
+        return t != null && System.currentTimeMillis() - t < ETW_DEDUP_MS;
+    }
+
+    /** Rimuove dalla finestra di dedup i PID piu' vecchi (bound sulla memoria). */
+    private void pruneEtwSeen() {
+        if (etwSeen.isEmpty()) return;
+        long cutoff = System.currentTimeMillis() - ETW_DEDUP_MS;
+        etwSeen.entrySet().removeIf(e -> e.getValue() < cutoff);
     }
 
     @Override

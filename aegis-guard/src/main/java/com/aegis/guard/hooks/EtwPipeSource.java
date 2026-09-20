@@ -21,11 +21,17 @@ import org.slf4j.LoggerFactory;
  * Guard via {@link ExternalEventIngester}.
  *
  * <p>Feature flag: {@code AEGIS_ETW_ENABLED=true} + binario in
- * {@code AEGIS_ETW_PATH} (default {@code aegis-etw.exe} nel workdir).
+ * {@code AEGIS_ETW_PATH} (path ASSOLUTO: un collector risolto dal workdir
+ * verrebbe eseguito da una directory scrivibile, quindi si rifiuta).
  * Binario assente, flag spento, non-Windows o errore qualunque → sorgente
  * DEGRADATA (nessun crash del servizio, il polling Toolhelp32 resta):
  * {@link #isAvailable()} resta falso e il monitor marca
- * {@code quality=degraded:etw-unavailable}.
+ * {@code quality=degraded:etw-...}.
+ *
+ * <p>Nota operativa: il consumer ETW apre una sessione di trace e richiede
+ * privilegi amministrativi. Senza, il collector stampa il motivo ed esce
+ * subito; {@link #lastDiagnostic()} lo riporta (es. {@code StartTrace: 5
+ * (serve admin)}) cosi'il degrado e' DICHIARATO invece di sembrare un guasto.
  *
  * <p>Fallback senza admin: se il binario non può aprire la sessione kernel
  * esce subito e qui si legge solo EOF → degradata, niente loop infiniti
@@ -41,20 +47,34 @@ public final class EtwPipeSource {
     private final String agentVersion;
     private final boolean enabled;
     private final Path binary;
+    private final boolean allowUnsigned;
     private volatile boolean available = false;
     private volatile String degradedReason = "disabled";
+    // Il probe viene eseguito piu' volte (monitor + startStream): l'avviso
+    // sull'opt-in non firmato si stampa una volta per processo.
+    private static final java.util.concurrent.atomic.AtomicBoolean UNSIGNED_WARNED =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+    /** Prima riga non-JSON emessa dal collector (= motivo del fallimento). */
+    private volatile String lastDiagnostic = "";
 
     public EtwPipeSource(String agentId, String agentVersion) {
         this(agentId, agentVersion,
                 Boolean.parseBoolean(System.getenv().getOrDefault("AEGIS_ETW_ENABLED", "false")),
-                Paths.get(System.getenv().getOrDefault("AEGIS_ETW_PATH", "aegis-etw.exe")));
+                Paths.get(System.getenv().getOrDefault("AEGIS_ETW_PATH", "aegis-etw.exe")),
+                Boolean.parseBoolean(System.getenv().getOrDefault("AEGIS_ETW_ALLOW_UNSIGNED", "false")));
     }
 
     EtwPipeSource(String agentId, String agentVersion, boolean enabled, Path binary) {
+        this(agentId, agentVersion, enabled, binary, false);
+    }
+
+    EtwPipeSource(String agentId, String agentVersion, boolean enabled, Path binary,
+                  boolean allowUnsigned) {
         this.agentId = agentId;
         this.agentVersion = agentVersion;
         this.enabled = enabled;
         this.binary = binary;
+        this.allowUnsigned = allowUnsigned;
     }
 
     public boolean isAvailable() {
@@ -63,6 +83,16 @@ public final class EtwPipeSource {
 
     public String degradedReason() {
         return degradedReason;
+    }
+
+    /**
+     * Motivo riportato dal collector quando non riesce ad aprire la sessione
+     * (es. {@code StartTrace: 5 (serve admin)}), oppure stringa vuota.
+     * Il collector scrive diagnostica su stdout prima di uscire: senza questo
+     * un ETW non attivo sarebbe indistinguibile da un binario rotto.
+     */
+    public String lastDiagnostic() {
+        return lastDiagnostic;
     }
 
     /**
@@ -101,9 +131,24 @@ public final class EtwPipeSource {
         try {
             AuthenticodeVerifier.Result sig = AuthenticodeVerifier.verify(binary.toString());
             if (!sig.signed()) {
-                degradedReason = "untrusted-binary";
-                available = false;
-                return false;
+                // Default: NON si esegue un helper non firmato (un binario
+                // lasciato in un workdir scrivibile e' hijackabile). Il lab
+                // locale puo' accettarlo esplicitamente con
+                // AEGIS_ETW_ALLOW_UNSIGNED=true — prima non c'era modo di
+                // attivare l'ETW senza un certificato Authenticode, quindi la
+                // capacita' documentata restava spenta per chiunque non
+                // firmasse il binario.
+                if (allowUnsigned) {
+                    if (UNSIGNED_WARNED.compareAndSet(false, true)) {
+                        log.warn("ETW: binario non firmato accettato (AEGIS_ETW_ALLOW_UNSIGNED=true) "
+                                + "— uso di laboratorio, non deployare cosi' su host di produzione: {}",
+                                binary);
+                    }
+                } else {
+                    degradedReason = "untrusted-binary";
+                    available = false;
+                    return false;
+                }
             }
         } catch (Exception e) {
             degradedReason = "verify-error";
@@ -113,6 +158,25 @@ public final class EtwPipeSource {
         degradedReason = "";
         available = true;
         return true;
+    }
+
+    /**
+     * Gestisce una riga del collector: evento valido → consumer con provenance
+     * ETW; riga non-JSON → diagnostica (il collector scrive su stdout il motivo
+     * del fallimento, es. {@code StartTrace: 5 (serve admin)}) conservata per
+     * spiegare il degrado. Package-private: e' la logica testata direttamente.
+     */
+    void handleLine(String line, Consumer<SystemEvent> out) {
+        if (line == null || line.isBlank()) return;
+        SystemEvent e = ExternalEventIngester.fromJsonLine(agentId, "Windows", agentVersion, line);
+        if (e != null) {
+            if (e.getProvenance() == null) e.setProvenance("etw");
+            if (out != null) out.accept(e);
+            return;
+        }
+        if (lastDiagnostic.isEmpty()) {
+            lastDiagnostic = line.length() > 200 ? line.substring(0, 200) : line;
+        }
     }
 
     /**
@@ -161,12 +225,7 @@ public final class EtwPipeSource {
                         new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
                     String line;
                     while ((line = br.readLine()) != null) {
-                        SystemEvent e = ExternalEventIngester.fromJsonLine(
-                                agentId, "Windows", agentVersion, line);
-                        if (e != null) {
-                            if (e.getProvenance() == null) e.setProvenance("etw");
-                            if (out != null) out.accept(e);
-                        }
+                        handleLine(line, out);
                     }
                 } catch (Exception ex) {
                     log.warn("Stream ETW interrotto: {}", ex.getMessage());

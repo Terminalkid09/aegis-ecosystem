@@ -127,8 +127,22 @@ public class Main {
                     hb.setAgentVersion(Config.AGENT_VERSION);
                     // Matrice feature DICHIRARATA (niente promesse): ogni flag
                     // riflette uno stato reale verificato all'avvio.
-                    boolean etw = Boolean.parseBoolean(System.getenv().getOrDefault("AEGIS_ETW_ENABLED", "false"))
-                            && java.nio.file.Files.isRegularFile(java.nio.file.Paths.get("aegis-etw.exe"));
+                    // L'ETW deve guardare lo STESSO path del probe reale
+                    // (AEGIS_ETW_PATH, assoluto): con il precedente
+                    // "aegis-etw.exe" relativo la capability risultava spenta
+                    // anche quando il collector era installato e attivo.
+                    // ...e deve descrivere lo stream DAVVERO attivo, non solo
+                    // flag+binario: l'ETW richiede privilegi amministrativi, e
+                    // senza il collector esce subito. monitor.etwStreamActive()
+                    // riporta lo stato reale (false su Linux e su Windows non
+                    // elevato), quindi la dashboard non promette capacita' che
+                    // non stanno arrivando.
+                    java.nio.file.Path etwPath = java.nio.file.Paths.get(
+                            System.getenv().getOrDefault("AEGIS_ETW_PATH", "aegis-etw.exe"));
+                    boolean etwEnabled = Boolean.parseBoolean(
+                            System.getenv().getOrDefault("AEGIS_ETW_ENABLED", "false"))
+                            && java.nio.file.Files.isRegularFile(etwPath);
+                    boolean etw = etwEnabled && monitor.etwStreamActive();
                     boolean yara = java.nio.file.Files.isRegularFile(java.nio.file.Paths.get("bin/yara64.exe"));
                     com.google.gson.JsonObject caps = new com.google.gson.JsonObject();
                     caps.addProperty("fim", true);

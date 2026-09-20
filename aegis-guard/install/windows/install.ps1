@@ -173,10 +173,15 @@ Write-Host "  [OK] JAR deployed" -ForegroundColor Green
 # Il servizio gira come LocalSystem, quindi il collector eredita l'elevazione:
 # niente UAC, niente passaggi manuali. Se il binario manca, Guard degrada al
 # polling Toolhelp32 senza errori: capacita' in meno, non un guasto.
-$etwSource = Join-Path $scriptPath "..\..\aegis-ebpf\aegis-etw.exe"
+# NOTA (bug corretto): prima veniva passata solo AEGIS_ETW_ENABLED e nessun
+# AEGIS_ETW_PATH, quindi Guard leggeva il default RELATIVO "aegis-etw.exe":
+# il collector viene rifiutato (EtwPipeSource accetta solo path assoluti, per
+# non eseguire binari dal workdir) e l'ETW restava spento anche col file
+# deployato. Ora il path e' assoluto.
+$etwPath = Join-Path $installDir "aegis-etw.exe"
 $etwEnabled = "false"
 if (Test-Path $etwSource) {
-    Copy-Item $etwSource -Destination (Join-Path $installDir "aegis-etw.exe") -Force
+    Copy-Item $etwSource -Destination $etwPath -Force
     $etwEnabled = "true"
     Write-Host "  [OK] Kernel telemetry (ETW) deployed and enabled" -ForegroundColor Green
 } else {
@@ -264,8 +269,18 @@ if (-not $enrollKey) { $enrollKey = $envVars['AEGIS_ENROLL_KEY'] }
 # inevitabile perché `Config.ENROLL_KEY` è letta all'avvio anche quando
 # `secret.json` esiste già; il token di enrollment ha scadenza breve ed è
 # monouso, quindi il valore esposto non è una credenziale device.
+# AEGIS_ETW_ALLOW_UNSIGNED: il collector e' compilato localmente (MinGW) e non
+# ha una firma Authenticode. Senza questo opt-in Guard rifiuta l'helper
+# ("untrusted-binary") e la capacita' kernel resta spenta per chiunque non
+# firmi il binario. Il path e' assoluto e il file sta in <install>, che e'
+# scrivibile solo da amministratori — il rischio di hijack e' quello di un
+# binario firmato con la stessa ACL.
 & $nssmPath set AegisGuard AppEnvironmentExtra `
-    "AEGIS_GATEWAY_URL=$gatewayUrl`nAEGIS_BRAIN_URL=$brainUrl`nAEGIS_GUARD_API_KEY=$apiKey`nAEGIS_ENROLL_KEY=$enrollKey`nAEGIS_AGENT_ID=$agentId`nAEGIS_SCAN_INTERVAL_MS=$scanInterval`nAEGIS_ETW_ENABLED=$etwEnabled"
+    "AEGIS_GATEWAY_URL=$gatewayUrl`nAEGIS_BRAIN_URL=$brainUrl`nAEGIS_GUARD_API_KEY=$apiKey`nAEGIS_ENROLL_KEY=$enrollKey`nAEGIS_AGENT_ID=$agentId`nAEGIS_SCAN_INTERVAL_MS=$scanInterval`nAEGIS_ETW_ENABLED=$etwEnabled`nAEGIS_ETW_PATH=$etwPath`nAEGIS_ETW_ALLOW_UNSIGNED=true"
+
+# Workdir esplicito = cartella di installazione (con il default il servizio
+# partiva da C:\Windows\System32 e ogni path relativo puntava lì).
+& $nssmPath set AegisGuard AppDirectory "$installDir"
 
 # Set service recovery
 & $nssmPath set AegisGuard AppExit Default Restart

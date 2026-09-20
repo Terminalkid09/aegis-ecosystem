@@ -19,4 +19,15 @@ public interface ProcessMonitor {
 
     // Restituisce uno snapshot dei processi attivi al momento della chiamata
     List<SystemEvent> scanProcesses();
+
+    /**
+     * True se lo stream di telemetria kernel (ETW su Windows) e' EFFETTIVAMENTE
+     * attivo in questo momento. Serve al heartbeat: dichiarare la capacita'
+     * "kernel telemetry" perche' il flag e' acceso e il binario esiste sarebbe
+     * una promessa non verificata (senza privilegi amministrativi il collector
+     * esce subito). Default false: gli altri OS non hanno questo stream.
+     */
+    default boolean etwStreamActive() {
+        return false;
+    }
 }

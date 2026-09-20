@@ -12,6 +12,9 @@ set "PURPLE=[95m"
 set "YELLOW=[93m"
 set "RESET=[0m"
 
+:: `aegis.bat agents batch` : usato dal rilancio elevato, evita il pause finale.
+if /i "%~2"=="batch" set "AEGIS_BATCH=1"
+
 if /i "%~1"=="start" goto start_platform
 if /i "%~1"=="agents" goto start_agents
 if /i "%~1"=="pilot" goto pilot
@@ -98,7 +101,7 @@ if errorlevel 1 (
 
 if defined AI_PROFILE (
     echo  %YELLOW%[*] Pulling !AEGIS_MODEL! model for Ollama - first time only...%RESET%
-    start "Ollama Pull" /B cmd /c "timeout /t 5 >nul && docker exec aegis-ollama ollama pull !AEGIS_MODEL! 2>nul"
+    start "Ollama Pull" /B cmd /c ""%SystemRoot%\System32\timeout.exe" /t 5 /nobreak >nul && docker exec aegis-ollama ollama pull !AEGIS_MODEL! 2>nul"
 )
 
 netstat -ano | findstr ":5173 " | findstr "LISTENING" >nul
@@ -117,7 +120,7 @@ if !errorlevel! equ 0 (
             cd /d "%ROOT%"
         )
         echo  %PURPLE%[*] Waiting for backend to initialize...%RESET%
-        timeout /t 8 >nul
+        call :sleep 8
         echo  %CYAN%[*] Starting Vite dev dashboard on http://localhost:5173 ^(container UI: http://localhost:3000^)...%RESET%
         start "Aegis Dashboard" cmd /k "cd /d "%ROOT%frontend" && set VITE_API_URL=http://127.0.0.1:8000/api/v1 && npm run dev"
     )
@@ -158,6 +161,15 @@ goto menu_or_exit
 :start_agents
 echo.
 
+:: Telemetria kernel ETW: il consumer apre una sessione di trace e richiede
+:: privilegi amministrativi, che Windows non concede a un processo avviato
+:: senza. Se il collector c'e' e la shell NON e' elevata, il launcher si
+:: rilancia elevato (un solo prompt UAC) cosi' l'ETW parte davvero senza
+:: configurare nulla; se l'utente rifiuta, gli agenti partono comunque e la
+:: copertura mancante e' DICHIARATA (quality=degraded:etw-stream-...).
+call :maybe_self_elevate
+if !errorlevel! equ 3 exit /b 0
+
 :: Step 0: Auto-build if needed
 set "NODETRACE_EXE=%ROOT%NodeTrace\agents\python\dist\nodetrace-agent\nodetrace-agent.exe"
 set "GUARD_JAR=%ROOT%aegis-guard\target\aegis-guard.jar"
@@ -176,13 +188,24 @@ if defined NEED_BUILD (
 
 echo  %YELLOW%[*] Stopping any previously running host agents...%RESET%
 taskkill /f /im nodetrace-agent.exe 2>nul
-taskkill /f /im java.exe 2>nul
-timeout /t 2 >nul
 
-:: Clean stale agent state so registration is fresh
-if exist "%ROOT%NodeTrace\agents\python\token.json" del /q /f "%ROOT%NodeTrace\agents\python\token.json" 2>nul
-if exist "%ROOT%aegis-guard\secret.json" del /q /f "%ROOT%aegis-guard\secret.json" 2>nul
-if exist "%ROOT%logs" rmdir /s /q "%ROOT%logs" >nul 2>&1
+:: Kill MIRATO di Guard: prima era `taskkill /f /im java.exe`, che su una
+:: workstation chiude OGNI processo Java dell'utente (IDE, tool, altri agenti).
+:: Qui si chiude solo il processo che ha aegis-guard.jar nella command line,
+:: con fallback sul vecchio comportamento se PowerShell non e' disponibile.
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*aegis-guard.jar*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
+call :sleep 2
+
+:: Identita' degli agenti: PRESERVATA di default.
+:: Prima token.json/secret.json venivano cancellati a OGNI avvio: ogni start
+:: registrava un agente NUOVO nel fleet (duplicati, alert attribuiti all'host
+:: sbagliato). L'identita' va persa solo quando lo chiedi tu:
+::   set AEGIS_RESET_IDENTITY=1  &&  aegis.bat agents
+if /i "%AEGIS_RESET_IDENTITY%"=="1" (
+    echo  %RED%  [!] AEGIS_RESET_IDENTITY=1: nuova identita' per entrambi gli agenti%RESET%
+    if exist "%ROOT%NodeTrace\agents\python\token.json" del /q /f "%ROOT%NodeTrace\agents\python\token.json" 2>nul
+    if exist "%ROOT%aegis-guard\secret.json" del /q /f "%ROOT%aegis-guard\secret.json" 2>nul
+)
 mkdir "%ROOT%logs" 2>nul
 
 echo  %YELLOW%[*] Checking Docker backend is running (http://127.0.0.1:8000)...%RESET%
@@ -224,19 +247,9 @@ if not exist "!GUARD_JAR!" (
 
 echo  %YELLOW%[*] Starting Aegis-Guard (Java) EDR Agent...%RESET%
 
-:: Telemetria kernel ETW: se il binario e' stato compilato da build.bat, viene
-:: copiato nel workdir di Guard e la flag accesa. Guard (EtwPipeSource) spawna
-:: il collector e ne legge lo stdout: consumer user-mode, nessun driver, nessuna
-:: firma. Se il binario manca, Guard degrada a polling senza rumore: la mancanza
-:: non e' un errore, e' una capacita' in meno dichiarata nel log.
-set "AEGIS_ETW_ENABLED="
-if exist "%ROOT%aegis-ebpf\aegis-etw.exe" (
-    copy /y "%ROOT%aegis-ebpf\aegis-etw.exe" "%ROOT%aegis-guard\aegis-etw.exe" >nul
-    set "AEGIS_ETW_ENABLED=true"
-    echo  %GREEN%  [+] Kernel telemetry (ETW) enabled for Guard%RESET%
-) else (
-    echo  %YELLOW%  [i] aegis-etw.exe non trovato: Guard parte senza telemetria kernel ETW%RESET%
-)
+:: Telemetria kernel ETW: compilazione del collector se assente, deploy accanto
+:: al JAR ed export delle env che Guard legge. Dettagli in :deploy_etw.
+call :deploy_etw
 
 :: YARA: se il binario ufficiale e' in install\windows\bin\, viene copiato
 :: nel workdir Guard (bin\) per il comando YARA_SCAN (scansioni on-demand).
@@ -310,6 +323,77 @@ if /i "%confirm%"=="y" (
 )
 call :maybe_pause
 goto menu_or_exit
+
+:maybe_self_elevate
+:: Ritorna 3 quando il lavoro e' stato delegato a una istanza elevata.
+set "ETW_PRESENT="
+if exist "%ROOT%aegis-ebpf\aegis-etw.exe" set "ETW_PRESENT=1"
+if not defined ETW_PRESENT if exist "%ROOT%aegis-guard\aegis-etw.exe" set "ETW_PRESENT=1"
+if not defined ETW_PRESENT exit /b 0
+if /i "%AEGIS_NO_ELEVATE%"=="1" exit /b 0
+if /i "%AEGIS_ELEVATED%"=="1" exit /b 0
+powershell -NoProfile -Command "if(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(544)){exit 0}else{exit 1}" >nul 2>&1
+if !errorlevel! equ 0 exit /b 0
+echo  %YELLOW%[*] Telemetria kernel ETW: richiedo i privilegi di amministratore...%RESET%
+powershell -NoProfile -Command "$p=Start-Process -FilePath '%ROOT%aegis.bat' -ArgumentList 'agents','batch' -Verb RunAs -PassThru -Wait; exit $p.ExitCode"
+if !errorlevel! neq 0 (
+    echo  %RED%  [!] Elevazione non concessa: gli agenti partono SENZA telemetria kernel.%RESET%
+    echo  %YELLOW%      Per averla: tasto destro su aegis.bat - Esegui come amministratore,%RESET%
+    echo  %YELLOW%      oppure installa Guard come servizio (parte come LocalSystem, senza UAC).%RESET%
+    exit /b 0
+)
+echo  %GREEN%  [+] Agenti avviati nella finestra elevata.%RESET%
+exit /b 3
+
+:deploy_etw
+:: Compila (se necessario) e deploya il collector ETW, poi esporta le tre env
+:: che Guard legge all'avvio:
+::   AEGIS_ETW_ENABLED=true        tenta l'ETW;
+::   AEGIS_ETW_PATH=<assoluto>     EtwPipeSource rifiuta i path relativi (non
+::                                 esegue binari risolti da un workdir scrivibile);
+::   AEGIS_ETW_ALLOW_UNSIGNED=true il collector e' compilato localmente e non ha
+::                                 firma Authenticode: senza opt-in viene rifiutato.
+:: Sta in una subroutine perche' i messaggi non finiscano dentro un blocco
+:: `if ( ... )`, dove le parentesi vanno escapate e rompono il parsing.
+set "AEGIS_ETW_ENABLED="
+set "AEGIS_ETW_PATH="
+set "AEGIS_ETW_ALLOW_UNSIGNED="
+if not exist "%ROOT%aegis-ebpf\aegis-etw.exe" call :build_etw
+if not exist "%ROOT%aegis-ebpf\aegis-etw.exe" goto deploy_etw_missing
+copy /y "%ROOT%aegis-ebpf\aegis-etw.exe" "%ROOT%aegis-guard\aegis-etw.exe" >nul
+set "AEGIS_ETW_ENABLED=true"
+set "AEGIS_ETW_PATH=%ROOT%aegis-guard\aegis-etw.exe"
+set "AEGIS_ETW_ALLOW_UNSIGNED=true"
+echo  %GREEN%  [+] Kernel telemetry ETW attiva per Guard%RESET%
+exit /b 0
+
+:deploy_etw_missing
+echo  %YELLOW%  [i] aegis-etw.exe non disponibile - serve gcc/MinGW per compilarlo.%RESET%
+echo  %YELLOW%      Guard parte in polling Toolhelp32 e lo dichiara: quality=degraded%RESET%
+exit /b 0
+
+:build_etw
+set "GCC_EXE="
+for /d %%d in ("%ProgramFiles%\mingw64" "%ProgramFiles%\msys64\mingw64" "C:\mingw64") do (
+    if exist "%%d\bin\gcc.exe" set "GCC_EXE=%%d\bin\gcc.exe"
+)
+if not defined GCC_EXE (
+    where gcc >nul 2>&1
+    if !errorlevel! equ 0 set "GCC_EXE=gcc"
+)
+if not defined GCC_EXE exit /b 0
+echo  %YELLOW%  [*] Compilazione collector ETW...%RESET%
+pushd "%ROOT%aegis-ebpf"
+"!GCC_EXE!" -O2 -Wall aegis_etw.c -o aegis-etw.exe -ladvapi32 -ltdh -lws2_32 >nul 2>&1
+popd
+exit /b 0
+
+:sleep
+:: Pausa robusta. Da Git Bash/MSYS il "timeout" di PATH e' quello di coreutils,
+:: quindi `timeout /t 2` fallisce con "invalid time interval": si usa l'exe
+:: assoluto di Windows, che e' immune allo shadowing.
+"%SystemRoot%\System32\timeout.exe" /t %~1 /nobreak >nul 2>&1
+exit /b 0
 
 :maybe_pause
 if /i "%AEGIS_BATCH%"=="1" exit /b 0
