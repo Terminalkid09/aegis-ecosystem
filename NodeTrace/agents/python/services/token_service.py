@@ -2,8 +2,13 @@ import json
 import os
 import time
 
+from services.agent_home import agent_home
+
 class TokenService:
-    FILE = os.getenv("NODETRACE_TOKEN_FILE", "token.json")
+    # Path ASSOLUTO: con "token.json" relativo lo stesso device usava il token
+    # della cwd corrente (tre identita' diverse per un solo host -> 401 su ogni
+    # chiamata autenticata e agente cieco). Vedi services/agent_home.py.
+    FILE = os.getenv("NODETRACE_TOKEN_FILE") or os.path.join(agent_home(), "token.json")
 
     def _atomic_write(self, data):
         parent = os.path.dirname(os.path.abspath(self.FILE))

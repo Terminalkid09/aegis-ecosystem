@@ -490,6 +490,32 @@ class Agent:
         except Exception:
             return False
 
+    def _verify_token(self, token, device_id):
+        """True se il token salvato e' ancora accettato dal brain.
+
+        Perche' esiste: il token puo' smettere di essere valido per cause
+        legittime (re-enrollment da un'altra istanza dello stesso host, DB
+        ripristinato, identita' copiata altrove) e allora OGNI chiamata
+        autenticata risponde 401: l'agente resta registrato ma cieco, con un
+        warning al minuto e nessun recupero (il wipe automatico non esiste, per
+        non riammettere un device revocato). Un solo GET autenticato all'avvio
+        distingue il caso e permette il recupero previsto dal brain, che e'
+        una re-enrollment e che il brain STESSO nega (403) se il device e'
+        revocato.
+
+        Errore di rete o risposta inattesa -> True: non si ruota il token per
+        un brain momentaneamente irraggiungibile.
+        """
+        try:
+            url = self.config["heartbeat_url"].replace("/heartbeat", "/commands")
+            r = get(f"{url}?device_id={device_id}",
+                    headers=self._agent_headers(token, device_id), timeout=15)
+            return getattr(r, "status_code", 0) != 401
+        except Exception as e:
+            Logger.warn(f"Verifica credenziali non eseguibile ({e}): "
+                        "proseguo con il token salvato")
+            return True
+
     def _ensure_registered(self):
         token, device_id = self.token_service.load()
         if token:
@@ -499,6 +525,11 @@ class Agent:
             stored = self.token_service.load_server()
             if pin_err and stored:
                 raise RuntimeError(f"[FATAL] {pin_err}")
+
+            if not self._verify_token(token, device_id):
+                Logger.warn("Token device rifiutato dal brain (401): "
+                            "re-enrollment in corso...")
+                token = None  # il ramo di registrazione qui sotto ripara
 
         while not token:
             try:

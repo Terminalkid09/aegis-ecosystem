@@ -278,7 +278,9 @@ Every source enters the **same** event model and the **same** detection engine. 
 | **Endpoint agents** | host | Guard (processes, persistence, services), NodeTrace (CPU/RAM/disk/network/users) | signed enrollment + mTLS |
 | **Log sources** | appliance, server | syslog RFC5424/3164, Windows Event, Zeek, Suricata, nginx/Squid, firewall | none: one config line toward the endpoint |
 
-On Linux, kernel telemetry is native (eBPF — 300/300 events verified without loss on kernel 6.6 with BTF). On Windows it runs through ETW: `aegis_etw.c` is a **user-mode** consumer of system providers (no driver, no signing), spawned by Guard itself when `AEGIS_ETW_ENABLED=true` and read from its stdout. The service runs as LocalSystem, so the collector inherits elevation: zero UAC prompts, zero manual steps. A proprietary kernel-mode driver is only needed for **inline prevention** — that requires EV signing and Microsoft attestation, and is out of scope together with ETW-TI.
+On Linux, kernel telemetry is native (eBPF — 300/300 events verified without loss on kernel 6.6 with BTF). On Windows it runs through ETW: `aegis_etw.c` is a **user-mode** consumer of system providers (no driver, no signing), spawned by Guard itself and read from its stdout. It is **on by default** when the collector is present: `aegis.bat agents` (and the installer) compile or deploy `aegis-etw.exe`, point `AEGIS_ETW_PATH` at its absolute path and set `AEGIS_ETW_ALLOW_UNSIGNED=true` — the helper is built locally and carries no Authenticode signature, so Guard needs that explicit opt-in before executing it. The stream is **actually ingested**, not just probed: each kernel event enters the same enrichment pipeline as the poll (path, hash, Authenticode, command line) tagged `provenance=etw`, and the Toolhelp32 poll stays as the backstop (persistence, services, Defender, netstat) with a 15s dedup window so a process seen at kernel latency is not re-reported by the poll. If the collector is missing, Guard falls back to polling and **says so** (`quality=degraded:etw-…`): a missing capability, never a silent failure.
+
+ETW requires a trace session, i.e. **administrative rights**: without them the collector prints the reason and exits, and Guard reports exactly that (`quality=degraded:etw-stream-StartTrace:_5_(serve_admin)`). So that a fresh clone needs no configuration, `aegis.bat agents` **asks for elevation once** (single UAC prompt; skip it with `set AEGIS_NO_ELEVATE=1`, or install Guard as a service — it runs as LocalSystem and needs no prompt at all). A proprietary kernel-mode driver is only needed for **inline prevention** — that requires EV signing and Microsoft attestation, and is out of scope together with ETW-TI.
 
 ### Agents survive reboot
 
@@ -337,7 +339,7 @@ Build all agents with a single command: `build.bat`. If `JAVA_HOME` still points
   ```
 
   Without at least one `admin`, host isolation, deploy approval, rule and alert deletion and site assignment all return 403 by design. `set-role` refuses to demote the last remaining admin unless `--force` is given.
-- **Agents**: enrollment key at registration, then per-agent Bearer token (NodeTrace) or gateway API key (Aegis-Link).
+- **Agents**: enrollment key at registration, then per-agent Bearer token (NodeTrace) or gateway API key (Aegis-Link). NodeTrace validates that token once at startup with an authenticated call: if the brain rejects it (401) the agent re-enrolls, which is the brain's own recovery path — the same `device_id` is kept, and a **revoked** device is refused (403), so this is not a way back in. Its identity files (`token.json`, device key/certificate) are resolved against a **fixed absolute directory** (`NODETRACE_IDENTITY_DIR`, default: the agent's own folder), never the current working directory.
 - **Aegis-Link**: `X-Api-Key` for event ingestion — server-side only, never exposed to the React app.
 
 The global `AEGIS_API_KEY` is for Aegis-Link and automation scripts. It does **not** grant dashboard access.
@@ -428,7 +430,11 @@ Key environment variables (full list in `.env.example`):
 | `AI_AUTOMATIC_ENRICH` | `false` | Automatic alert enrichment toward a **cloud** provider |
 | `AEGIS_WITH_AI` | unset | Set `1` to add the Ollama service to the stack |
 | `OLLAMA_URL` | in-stack | Point at a powerful LAN machine to keep AI local with big models |
-| `AEGIS_ETW_ENABLED` | `true` on Windows | Spawns the ETW kernel collector from Guard |
+| `AEGIS_ETW_ENABLED` | `true` when the collector exists | Spawns the ETW kernel collector from Guard |
+| `AEGIS_ETW_PATH` | absolute path set by the launcher | Must be **absolute**: Guard refuses to execute a collector resolved from a writable workdir (hijack) |
+| `AEGIS_ETW_ALLOW_UNSIGNED` | `true` for locally built collectors | Allows an unsigned helper. Keep `false` if you sign `aegis-etw.exe` and want signature enforcement |
+| `AEGIS_NO_ELEVATE` | unset | `1` stops `aegis.bat agents` from requesting the UAC prompt for kernel telemetry |
+| `NODETRACE_IDENTITY_DIR` | agent directory | Where `token.json` and the device key/certificate live. Resolved as an **absolute** path on purpose: with a relative path the same device used a different identity per launch directory, and the brain answered 401 to every authenticated call |
 | `PLAYBOOK_SCRIPT_ENABLED` | `false` | Shell `script` SOAR actions (keep off unless enterprise-approved) |
 | `RATE_LIMIT_STORAGE_URI` | memory | `redis://…` for multi-worker/HA rate limiting |
 
