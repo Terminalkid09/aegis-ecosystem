@@ -60,6 +60,12 @@ class AlertResponse(BaseSchema):
     mitre_tactic_name: Optional[str] = None
     mitre_technique_name: Optional[str] = None
 
+
+class ResolveAlertResponse(AlertResponse):
+    """PATCH resolve: feedback esplicito sul muting (resolve che 'fa qualcosa')."""
+    triage_muted_seconds: int = 0
+    process_killed: bool = False
+
 class AgentResponse(BaseSchema):
     agent_id: UUIDStr
     hostname: Optional[str] = None

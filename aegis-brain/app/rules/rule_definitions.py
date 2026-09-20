@@ -3,6 +3,11 @@ from dataclasses import dataclass, field
 from typing import Optional
 from app.api.schemas.common import EventSchema
 
+# Default di RuleResult.confidence: usato come sentinel da stamp_result per
+# distinguere "la regola non ha pesato il contesto" da "l'ha pesato lei".
+_DEFAULT_CONFIDENCE = "medium"
+
+
 @dataclass
 class RuleResult:
     triggered: bool
@@ -15,7 +20,7 @@ class RuleResult:
     # M4 Fase 5: identità e confidenza SEPARATA dalla severity.
     rule_id: str = "custom"
     version: str = "1.0"
-    confidence: str = "medium"
+    confidence: str = _DEFAULT_CONFIDENCE
 
 @dataclass
 class StaticRule:
@@ -1228,9 +1233,16 @@ def stamp_result(rule_fn, result: "RuleResult") -> "RuleResult":
     """Timbro identità/versione/confidenza dal registry (default: custom)."""
     meta = RULE_BY_FN.get(rule_fn)
     if meta is not None and (not result.rule_id or result.rule_id == "custom"):
+        runtime_conf = result.confidence
         result.rule_id = meta.rule_id
         result.version = meta.version
-        result.confidence = meta.confidence
+        # La regola puo' pesare il contesto a runtime (es. S004: 'low' se il
+        # binario e' firmato trusted, in Downloads). Il catalogo timbra solo
+        # quando la regola NON ha espresso un peso proprio — il sentinel e'
+        # il default del dataclass, confrontato per nome e non per stringa
+        # magica duplicata (un 'medium' esplicito della regola resta suo).
+        if runtime_conf == _DEFAULT_CONFIDENCE:
+            result.confidence = meta.confidence
     return result
 
 

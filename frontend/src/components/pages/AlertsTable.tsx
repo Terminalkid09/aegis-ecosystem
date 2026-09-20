@@ -13,6 +13,7 @@ export default function AlertsTable() {
   const [search, setSearch] = useState('')
   const [filterSeverity, setFilterSeverity] = useState<string>('ALL')
   const [filterResolved, setFilterResolved] = useState<string>('UNRESOLVED')
+  const [resolveFeedback, setResolveFeedback] = useState<string | null>(null)
 
   const { data: alerts = [], isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: ['alerts', filterSeverity, filterResolved],
@@ -32,9 +33,37 @@ export default function AlertsTable() {
       const previous = qc.getQueriesData({ queryKey: ['alerts'] })
       qc.setQueriesData({ queryKey: ['alerts'] }, (current: any) => {
         if (!Array.isArray(current)) return current
-        return current.map(alert => alert.id === id ? { ...alert, is_resolved: resolved } : alert)
+        if (filterResolved === 'UNRESOLVED' && resolved) {
+          return current.filter((alert: any) => alert.id !== id)
+        }
+        return current.map((alert: any) =>
+          alert.id === id ? { ...alert, is_resolved: resolved } : alert
+        )
       })
+      const live = useAppStore.getState().liveStats
+      if (live && resolved && filterResolved === 'UNRESOLVED') {
+        setLiveStats({
+          ...live,
+          unresolved_alerts: Math.max(0, (live.unresolved_alerts ?? 1) - 1),
+        })
+      }
       return { previous }
+    },
+    onSuccess: (res, { resolved }) => {
+      const data = res?.data
+      if (!resolved) {
+        setResolveFeedback('Alert re-opened — similar detections can appear again.')
+        return
+      }
+      const days = data?.triage_muted_seconds
+        ? Math.round(data.triage_muted_seconds / 86400)
+        : 0
+      const killed = data?.process_killed
+      const parts = ['Marked resolved.']
+      if (days > 0) parts.push(`Similar alerts muted ~${days} days on this host.`)
+      if (killed) parts.push('Kill command queued to the agent.')
+      else if (data?.pid) parts.push('No kill (needs respond permission or event type).')
+      setResolveFeedback(parts.join(' '))
     },
     onError: (_error, _variables, context) => {
       context?.previous.forEach(([key, data]) => qc.setQueryData(key, data))
@@ -63,6 +92,15 @@ export default function AlertsTable() {
     },
     onError: (_error, _variables, context) => {
       context?.previous.forEach(([key, data]) => qc.setQueryData(key, data))
+    },
+    onSuccess: (res) => {
+      const n = res?.data?.resolved
+      const detail = res?.data?.detail
+      setResolveFeedback(
+        typeof detail === 'string' && detail
+          ? detail
+          : `Resolved ${n ?? 'all'} alerts. Similar patterns muted ~7 days on each host.`
+      )
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['alerts'] })
@@ -141,6 +179,14 @@ export default function AlertsTable() {
       {(resolveMut.isError || resolveAllMut.isError) && (
         <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">
           The change could not be saved. The alert state was restored.
+        </div>
+      )}
+      {resolveFeedback && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-200">
+          <span>{resolveFeedback}</span>
+          <button type="button" onClick={() => setResolveFeedback(null)} className="text-emerald-400/80 hover:text-white">
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -264,20 +310,16 @@ export default function AlertsTable() {
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-3 text-xs">
                       {[
                         ['Alert ID', alert.id],
+                        ['Host', (alert as any).agent_hostname || (alert as any).hostname || String(alert.agent_id).slice(0, 8)],
                         ['Agent ID', alert.agent_id],
-                        ['PID', alert.pid || 'N/A'],
-                        ['Parent PID', alert.parent_pid || 'N/A'],
+                        ['PID', alert.pid ?? 'N/A'],
+                        ['Parent PID', alert.parent_pid ?? 'N/A'],
                         ['Parent Process', alert.parent_process_name || 'N/A'],
                         ['Process Path', alert.process_path || 'N/A'],
-                        ['User', (alert as any).user || (alert as any).username || 'N/A'],
-                        ['Host', (alert as any).hostname || (alert as any).agent_id?.slice(0,8) || 'N/A'],
                         ['Event Type', alert.event_type || 'N/A'],
-                        ['Network', (alert as any).network_connections ? JSON.stringify((alert as any).network_connections).slice(0,120) : ((alert as any).remote || 'N/A')],
                         ['Rule', (alert as any).rule_id || (alert as any).rule_name || alert.mitre_technique_id || 'N/A'],
                         ['Confidence', ((): string => { const m = String(alert.description||'').match(/Confidence=([a-z]+)/i); return m ? m[1] : ((alert as any).confidence || 'medium') })()],
                         ['Severity', alert.severity],
-                        ['Evidence', ((): string => { const m = String(alert.description||'').match(/TrustedSigned=([a-z]+)/i); const p = String(alert.description||'').match(/Prevalence=([^|]+)/); const l = String(alert.description||'').match(/Lineage=([^|]+)/); return [m?`trusted=${m[1]}`:'', p?p[1].trim():'', l?`lineage ${l[1].trim()}`:''].filter(Boolean).join(' · ') || '—' })()],
-                        ['Reason', ((): string => { const m = String(alert.description||'').match(/Reason: ([^|]+)/); return m ? m[1].trim() : String(alert.description||'').slice(0,160) })()],
                         ['MITRE Tactic', `${alert.mitre_tactic_id ?? ''} ${alert.mitre_tactic_name ?? ''}`.trim() || 'N/A'],
                         ['MITRE Technique', `${alert.mitre_technique_id ?? ''} ${alert.mitre_technique_name ?? ''}`.trim() || 'N/A'],
                         ['Timestamp', new Date(alert.timestamp).toLocaleString()],
@@ -289,6 +331,39 @@ export default function AlertsTable() {
                         </div>
                       ))}
                     </div>
+                    {/* Evidence strutturata: i fatti dell'alert (endpoint remoto,
+                        conteggio connessioni, processi, CLI, utente) — non piu'
+                        righe N/A per campi che quel tipo di alert non ha mai avuto. */}
+                    {(() => {
+                      const ev = (alert as any).evidence as Record<string, any> | null | undefined
+                      if (!ev || typeof ev !== 'object') return null
+                      const ip = ev.ip || ev.endpoint || null
+                      const owners = Array.isArray(ev.processes) ? ev.processes : []
+                      const rows: Array<[string, string]> = []
+                      if (ip) rows.push(['Remote endpoint', `${ip}${ev.connection_count ? ` · ${ev.connection_count} connections in window` : ''}`])
+                      if (owners.length) rows.push(['Owning processes', owners.map((o: any) => `${o.name} (${o.connections})`).join(', ')])
+                      if (ev.command_line) rows.push(['Command line', String(ev.command_line)])
+                      if (ev.process) rows.push(['Process', String(ev.process)])
+                      if (ev.pid != null) rows.push(['PID', String(ev.pid)])
+                      if (ev.memory_percent != null) rows.push(['Memory', `${ev.memory_percent}%`])
+                      if (ev.cpu_percent != null) rows.push(['CPU', `${ev.cpu_percent}%`])
+                      if (ev.user) rows.push(['User', String(ev.user)])
+                      if (ev.detail) rows.push(['Detail', String(ev.detail)])
+                      if (!rows.length) return null
+                      return (
+                        <div className="mt-3 pt-3 border-t border-[hsl(var(--border))]">
+                          <p className="text-[hsl(var(--muted-foreground))] text-xs uppercase tracking-wider mb-1">Evidence</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {rows.map(([k, v]) => (
+                              <div key={k} className="bg-[hsl(var(--background))] rounded p-2">
+                                <p className="text-[hsl(var(--muted-foreground))] text-[10px] uppercase tracking-wider mb-0.5">{k}</p>
+                                <p className="text-white font-mono text-xs break-all">{v}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })()}
                     <div className="mt-3 pt-3 border-t border-[hsl(var(--border))]">
                       <p className="text-[hsl(var(--muted-foreground))] text-xs uppercase tracking-wider mb-1">Description</p>
                       <p className="text-white text-xs">{alert.description}</p>

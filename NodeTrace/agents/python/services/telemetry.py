@@ -76,25 +76,42 @@ class TelemetryService:
         except Exception:
             pass
         # Local Behavioral Heuristics (Anomalies)
+        # Formato nuovo: dict strutturati con evidence (endpoint, conteggio,
+        # processi possessori) — il brain li mappa su Alert.evidence cosi' il
+        # pannello di dettaglio mostra I FATTI, non solo il tag. Il brain
+        # accetta anche le stringhe dei vecchi agenti (backward compat).
         anomalies = []
 
         # 1. LOLBin Abuse & Crypto Miner Heuristics
         for p in processes:
             pname = p["name"].lower()
             if pname in ["certutil.exe", "bitsadmin.exe", "powershell.exe"] and p["memory_percent"] > 5.0:
-                anomalies.append(f"SUSPICIOUS_LOLBIN_MEMORY: {pname}")
+                anomalies.append({
+                    "type": "SUSPICIOUS_LOLBIN_MEMORY",
+                    "process": p["name"],
+                    "pid": p["pid"],
+                    "memory_percent": round(p["memory_percent"], 1),
+                })
 
             # CPU Spike + Miner Ports
             if p["cpu_percent"] > 80.0:
                 miner_found = False
+                miner_endpoint = ""
                 for flow in network_flows:
                     if flow["pid"] == p["pid"]:
                         raddr = flow.get("raddr", "")
                         if ":3333" in raddr or ":4444" in raddr or ":14444" in raddr or ":14433" in raddr:
                             miner_found = True
+                            miner_endpoint = raddr
                             break
                 if miner_found:
-                    anomalies.append(f"POSSIBLE_CRYPTOMINER: {pname}")
+                    anomalies.append({
+                        "type": "POSSIBLE_CRYPTOMINER",
+                        "process": p["name"],
+                        "pid": p["pid"],
+                        "endpoint": miner_endpoint,
+                        "cpu_percent": round(p["cpu_percent"], 1),
+                    })
 
         # 2. Network Beaconing
         dest_counts = {}
@@ -102,11 +119,22 @@ class TelemetryService:
             raddr = flow.get("raddr", "")
             if raddr:
                 ip_only = raddr.split(":")[0]
-                dest_counts[ip_only] = dest_counts.get(ip_only, 0) + 1
+                dest_counts.setdefault(ip_only, {"count": 0, "owners": {}})
+                dest_counts[ip_only]["count"] += 1
+                owner = next((p["name"] for p in processes if p["pid"] == flow["pid"]), None)
+                if owner:
+                    dest_counts[ip_only]["owners"][owner] = \
+                        dest_counts[ip_only]["owners"].get(owner, 0) + 1
 
-        for ip, count in dest_counts.items():
-            if count >= 10 and not ip.startswith("127.") and not ip.startswith("192.168.") and not ip.startswith("10."):
-                anomalies.append(f"HIGH_CONNECTION_COUNT_TO_IP: {ip}")
+        for ip, info in dest_counts.items():
+            if info["count"] >= 10 and not ip.startswith("127.") and not ip.startswith("192.168.") and not ip.startswith("10."):
+                top_owners = sorted(info["owners"].items(), key=lambda kv: -kv[1])[:5]
+                anomalies.append({
+                    "type": "HIGH_CONNECTION_COUNT_TO_IP",
+                    "ip": ip,
+                    "connection_count": info["count"],
+                    "processes": [{"name": n, "connections": c} for n, c in top_owners],
+                })
 
         return {
             "cpu_usage": cpu_usage,

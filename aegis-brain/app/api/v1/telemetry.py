@@ -7,7 +7,7 @@ from app.database.connection import get_db
 from app.database.models import Alert, Agent, Telemetry, ThreatReport, RemediationAction
 from app.core.deps import get_current_user, require_perm, has_perm
 from app.core.agent_deps import get_current_agent
-from app.api.schemas.common import AlertResponse, AgentResponse, StatsResponse, EventSchema
+from app.api.schemas.common import AlertResponse, ResolveAlertResponse, AgentResponse, StatsResponse, EventSchema
 from app.services import telemetry_service
 from app.services import event_dedup
 from app.core.audit import log_audit
@@ -114,10 +114,13 @@ async def get_alert_detail(
         "timestamp": alert.timestamp.isoformat() if alert.timestamp else None,
         "severity": alert.severity,
         "pid": alert.pid,
+        "parent_pid": alert.parent_pid,
+        "parent_process_name": alert.parent_process_name,
         "process_name": alert.process_name,
         "process_path": alert.process_path,
         "event_type": alert.event_type,
         "description": alert.description,
+        "evidence": alert.evidence,
         "is_resolved": alert.is_resolved,
         "telemetry": telemetry_sample,
         "threat_reports": threat_reports,
@@ -136,18 +139,27 @@ async def resolve_all_alerts(
     result = await db.execute(stmt)
     alerts = result.scalars().all()
     count = 0
+    muted = 0
     for alert in alerts:
         if not alert.is_resolved:
             alert.is_resolved = True
             count += 1
+            if await telemetry_service.record_triage_mute(alert.agent_id, alert):
+                muted += 1
     await db.commit()
     await log_audit(
         db, action="resolve_all_alerts", resource="alert",
-        details={"count": count}, user_id=_user.id, username=_user.username,
+        details={"count": count, "triage_muted": muted},
+        user_id=_user.id, username=_user.username,
         ip_address=request.client.host if request else None,
     )
     await db.commit()
-    return {"resolved": count, "detail": f"Resolved {count} unresolved alerts"}
+    ttl_days = telemetry_service.TRIAGE_MUTE_TTL // 86400
+    return {
+        "resolved": count,
+        "triage_muted": muted,
+        "detail": f"Resolved {count} alerts; similar detections muted ~{ttl_days}d for triaged patterns",
+    }
 
 @router.delete("/alerts")
 async def delete_all_alerts(
@@ -172,7 +184,7 @@ async def delete_all_alerts(
     await db.commit()
     return {"deleted": count, "detail": f"Deleted {count} alerts"}
 
-@router.patch("/alerts/{alert_id}/resolve", response_model=AlertResponse)
+@router.patch("/alerts/{alert_id}/resolve", response_model=ResolveAlertResponse)
 async def resolve_alert(
     alert_id: int, body: ResolveRequest,
     db: AsyncSession = Depends(get_db),
@@ -186,6 +198,7 @@ async def resolve_alert(
         raise HTTPException(status_code=404, detail="Alert not found")
 
     killed = False
+    muted_seconds = 0
     if not alert.is_resolved and body.resolved:
         safe_to_kill = alert.event_type in ("PROCESS_CREATED", "custom_rule")
         can_respond = has_perm(_user.role, "respond")
@@ -201,18 +214,40 @@ async def resolve_alert(
             except Exception:
                 # Queue down (Redis) must not block SOC triage — alert still resolves.
                 killed = False
+        muted_seconds = await telemetry_service.record_triage_mute(alert.agent_id, alert)
+
+    if alert.is_resolved and not body.resolved:
+        # Re-open: rimuovi muting così la detection puo' tornare visibile.
+        from app.services.alert_policy import triage_mute_fingerprint
+        fp = triage_mute_fingerprint(alert)
+        try:
+            await telemetry_service.redis_client.delete(
+                f"sup:triage:{alert.agent_id}:{fp}"
+            )
+        except Exception:
+            pass
+        muted_seconds = 0
 
     alert.is_resolved = body.resolved
     await db.commit()
     await log_audit(
         db, action="resolve_alert", resource="alert", resource_id=str(alert.id),
-        details={"resolved": body.resolved, "agent_id": str(alert.agent_id), "killed": killed},
+        details={
+            "resolved": body.resolved,
+            "agent_id": str(alert.agent_id),
+            "killed": killed,
+            "triage_muted_seconds": muted_seconds,
+        },
         user_id=_user.id, username=_user.username,
         ip_address=request.client.host if request else None,
     )
     await db.commit()
     await db.refresh(alert)
-    return alert
+    base = ResolveAlertResponse.model_validate(alert, from_attributes=True)
+    return base.model_copy(update={
+        "triage_muted_seconds": muted_seconds if body.resolved else 0,
+        "process_killed": killed,
+    })
 
 @router.get("/agents", response_model=List[AgentResponse])
 async def get_agents(

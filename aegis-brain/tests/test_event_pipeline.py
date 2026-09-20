@@ -173,6 +173,144 @@ async def test_process_telemetry_nested_processes_no_500(monkeypatch):
         assert isinstance(a.process_name, str), a.process_name
 
 
+# ── Alert con contesto: le anomalie portano I FATTI, non righe N/A ────────
+
+@pytest.mark.asyncio
+async def test_structured_anomaly_alert_has_evidence(monkeypatch):
+    """Anomalia strutturata (agent nuovo): evidence con endpoint, conteggio,
+    processi possessori — e l'IP NON finisce nel campo process_name."""
+    from app.services import telemetry_service as ts
+    from app.database.models import Alert
+
+    async def fake_analyze(agent_id, metrics):
+        return []
+
+    async def no_suppress(agent_id, key):
+        return False
+
+    import app.services.anomaly_engine as ae
+    monkeypatch.setattr(ae.anomaly_engine, "analyze", fake_analyze)
+    monkeypatch.setattr(ts, "_suppressed", no_suppress)
+
+    db = FakeDB2()
+    await ts.process_telemetry(db, "agent-1", {
+        "cpu_usage": 5.0, "ram_usage": 40.0,
+        "anomalies": [{
+            "type": "HIGH_CONNECTION_COUNT_TO_IP",
+            "ip": "104.16.4.34",
+            "connection_count": 27,
+            "processes": [{"name": "chrome.exe", "connections": 20},
+                          {"name": "updater.exe", "connections": 7}],
+        }],
+    })
+    alerts = [o for o in db.added if isinstance(o, Alert)]
+    assert len(alerts) == 1
+    a = alerts[0]
+    assert a.process_name == "system", "l'IP non e' un processo: il bug lo metteva qui"
+    assert a.severity == "HIGH"
+    assert a.mitre_technique_id == "T1071"
+    assert a.evidence["ip"] == "104.16.4.34"
+    assert a.evidence["connection_count"] == 27
+    assert a.evidence["processes"][0]["name"] == "chrome.exe"
+    assert "104.16.4.34" in a.description  # l'OSINT estrae gli IP dalla description
+
+
+@pytest.mark.asyncio
+async def test_string_anomaly_ip_never_becomes_process_name(monkeypatch):
+    """Anomalia stringa (agent vecchio): 'HIGH_CONNECTION_COUNT_TO_IP:
+    1.2.3.4' metteva 1.2.3.4 in process_name — il pannello mostrava un IP
+    al posto del processo. Ora: process_name='system', IP in evidence."""
+    from app.services import telemetry_service as ts
+    from app.database.models import Alert
+
+    async def fake_analyze(agent_id, metrics):
+        return []
+
+    async def no_suppress(agent_id, key):
+        return False
+
+    import app.services.anomaly_engine as ae
+    monkeypatch.setattr(ae.anomaly_engine, "analyze", fake_analyze)
+    monkeypatch.setattr(ts, "_suppressed", no_suppress)
+
+    db = FakeDB2()
+    await ts.process_telemetry(db, "agent-1", {
+        "cpu_usage": 5.0, "ram_usage": 40.0,
+        "anomalies": ["HIGH_CONNECTION_COUNT_TO_IP: 104.16.4.34"],
+    })
+    alerts = [o for o in db.added if isinstance(o, Alert)]
+    assert len(alerts) == 1
+    a = alerts[0]
+    assert a.process_name == "system"
+    assert a.evidence["detail"] == "104.16.4.34"
+    assert "104.16.4.34" in a.description
+
+
+@pytest.mark.asyncio
+async def test_string_anomaly_process_name_kept_for_processes(monkeypatch):
+    """Le anomalie con VERO processo (LOLBIN) continuano a nominarlo."""
+    from app.services import telemetry_service as ts
+    from app.database.models import Alert
+
+    async def fake_analyze(agent_id, metrics):
+        return []
+
+    async def no_suppress(agent_id, key):
+        return False
+
+    import app.services.anomaly_engine as ae
+    monkeypatch.setattr(ae.anomaly_engine, "analyze", fake_analyze)
+    monkeypatch.setattr(ts, "_suppressed", no_suppress)
+
+    db = FakeDB2()
+    await ts.process_telemetry(db, "agent-1", {
+        "cpu_usage": 5.0, "ram_usage": 40.0,
+        "anomalies": ["SUSPICIOUS_LOLBIN_MEMORY: certutil.exe"],
+    })
+    alerts = [o for o in db.added if isinstance(o, Alert)]
+    assert len(alerts) == 1
+    a = alerts[0]
+    assert a.process_name == "certutil.exe"
+    assert a.evidence["tag"] == "SUSPICIOUS_LOLBIN_MEMORY"
+
+
+@pytest.mark.asyncio
+async def test_guard_btag_alert_carries_evidence(monkeypatch):
+    """Tag comportamentale Guard: CLI/lineage/path in evidence, non solo in
+    description troncata a 200 caratteri."""
+    from app.services import telemetry_service as ts
+    from app.database.models import Alert
+
+    async def fake_analyze(agent_id, metrics):
+        return []
+
+    async def no_suppress(agent_id, key):
+        return False
+
+    import app.services.anomaly_engine as ae
+    monkeypatch.setattr(ae.anomaly_engine, "analyze", fake_analyze)
+    monkeypatch.setattr(ts, "_suppressed", no_suppress)
+
+    db = FakeDB2()
+    await ts.process_telemetry(db, "agent-1", {
+        "cpu_usage": 5.0, "ram_usage": 40.0,
+        "process_name": "powershell.exe",
+        "pid": 4242,
+        "parent_pid": 100,
+        "parent_process_name": "winword.exe",
+        "process_path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "command_line": "powershell -enc AAAA" + "x" * 400,
+        "behavioral_tags": ["OFFICE_SPAWNED_SHELL"],
+    })
+    alerts = [o for o in db.added if isinstance(o, Alert)]
+    assert len(alerts) == 1
+    a = alerts[0]
+    assert a.evidence["command_line"] == "powershell -enc AAAA" + "x" * 400, \
+        "CLI COMPLETA in evidence, non il troncamento a 200 della description"
+    assert a.evidence["parent_process_name"] == "winword.exe"
+    assert a.pid == 4242
+
+
 # ── Audit: reliable queue (niente perdita su crash/errore) ────────────────
 class FakeRedis:
     """Liste in memoria con la semantica usata dal consumer."""

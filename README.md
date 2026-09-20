@@ -38,6 +38,7 @@
 | **Kernel telemetry** | eBPF probes on Linux (`sched_process_exec`, TCP via ringbuf, verified 300/300 events on kernel 6.6); ETW kernel providers on Windows (user-mode consumer, no driver, no signing) |
 | **SIEM ingestion** | Syslog (RFC 3164/5424), Windows Event Log, Zeek, Suricata, nginx/Squid, pfSense/iptables — one pipeline, parser auto-detection, real UDP/TCP listener |
 | **Detection** | 21 static rules with MITRE mapping, custom AND/OR rules, **Sigma engine** (modifiers, mapping, fail-loud exclusions), threshold + sequence correlation over Redis windows |
+| **Noise control** | Risk policy before `db.add(alert)`: **trusted-signed suppression** (signed IDE/browser/updater binaries from user-writable paths become log-only, S004/S009/S010/S012/S014), severity **decoupled from confidence** (weak-confidence hits score as LOW in the cumulative engine), and **triage muting**: resolving an alert silences that exact pattern on that host for 7 days — re-opening clears it |
 | **SOAR** | 12 playbook action types with trigger conditions, execution history, composite `eradicate` chain |
 | **Static analysis** | Aegis Total: PE/ELF/Mach-O/Office/PDF/archives/APK/LNK… with YARA, entropy, imports, IOCs and disassembly — nothing is rejected, everything is analyzed |
 | **FIM** | Per-agent file integrity monitoring watchlist (Run keys, tasks, services, hosts, cron, systemd) via WatchService + SHA-256 baseline |

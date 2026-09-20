@@ -89,6 +89,11 @@ class Alert(Base):
     process_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     event_type: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    # Contesto strutturato dell'alert (endpoint remoto, conteggio connessioni,
+    # processi possessori, command line...): la description resta leggibile,
+    # l'evidence e' la parte che un analista puo' interrogare. Nullable perche'
+    # gli alert pre-0019 e alcune sorgenti (Sigma) non la popolano ancora.
+    evidence: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     is_resolved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # MITRE ATT&CK mapping (populated from CustomRule or enrichment)

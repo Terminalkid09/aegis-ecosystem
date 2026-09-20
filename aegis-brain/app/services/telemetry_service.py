@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import re
 from typing import List, Dict, Any
@@ -21,6 +22,9 @@ redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 # Senza, ogni batch di telemetria ricrea gli stessi alert (FP storm che
 # seppellisce il SOC). Fail-open se Redis è giù.
 ALERT_SUPPRESS_TTL = 3600
+# Dopo resolve: l'analista ha accettato il rumore — non ricreare lo stesso alert
+# per giorni (cooldown ingest resta 1h per storm non triati).
+TRIAGE_MUTE_TTL = 86400 * 7
 
 
 async def _suppressed(agent_id: Any, key: str) -> bool:
@@ -32,6 +36,37 @@ async def _suppressed(agent_id: Any, key: str) -> bool:
         return False
     except Exception:
         return False
+
+
+async def _muted_by_triage(agent_id: Any, fingerprint: str) -> bool:
+    cache_key = f"sup:triage:{agent_id}:{fingerprint}"
+    try:
+        return bool(await redis_client.exists(cache_key))
+    except Exception:
+        return False
+
+
+async def record_triage_mute(agent_id: Any, alert: Alert) -> int:
+    """Registra muting post-resolve. Ritorna TTL in secondi (0 se Redis down)."""
+    from app.services.alert_policy import triage_mute_fingerprint
+
+    fp = triage_mute_fingerprint(alert)
+    cache_key = f"sup:triage:{agent_id}:{fp}"
+    try:
+        await redis_client.setex(cache_key, TRIAGE_MUTE_TTL, "1")
+        return TRIAGE_MUTE_TTL
+    except Exception:
+        return 0
+
+
+async def _skip_new_alert(agent_id: Any, alert: Alert) -> bool:
+    from app.services.alert_policy import triage_mute_fingerprint
+
+    fp = triage_mute_fingerprint(alert)
+    if await _muted_by_triage(agent_id, fp):
+        logger.info("Alert skipped (triage mute): %s on %s", alert.process_name, fp[:80])
+        return True
+    return False
 
 
 # Bound anti DB-bloat sulle strutture annidate (audit): lo schema limita i
@@ -219,11 +254,23 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                 f"{context}"
                 f"current={anomaly['value']:.1f}% — "
                 f"significantly above normal baseline. "
-            )
+            ),
+            # Evidence: cosa ha fatto scattare la statistica (metrica, valore,
+            # z-score, soglia). Serve al pannello di dettaglio E al fingerprint
+            # del muting post-resolve: senza la metrica, risolvere un'anomalia
+            # di CPU silenzierebbe per 7 giorni anche quelle di rete.
+            evidence={
+                "source": "anomaly-engine",
+                "metric": anomaly.get("metric"),
+                "value": anomaly.get("value"),
+                "z_score": anomaly.get("z_score"),
+                "threshold": anomaly.get("threshold"),
+                "process": top_proc,
+            },
         )
         if await _suppressed(agent_id, f"anomaly:{anomaly['metric']}:{top_proc}"):
             logger.debug(f"Anomaly alert suppressed (cooldown): {anomaly['metric']} on {top_proc}")
-        else:
+        elif not await _skip_new_alert(agent_id, alert):
             db.add(alert)
             created_alerts.append(alert)
 
@@ -272,9 +319,11 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                             mitre_technique_id=rule.mitre_technique_id or rule.mitre_technique,
                             mitre_tactic_name=rule.mitre_tactic,
                             mitre_technique_name=rule.mitre_technique,
+                            evidence={"source": "custom_rule", "rule_id": rule.id, "rule_name": rule.name},
                         )
-                        db.add(alert)
-                        created_alerts.append(alert)
+                        if not await _skip_new_alert(agent_id, alert):
+                            db.add(alert)
+                            created_alerts.append(alert)
                         logger.info(f"Custom rule '{rule.name}' triggered for agent {agent_id} on process '{proc_name}'")
                         break  # one alert per rule per telemetry batch
 
@@ -309,19 +358,19 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
             triggered_rules = []
             # Contesto arricchente (signature, prevalence, first_seen) prima di pesare i trigger.
             # Best-effort: mai blocca la detection se il DB è down.
+            from app.services.detection_context import fetch_context, is_signed_verified
+
             ctx = {}
             try:
-                from app.services.detection_context import fetch_context, is_signed_verified
                 ctx = await fetch_context(db, event)
             except Exception:
                 ctx = {}
-                from app.services.detection_context import is_signed_verified
-            else:
-                from app.services.detection_context import is_signed_verified
 
-            # Regole rumorose che si sopprimono se il binario è firmato trusted
-            # (riduce FP su System32, updater, ecc. senza perdere i veri attack tool).
-            TRUSTED_SUPPRESS = {"AEGIS-S009", "AEGIS-S010", "AEGIS-S012", "AEGIS-S014"}
+            from app.services.alert_policy import (
+                TRUSTED_SUPPRESS_RULE_IDS,
+                should_skip_known_signed_app_path,
+                should_skip_trusted_noisy_rule,
+            )
             trusted = is_signed_verified(event)
 
             for rule in ALL_RULES:
@@ -329,25 +378,20 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                     rule_result = rule(event)
                     if rule_result.triggered:
                         stamp_result(rule, rule_result)
-                        # Abbassa confidence se firmato trusted (evidence separata dalla severity).
-                        if trusted and rule_result.rule_id in TRUSTED_SUPPRESS:
+                        if trusted and rule_result.rule_id in TRUSTED_SUPPRESS_RULE_IDS:
                             rule_result.confidence = "low"
-                            # Non sopprime i CRITICAL/high, ma marca low confidence
-                            # e lascia al SOC il triage con evidence.
                         if is_canary_rule(rule_result.rule_id):
-                            # Canary: log-only, MAI alert (rollout sicuro).
                             logger.warning(
                                 "CANARY %s v%s avrebbe allertato su %s (%s)",
                                 rule_result.rule_id, rule_result.version,
                                 event.process_name, rule_result.description[:160])
-                        elif (is_signed_verified(event)
-                              and rule_result.rule_id in TRUSTED_SUPPRESS
-                              and rule_result.confidence == "low"):
-                            # Rumore noto su binario firmato-trusted: un editore
-                            # fidato che lancia pwsh/curl non merita un alert
-                            # (macchine di sviluppo legittime). Se la stessa
-                            # regola scatta su binario NON trusted resta un
-                            # alert a tutti gli effetti.
+                        elif should_skip_known_signed_app_path(event, rule_result.rule_id):
+                            logger.info(
+                                "Known-app suppressed %s su %s (firmato)",
+                                rule_result.rule_id, event.process_name)
+                        elif should_skip_trusted_noisy_rule(
+                            rule_result.rule_id, rule_result, event
+                        ):
                             logger.info(
                                 "Trusted-suppressed %s su %s (firmato)",
                                 rule_result.rule_id, event.process_name)
@@ -381,7 +425,6 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                 else:
                         descriptions = " | ".join(res.description for res in triggered_rules)
                         best_res = max(triggered_rules, key=lambda x: score_map.get(x.severity, 10))
-                        # Evidence separata da severity/confidence, con reason leggibile
                         try:
                             from app.services.detection_context import build_evidence
                             evidence = build_evidence(event, triggered_rules, ctx)
@@ -410,14 +453,26 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                             mitre_technique_id=best_res.mitre_technique_id,
                             mitre_tactic_name=best_res.mitre_tactic,
                             mitre_technique_name=best_res.mitre_technique,
+                            evidence=evidence or None,
                         )
-                        db.add(alert)
-                        created_alerts.append(alert)
-                        logger.warning(f"THREAT DETECTED on {agent_id}: {alert.description} | evidence={evidence}")
+                        if not await _skip_new_alert(agent_id, alert):
+                            db.add(alert)
+                            created_alerts.append(alert)
+                            logger.warning(f"THREAT DETECTED on {agent_id}: {alert.description} | evidence={evidence}")
         except Exception as e:
             logger.error("Failed to process static rules for event: %s", str(e))
 
     # 5. Agent-Side Behavioral Tags (from Aegis-Guard) & Anomalies (from NodeTrace)
+    def _looks_like_ip(value: str) -> bool:
+        """IPv4/IPv6 riconoscibile: per gli anomaly-as-string decide se il
+        payload dopo i ':' e' un endpoint (NON un nome processo — bug per cui
+        l'IP finiva nel campo process_name del pannello alert)."""
+        try:
+            ipaddress.ip_address(value.strip().strip("[]"))
+            return True
+        except ValueError:
+            return False
+
     BEHAVIORAL_TAG_MITRE = {
         "SUSPICIOUS_SVCHOST_PARENT":      ("HIGH",     "Defense Evasion",      "T1055",  "Process Injection"),
         "OFFICE_SPAWNED_SHELL":           ("CRITICAL", "Execution",            "T1566",  "Phishing / Macro Execution"),
@@ -436,9 +491,10 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
         mapping = BEHAVIORAL_TAG_MITRE.get(tag)
         severity, tactic, technique_id, technique_name = mapping if mapping else ("MEDIUM", "Unknown", None, tag)
         sup_key = f"btag:{tag}:{data.get('process_name', 'unknown')}"
-        if not await _suppressed(agent_id, sup_key):
-            cmd_line = data.get("command_line") or data.get("commandLine") or ""
-            alert = Alert(
+        if await _suppressed(agent_id, sup_key):
+            continue
+        cmd_line = data.get("command_line") or data.get("commandLine") or ""
+        alert = Alert(
                 agent_id=agent_id,
                 severity=severity,
                 pid=data.get("pid"),
@@ -451,33 +507,79 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                 mitre_tactic_name=tactic,
                 mitre_technique_id=technique_id,
                 mitre_technique_name=technique_name,
+                # Evidence strutturata: il triage legge i fatti (CLI completa,
+                # lineage, path) senza doverli parsare dalla description.
+                evidence={
+                    "source": "aegis-guard",
+                    "tag": tag,
+                    "command_line": cmd_line,
+                    "pid": data.get("pid"),
+                    "parent_pid": data.get("parent_pid"),
+                    "parent_process_name": data.get("parent_process_name"),
+                    "process_path": data.get("process_path"),
+                    "user": data.get("user") or data.get("username"),
+                },
             )
+        if not await _skip_new_alert(agent_id, alert):
             db.add(alert)
             created_alerts.append(alert)
             logger.warning("BEHAVIORAL_TAG alert: %s | agent=%s | tag=%s", data.get('process_name'), agent_id, tag)
 
-    for anomaly_str in agent_anomalies:
-        # Audit: ignora voci non-stringa (vecchi agent mandavano dict).
-        if not isinstance(anomaly_str, str):
+    for anomaly in agent_anomalies:
+        # Due formati: dict strutturato (agenti nuovi, con evidence: endpoint,
+        # conteggio, processi possessori) oppure stringa (agenti vecchi).
+        # BUG corretto: per le stringhe il processo era `split(":")[-1]` —
+        # per HIGH_CONNECTION_COUNT_TO_IP metteva L'IP nel campo process_name.
+        if isinstance(anomaly, dict):
+            tag_key = str(anomaly.get("type") or "unknown").strip()
+            ev = {"source": "nodetrace", **anomaly}
+            proc = anomaly.get("process") or anomaly.get("process_name")
+            ip = anomaly.get("ip")
+            count = anomaly.get("connection_count")
+            owners = anomaly.get("processes") or []
+            if ip:
+                detail = f"{tag_key}: {ip}" + (f" ({count} connections)" if count else "")
+                if owners:
+                    detail += " — " + ", ".join(
+                        f"{o.get('name')}({o.get('connections')})" for o in owners[:3])
+            else:
+                detail = f"{tag_key}: {proc or anomaly.get('endpoint') or 'system'}"
+            desc = f"[NodeTrace Heuristic] {detail}"
+        elif isinstance(anomaly, str):
+            tag_key = anomaly.split(":")[0].strip()
+            payload = anomaly.split(":", 1)[1].strip() if ":" in anomaly else ""
+            ev = {"source": "nodetrace", "tag": tag_key, "detail": payload}
+            proc = payload if payload and not _looks_like_ip(payload) else None
+            ip = payload if _looks_like_ip(payload) else None
+            if ip:
+                detail = f"{tag_key}: {ip}"
+            else:
+                detail = f"{tag_key}: {proc or 'system'}"
+            desc = f"[NodeTrace Heuristic] {anomaly}"
+        else:
             continue
-        tag_key = anomaly_str.split(":")[0].strip()
         mapping = BEHAVIORAL_TAG_MITRE.get(tag_key)
-        severity, tactic, technique_id, technique_name = mapping if mapping else ("MEDIUM", "Unknown", None, anomaly_str)
-        sup_key = f"anomaly_nt:{anomaly_str[:80]}"
+        severity, tactic, technique_id, technique_name = mapping if mapping else ("MEDIUM", "Unknown", None, tag_key)
+        sup_key = f"anomaly_nt:{str(anomaly)[:80]}"
         if not await _suppressed(agent_id, sup_key):
             alert = Alert(
                 agent_id=agent_id,
                 severity=severity,
-                process_name=anomaly_str.split(":")[-1].strip() if ":" in anomaly_str else "unknown",
+                # process_name = il VERO processo se noto, mai l'IP; per le
+                # anomalie di rete senza possessore resta "system" (snapshot
+                # di sistema: non c'e' un evento processo da attribuire).
+                process_name=proc or "system",
                 event_type="behavioral_detection",
-                description=f"[NodeTrace Heuristic] {anomaly_str}",
+                description=desc,
                 mitre_tactic_name=tactic,
                 mitre_technique_id=technique_id,
                 mitre_technique_name=technique_name,
+                evidence=ev,
             )
-            db.add(alert)
-            created_alerts.append(alert)
-            logger.warning("NODETRACE_ANOMALY alert: agent=%s | %s", agent_id, anomaly_str)
+            if not await _skip_new_alert(agent_id, alert):
+                db.add(alert)
+                created_alerts.append(alert)
+                logger.warning("NODETRACE_ANOMALY alert: agent=%s | %s", agent_id, detail)
 
     # 6. Eventi file (FIM) e match YARA: stessi effetti della pipeline batch
     # (alert MITRE + evento OCSF in Log Search). Prima non erano gestiti QUI:
