@@ -40,6 +40,24 @@ La connessione alla dashboard remota è opzionale. Se disattivata, i file
 vengono estratti ma i servizi non vengono avviati, perché un agent senza
 endpoint di enrollment configurato non deve partire in modo ambiguo.
 
+**Prima degli installer: pubblicare gli artefatti.** L'one-liner scarica da
+`/deploy/bootstrap-artifacts/<agent>-latest.zip`, quindi il file deve esistere
+in `ARTIFACT_DIR` (gli artefatti sono output di build: non stanno nel repo).
+
+```bash
+python scripts/pack-artifacts.py            # ZIP + tar.gz, nomi -latest inclusi
+python scripts/setup.py update --rebuild-agents   # se serve ricostruire prima
+```
+
+Dentro l'artefatto di Guard finiscono `aegis-guard.jar`, il `jre/` incluso
+(se `build.bat` lo ha creato), `aegis-etw.exe` per la telemetria kernel e
+`bin/yara64.exe`. Manca il runtime → lo script fallisce; manca un pezzo
+opzionale (collector ETW, YARA) → lo dichiara e Guard degrada dicendolo
+(`quality=degraded:etw-...`). Sul target serve **admin** (registrazione
+servizio + sessione di trace ETW) e **Java 21+**, incluso nell'artefatto o
+installato lì: la versione viene verificata, non solo la presenza (`java` 8
+avviva un servizio che muore con `UnsupportedClassVersionError`).
+
 La dashboard locale sull'endpoint non è ancora distribuita: non selezionarla
 come requisito operativo. Per aziende isolate usare una dashboard centrale
 raggiungibile dalla rete interna; il supporto a una dashboard locale richiede

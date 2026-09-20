@@ -49,3 +49,41 @@ def test_installers_do_not_embed_proxy_configuration():
         assert "PROXY_URL" not in tpl
         assert "HTTP_PROXY" not in tpl
         assert "HTTPS_PROXY" not in tpl
+
+
+# ---------------------------------------------------------------------------
+# Parita' fra installazione remota (one-liner) e installazione locale
+# ---------------------------------------------------------------------------
+# Perche' questi test: il percorso remoto e il percorso locale erano due
+# prodotti diversi. L'installer locale puntava ETW a un path assoluto e
+# verificava la major di Java; quello remoto no — quindi un host arruolato da
+# remote girava senza telemetria kernel (e con `java` del PATH, che poteva
+# essere la 8) senza che nessuno lo dicesse.
+
+def test_windows_installer_wires_kernel_telemetry():
+    """ETW: path assoluto + opt-in esplicito per il collector non firmato."""
+    assert "AEGIS_ETW_ENABLED" in INSTALL_PS1
+    assert "AEGIS_ETW_PATH" in INSTALL_PS1
+    assert "AEGIS_ETW_ALLOW_UNSIGNED" in INSTALL_PS1
+    # Path ASSOLUTO: un path relativo non viene risolto e l'ETW non parte mai.
+    assert 'Join-Path $Dir "aegis-etw.exe"' in INSTALL_PS1
+
+
+def test_windows_installer_declares_missing_etw_instead_of_silence():
+    """Capacita' mancante dichiarata, mai finta: e' il contratto del progetto."""
+    assert "no ETW collector in the artifact" in INSTALL_PS1
+    assert "quality=degraded" in INSTALL_PS1
+
+
+def test_windows_installer_resolves_java_version_not_just_presence():
+    """Java 8 nel PATH installa un servizio che poi muore: va verificata la major."""
+    assert "function Get-JavaMajor" in INSTALL_PS1
+    assert "function Resolve-Java" in INSTALL_PS1
+    assert "jre\\bin\\java.exe" in INSTALL_PS1
+    assert "-ge 21" in INSTALL_PS1
+
+
+def test_windows_installer_says_when_no_service_was_registered():
+    """Senza dashboard remota non si registra nulla: va detto, non sottinteso."""
+    assert "no service registered" in INSTALL_PS1
+    assert "remote dashboard NOT selected" in INSTALL_PS1

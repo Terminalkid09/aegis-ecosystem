@@ -106,9 +106,19 @@
 
 | Channel | Description |
 |---------|-------------|
-| **Telegram** | Alerts at or above your chosen minimum severity (INFO → CRITICAL, default HIGH) pushed to a bot chat the moment they are created, plus a periodic "Aegis is alive" heartbeat — the dashboard does not need to be open. Outbound HTTPS only: a fully local stack needs no open ports, no port forwarding, no cloud host. Setup: `@BotFather` → paste the whole token (`123456789:ABC...`) in **Settings → Integrations & API Keys** → **Detect chat ID** in **Settings → Telegram Notifications** lists the chats that messaged your bot → **Send test message** verifies for real. Delivery is best-effort and fail-soft: detection and storage never depend on it |
+| **Telegram** | Alerts at or above your chosen minimum severity (INFO → CRITICAL, default HIGH) pushed to a bot chat the moment they are created, plus a periodic "Aegis is alive" heartbeat — the dashboard does not need to be open. Resolutions and reopenings are pushed with the **same threshold** (choose CRITICAL and you get no HIGH noise, open or closed). Messages are laid out in labelled blocks (severity/host header, event, process, PID, MITRE, monospaced command line, footer with timestamp and alert id). Outbound HTTPS only: a fully local stack needs no open ports, no port forwarding, no cloud host. Setup: `@BotFather` → paste the whole token (`123456789:ABC...`) in **Settings → Integrations & API Keys** → **Detect chat ID** in **Settings → Telegram Notifications** lists the chats that messaged your bot → **Send test message** verifies for real (saving the chat ID invalidates the in-process cache, so the button uses it immediately — no "chat_id missing" after a save). Delivery is best-effort and fail-soft: detection and storage never depend on it |
 | **Browser** | *Desktop Notifications* and *Audio Alarms* toggles are functional — native OS notifications (Notification API) and audio alerts (WebAudio), driven by the realtime stream |
 | **Realtime stream** | `/api/v1/ws/alerts` pushes every newly created alert to connected dashboards (HttpOnly-cookie auth, no tokens in URLs); alert lists and counters update instantly |
+
+**Telegram as a remote control, not a second dashboard.** The bot answers three read-only commands, so "is it still watching?" does not need a browser:
+
+| Command | Answer |
+|---|---|
+| `/status` (alias `/agents`) | How many agents are online and, per device: hostname, agent (Guard/NodeTrace), OS and last contact (`online` / `offline 4m` / `never seen`) |
+| `/alerts` | Open alerts, filtered with your threshold (the same one the notifications use) |
+| `/help` (and `/start`) | The command list plus **your chat ID** — that is how the setup step discovers it |
+
+`/status` and `/alerts` answer **only to the configured chat_id**: anything else gets silence (no data, and no confirmation of what exists). `/start` answers anyone, because that is the only way for a user to learn their own chat ID, and it exposes nothing about the system. Triage, evidence and playbooks stay in the dashboard.
 
 ### 🗺️ Discovery Center
 
@@ -149,7 +159,11 @@ cd aegis-ecosystem
 python scripts/setup.py
 ```
 
-It prints the admin credentials, the dashboard URL and the update path. To update later (data preserved — the database volume is never touched):
+It prints the admin credentials, the dashboard URL and the update path.
+
+> **Run it from an *Administrator* terminal** (`Right-click → Run as administrator`) if you want the host agents installed as persistent Windows services with kernel telemetry. That single elevated session is what pays the privilege cost once: agents run as `LocalSystem` (always admin, no UAC prompt ever again, restart at boot). Not elevated, `setup.py` still brings the whole stack up and **prints the exact commands to run later** — it never leaves a silent gap. The same applies to `aegis.bat services`, which requests the elevation itself with one UAC prompt.
+
+To update later (data preserved — the database volume is never touched):
 
 ```bash
 python scripts/setup.py update          # rebuild + restart, DB preserved
@@ -290,6 +304,29 @@ Docker containers come back on their own (`restart: unless-stopped`), but host a
 - **`python scripts/setup.py` registers them for you** when it runs elevated; if it is not elevated, it prints the exact commands instead of leaving a silent gap. Use `--no-autostart` to force dev-mode agents only (never two instances per endpoint: either services **or** dev processes).
 - **No-admin fallback**: `powershell -ExecutionPolicy Bypass -File scripts/install-agents-autostart.ps1` registers Scheduled Tasks "at log on" (user context; elevated Guard actions unavailable). Remove with `-Remove`.
 - **Token installer**: when remote dashboard connectivity is selected, the installer performs the service registration itself and verifies the service is running before returning success.
+
+### Remote enrollment: install an agent on another host
+
+Generate a short-lived token in **Deployment Manager** (`Aegis-Guard`, `NodeTrace` or **both**, one slot consumed per agent), then run the one-liner it shows **in an Administrator PowerShell on the target**:
+
+```powershell
+irm <brain>/api/v1/deploy/install.ps1?agent=both -Headers @{'X-Enroll-Token'='<token>'} | iex
+```
+
+```bash
+curl -fsSL -H 'X-Enroll-Token: <token>' '<brain>/api/v1/deploy/install.sh?agent=both' | sudo bash
+```
+
+The installer downloads the artifact for that agent, extracts it (Guard into `C:\Aegis\Guard`, NodeTrace into `C:\Aegis\NodeTrace`), sets the brain URL / enrollment key and **registers the service** (`New-Service` on Windows, systemd on Linux) — the same service model as a local install. It refuses to pretend: if remote-dashboard connectivity was not selected in the token, it says that no service was registered instead of reporting success.
+
+One preparative step is yours — **publish the artifacts the brain serves** (they are build outputs, never committed):
+
+```bash
+python scripts/pack-artifacts.py            # -> aegis-brain/artifacts/*-latest.{zip,tar.gz}
+python scripts/pack-artifacts.py --version v4.0.0
+```
+
+It packs exactly what a local install copies: `aegis-guard.jar`, a bundled `jre/` when `build.bat` produced one, `aegis-etw.exe` (kernel telemetry) and `bin/yara64.exe` for Guard; the full PyInstaller bundle for NodeTrace. Missing runtime = hard failure; missing optional piece = declared in the output (`python -m ...`-style honesty, no silent gaps). What the target needs: **Administrator** (service registration + ETW trace session), and a **Java 21+** runtime — either bundled in the artifact or installed there (`Get-JavaMajor` verifies the version, because a Java 8 on `PATH` installs a service that starts and dies with `UnsupportedClassVersionError`).
 
 ### Development mode (agents)
 

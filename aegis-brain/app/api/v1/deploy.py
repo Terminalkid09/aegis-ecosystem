@@ -167,6 +167,35 @@ $Base = "{BASE}/api/v1"
 $EnrollToken = "{ENROLL_TOKEN}"
 $RemoteDashboard = {REMOTE_DASHBOARD}
 
+function Get-JavaMajor([string]$Exe) {
+    # La sola presenza di `java` nel PATH non basta: la prima java del PATH puo'
+    # essere la 8 (su questa macchina lo era), il servizio si installa, parte e
+    # muore con UnsupportedClassVersionError — e in dashboard l'host
+    # semplicemente non compare, senza un errore visibile da nessuna parte.
+    try {
+        $first = (& $Exe -version 2>&1 | Select-Object -First 1)
+        if ("$first" -match 'version "(\d+)(?:\.(\d+))?') {
+            $major = [int]$Matches[1]
+            if ($major -eq 1 -and $Matches[2]) { return [int]$Matches[2] }
+            return $major
+        }
+    } catch { }
+    return 0
+}
+
+function Resolve-Java([string]$Dir) {
+    # Ordine di preferenza: runtime incluso nell'artefatto (host senza Java
+    # installato), poi java del PATH — ma solo se la versione e' >= 21.
+    $candidates = @((Join-Path $Dir "jre\bin\java.exe"),
+                    (Get-Command java -ErrorAction SilentlyContinue).Source)
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate) -and (Get-JavaMajor $candidate) -ge 21) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
 function Install-AegisAgent($TargetAgent) {
     $Dir = if ($TargetAgent -eq "nodetrace") { "C:\Aegis\NodeTrace" } else { "C:\Aegis\Guard" }
     New-Item -ItemType Directory -Force -Path $Dir | Out-Null
@@ -182,6 +211,22 @@ function Install-AegisAgent($TargetAgent) {
             [Environment]::SetEnvironmentVariable("NODETRACE_REGISTER_URL", "$Base/register", "Machine")
             [Environment]::SetEnvironmentVariable("NODETRACE_HEARTBEAT_URL", "$Base/heartbeat", "Machine")
             [Environment]::SetEnvironmentVariable("NODETRACE_UPDATE_URL", "$Base/update", "Machine")
+            if ($TargetAgent -eq "aegis-guard") {
+                # Telemetria kernel: se l'artefatto include il collector, si
+                # punta AEGIS_ETW_PATH all'eseguibile ASSOLUTO e si dichiara
+                # l'opt-in (il collector e' compilato dall'operatore, quindi
+                # senza firma Authenticode: Guard lo esegue solo con questa
+                # dichiarazione esplicita). Se manca, NON si finge nulla:
+                # Guard usa il polling e lo dice (quality=degraded:etw-...).
+                $etw = Join-Path $Dir "aegis-etw.exe"
+                if (Test-Path $etw) {
+                    [Environment]::SetEnvironmentVariable("AEGIS_ETW_ENABLED", "true", "Machine")
+                    [Environment]::SetEnvironmentVariable("AEGIS_ETW_PATH", $etw, "Machine")
+                    [Environment]::SetEnvironmentVariable("AEGIS_ETW_ALLOW_UNSIGNED", "true", "Machine")
+                } else {
+                    Write-Host "[aegis] no ETW collector in the artifact: Guard will use polling (declared as quality=degraded:etw-...)."
+                }
+            }
         }
         Remove-Item -Force $pkg
     } catch {
@@ -200,8 +245,11 @@ function Install-AegisService($TargetAgent) {
     }
     if (-not $binary) { throw "No $TargetAgent runtime found after extraction" }
     if ($TargetAgent -eq "aegis-guard") {
-        $java = (Get-Command java -ErrorAction SilentlyContinue).Source
-        if (-not $java) { throw "Java 21+ is required for Aegis-Guard service" }
+        $java = Resolve-Java "C:\Aegis\Guard"
+        if (-not $java) {
+            throw "Java 21+ is required for Aegis-Guard: bundle a runtime under jre\ in the artifact, or install it on the target."
+        }
+        Write-Host "[aegis] using Java: $java (major $((Get-JavaMajor $java)))"
         $binPath = "`"$java`" -jar `"$($binary.FullName)`""
     } else {
         $binPath = "`"$($binary.FullName)`""
@@ -229,10 +277,15 @@ if ($Agent -eq "both") {
     Install-AegisService $Agent
     Write-Host "[aegis] installed."
 }
+if (-not $RemoteDashboard) {
+    Write-Host "[aegis] remote dashboard NOT selected: files extracted, no service registered."
+    Write-Host "        Start the agent from its directory, or re-issue a token with remote dashboard enabled for a persistent service."
+}
 Write-Host "[aegis] Set AEGIS_BRAIN_URL=$Base and AEGIS_ENROLL_KEY before starting the agent."
 Write-Host "[aegis] For NodeTrace also set NODETRACE_REGISTER_URL=$Base/register,"
 Write-Host "        NODETRACE_HEARTBEAT_URL=$Base/heartbeat and NODETRACE_UPDATE_URL=$Base/update."
 Write-Host "[aegis] The agent will consume the single-use token during its first enrollment."
+Write-Host "[aegis] Verify: Get-Service AegisGuard,AegisNodeTrace and logs under C:\Aegis\<agent>\logs."
 Write-Host "[aegis] Docs: https://aegis.local/docs/agent-install"
 """
 
