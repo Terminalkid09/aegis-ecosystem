@@ -452,7 +452,12 @@ jobs:
           mvn clean package
           cd ..
           mkdir -p release
-          cp aegis-guard/target/aegis-guard-*.jar release/
+          # Il glob dev'essere *.jar, non aegis-guard-*.jar: lo shade plugin
+          # rinomina l'artefatto finale in aegis-guard.jar (senza versione),
+          # quindi il pattern con il trattino non matchava NIENTE e la release
+          # moriva su un cp a target/ pieno. Stesso path usato dal passo che
+          # carica l'artefatto sui branch, che ha sempre funzionato.
+          cp aegis-guard/target/*.jar release/
           sha256sum release/* > release/SHA256SUMS.txt
 
       - name: Download SBOM
