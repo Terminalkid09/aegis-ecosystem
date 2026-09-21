@@ -16,14 +16,27 @@ export const apiClient = axios.create({
 // 401 there is the expected answer, not a lost session, and the session is
 // cleared only when the app believed it had one (sessionHint): without that, a
 // 401 from a page opened with no session at all would wipe a valid login.
+//
+// L'epoca chiude il buco rimasto: una richiesta partita con la sessione VECCHIA
+// puo' rispondere 401 DOPO un nuovo login, e senza controllo sloggava l'utente
+// che era appena rientrato (l'operatore vedeva errore e doveva ricaricare la
+// pagina). Ogni richiesta porta l'epoca in cui e' partita; il 401 chiude la
+// sessione solo se appartiene alla sessione corrente.
+apiClient.interceptors.request.use((config) => {
+  ;(config as any).__sessionEpoch = useAppStore.getState().sessionEpoch
+  return config
+})
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error?.response?.status
     const url: string = error?.config?.url || ''
     const skipWipe = (error?.config as any)?.__skipAuthWipe === true
+    const reqEpoch = (error?.config as any)?.__sessionEpoch
     const store = useAppStore.getState()
     if (status === 401 && !skipWipe && store.sessionHint
+        && reqEpoch === store.sessionEpoch
         && !url.includes('/auth/login') && !url.includes('/auth/me')) {
       store.logout()
     }

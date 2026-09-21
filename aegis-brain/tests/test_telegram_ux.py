@@ -306,3 +306,120 @@ async def test_command_loop_marks_updates_as_handled(client, db_session, test_ag
     assert "Aegis" in sent[0][2]
     # offset = update_id + 1: senza, Telegram rimanda sempre lo stesso comando.
     assert upd.await_args_list[-1].args[-1] == 42
+
+
+# ---------------------------------------------------------------------------
+# Regressione: l'intervallo del heartbeat e' quello SALVATO, letto fresco
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_heartbeat_interval_honours_saved_value(db_session):
+    """900 minuti scritti in dashboard = 900 minuti, non il default di 60."""
+    await app_settings.set_value(db_session, "telegram.heartbeat_minutes", "900")
+    await db_session.flush()
+    app_settings._TG_CACHE.clear()
+    telegram_notifier._cache_loaded = False
+
+    await telegram_notifier._ensure_cache(db_session)
+    assert telegram_notifier._heartbeat_interval() == 900 * 60
+
+    # Il minimo della UI (15 minuti) resta il pavimento: un valore piu' basso
+    # scritto a mano nel DB non deve trasformare il bot in spam.
+    await app_settings.set_value(db_session, "telegram.heartbeat_minutes", "1")
+    await db_session.flush()
+    telegram_notifier.invalidate_cache()
+    await telegram_notifier._ensure_cache(db_session)
+    assert telegram_notifier._heartbeat_interval() == 15 * 60
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_loop_refreshes_config_before_reading_interval(db_session):
+    """Il bug osservato: cache vuota (appena salvato) -> default di 60 minuti.
+
+    Il valore salvato esisteva; veniva letto da una cache non ancora
+    rinfrescata. Qui si blocca l'ORDINE (rinfresca, poi leggi) e si verifica
+    che l'intervallo usato sia quello del DB e non 3600.
+    """
+    await app_settings.set_value(db_session, "telegram.enabled", "true")
+    await app_settings.set_value(db_session, "telegram.chat_id", "12345")
+    await app_settings.set_value(db_session, "telegram.heartbeat_minutes", "900")
+    await db_session.flush()
+    telegram_notifier.invalidate_cache()          # cio' che fa il PUT dalla UI
+
+    events: list = []
+    intervals: list = []
+    real_interval = telegram_notifier._heartbeat_interval
+
+    async def ensure_cache(session):
+        events.append("refresh")
+        await app_settings.refresh_telegram_cache(session)
+
+    def interval():
+        events.append("read")
+        value = real_interval()
+        intervals.append(value)
+        return value
+
+    send = AsyncMock()
+    with patch.object(telegram_notifier, "_ensure_cache", ensure_cache), \
+         patch.object(telegram_notifier, "_heartbeat_interval", interval), \
+         patch.object(telegram_notifier, "HEARTBEAT_TICK_SECONDS", 0.01), \
+         patch.object(telegram_notifier, "_session_factory", lambda: db_session), \
+         patch.object(telegram_notifier, "_db_cleanup", AsyncMock()), \
+         patch.object(telegram_notifier, "_send", send), \
+         _patch_token():
+        import asyncio
+        task = asyncio.create_task(telegram_notifier._heartbeat_loop())
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if len(intervals) >= 2:
+                break
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert events[:2] == ["refresh", "read"], events
+    assert intervals and set(intervals) == {900 * 60}, intervals
+    # 900 minuti non sono passati: il battito NON deve essere partito subito.
+    send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_loop_sends_when_interval_elapsed(db_session):
+    """Quando e' ora, il battito parte davvero (la fix non l'ha spento)."""
+    await app_settings.set_value(db_session, "telegram.enabled", "true")
+    await app_settings.set_value(db_session, "telegram.chat_id", "12345")
+    await db_session.flush()
+    app_settings._TG_CACHE.clear()
+    app_settings._TG_CACHE.update({
+        app_settings.KEY_TG_ENABLED: "true",
+        app_settings.KEY_TG_CHAT: "12345",
+    })
+    telegram_notifier._cache_loaded = True
+    telegram_notifier._enabled = None
+
+    sent: list = []
+    with patch.object(telegram_notifier, "_heartbeat_interval", lambda: 0), \
+         patch.object(telegram_notifier, "HEARTBEAT_TICK_SECONDS", 0.01), \
+         patch.object(telegram_notifier, "_session_factory", lambda: db_session), \
+         patch.object(telegram_notifier, "_db_cleanup", AsyncMock()), \
+         patch.object(telegram_notifier, "_send",
+                      new=AsyncMock(side_effect=lambda t, c, x: sent.append((t, c, x)))), \
+         _patch_token():
+        import asyncio
+        task = asyncio.create_task(telegram_notifier._heartbeat_loop())
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            if sent:
+                break
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert sent, "il battito non e' partito quando l'intervallo era scaduto"
+    assert sent[0][1] == "12345"
+    assert "heartbeat" in sent[0][2].lower()

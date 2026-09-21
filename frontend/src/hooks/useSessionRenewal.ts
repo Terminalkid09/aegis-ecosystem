@@ -17,8 +17,15 @@ import { useAppStore } from '@/store/appStore'
  *   lunga (tab chiusa/sospesa = il timer non gira);
  * - un refresh fallito NON slogga (flag __skipAuthWipe): slogga solo il 401
  *   su una richiesta dati reale;
- * - al re-login la cache React Query viene svuotata, cosi' la UI riparte
- *   dai dati freschi invece di mostrare lo stato freezato.
+ * - a ogni cambio di sessione (login o logout) la cache React Query viene
+ *   svuotata e le richieste in volo annullate, cosi' la UI riparte dai dati
+ *   freschi invece di mostrare lo stato della sessione precedente.
+ *
+ * Perche' non basta il cambio utente: dopo una scadenza e un re-login con lo
+ * STESSO account l'utente non cambiava, quindi la cache sopravviveva con le
+ * query in errore della sessione morta — la dashboard restava in errore finche'
+ * non si ricaricava la pagina a mano. Il segnale giusto e' la sessione (l'epoca),
+ * non l'identita' dell'utente.
  *
  * Da montare dentro QueryClientProvider (usa useQueryClient).
  */
@@ -30,15 +37,19 @@ export function useSessionRenewal() {
   const user = useAppStore((s) => s.user)
   const lastAwayRef = useRef<number>(0)
 
-  // Re-login => cache pulita: niente stato vecchio dalla sessione precedente.
-  const prevUserIdRef = useRef<number | null>(null)
+  // Nuova sessione o fine sessione => cache pulita: niente stato vecchio
+  // (query fallite comprese) che sopravvive al login. L'epoca cambia sia al
+  // login sia al logout, quindi copre anche il re-login con lo stesso utente.
+  const sessionEpoch = useAppStore((s) => s.sessionEpoch)
+  const lastEpochRef = useRef(sessionEpoch)
   useEffect(() => {
-    const prev = prevUserIdRef.current
-    prevUserIdRef.current = user?.id ?? null
-    if (user && prev !== null && prev !== user.id) {
-      queryClient.clear()
-    }
-  }, [user?.id, queryClient])
+    if (lastEpochRef.current === sessionEpoch) return
+    lastEpochRef.current = sessionEpoch
+    // Annullare prima di svuotare: una risposta in volo della sessione vecchia
+    // non deve scrivere nella cache nuova.
+    queryClient.cancelQueries()
+    queryClient.clear()
+  }, [sessionEpoch, queryClient])
 
   // Remember-me: se non c'e' sessione ma il browser ha un dispositivo fidato
   // ("Mantieni l'accesso"), rientra in silenzio senza chiedere le credenziali.

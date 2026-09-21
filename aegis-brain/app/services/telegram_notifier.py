@@ -667,13 +667,34 @@ def _commands_interval() -> int:
 _task: Optional[asyncio.Task] = None
 
 
+# Fetta di attesa del heartbeat. L'intervallo vero si rilegge a ogni fetta:
+# con un'attesa unica da 15-1440 minuti, accorciare il periodo dalla dashboard
+# avrebbe avuto effetto solo alla scadenza del timer vecchio (fino a un giorno
+# dopo), che per un'impostazione appena salvata e' indistinguibile da "non ha
+# funzionato".
+HEARTBEAT_TICK_SECONDS = 30
+
+
 async def _heartbeat_loop() -> None:
+    """Manda "sono vivo" ogni N minuti, con N letto fresco dal DB.
+
+    Regressione chiusa qui (riportata dall'operatore: "ho messo 900 minuti e la
+    notifica e' arrivata dopo un'ora"): la cache delle impostazioni veniva letta
+    PRIMA di essere rinfrescata. Subito dopo un salvataggio dalla dashboard la
+    cache e' vuota (`invalidate_cache`), quindi `get_cached` restituiva None e
+    vinceva il default di 60 minuti — il valore salvato c'era, l'ordine no.
+    Ora: rinfresca, poi leggi, poi decidi se e' ora di mandare.
+    """
+    last_run = time.monotonic()
     while True:
         db = None
         try:
-            await asyncio.sleep(_heartbeat_interval())
+            await asyncio.sleep(HEARTBEAT_TICK_SECONDS)
             db = _session_factory()
             await _ensure_cache(db)
+            if time.monotonic() - last_run < _heartbeat_interval():
+                continue
+            last_run = time.monotonic()
             if not _is_enabled():
                 continue
             token = await integration_settings.get_key(db, "telegram_bot_token")
