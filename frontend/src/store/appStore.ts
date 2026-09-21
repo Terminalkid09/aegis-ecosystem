@@ -55,6 +55,11 @@ interface AppState {
   token: string | null
   login: (token: string, user: User) => void
   logout: () => void
+  // Cambia a ogni login/logout. Le richieste portano l'epoca in cui sono
+  // partite: cosi' un 401 che arriva da una richiesta iniziata PRIMA del login
+  // (sessione vecchia) non chiude la sessione appena aperta. Partiva da qui il
+  // sintomo "dopo il re-login la pagina da errore finche' non la ricarico".
+  sessionEpoch: number
   // True once a login succeeded on this browser: it tells the app there is a
   // session cookie worth validating on the next load. A first-time visitor has
   // no session, so probing /auth/me would only produce a guaranteed 401.
@@ -87,14 +92,25 @@ export const useAppStore = create<AppState>()(
       user: null,
       token: null,
       sessionHint: false,
+      sessionEpoch: 0,
       setUser: (user) => set({ user }),
       login: (token, user) => {
         // The server sets an HttpOnly cookie. The token stays in memory only
         // for backwards-compatible state shape and is never persisted.
-        set({ token: token || 'cookie-session', user, sessionHint: true })
+        set((state) => ({
+          token: token || 'cookie-session',
+          user,
+          sessionHint: true,
+          sessionEpoch: state.sessionEpoch + 1,
+        }))
       },
       logout: () => {
-        set({ token: null, user: null, sessionHint: false })
+        set((state) => ({
+          token: null,
+          user: null,
+          sessionHint: false,
+          sessionEpoch: state.sessionEpoch + 1,
+        }))
       },
 
       // Live stats
