@@ -239,6 +239,19 @@ jobs:
           name: guard-surefire
           path: aegis-guard/target/surefire-reports/
           if-no-files-found: warn
+      # Il database NVD scaricato da dependency-check e' la ragione per cui la
+      # prima run di un ref e' lentissima (decine di minuti) e le successive no:
+      # senza cache ogni push riparte da zero. Chiave con run_id + restore-keys
+      # per prefisso = si riusa sempre la cache piu' recente disponibile; le
+      # voci vecchie vengono poi sfrattate da GitHub.
+      - name: Cache NVD data (dependency-check)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: nvd-data-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            nvd-data-${{ runner.os }}-
+
       - name: Audit Guard (Maven, fail on high)
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
@@ -267,14 +280,15 @@ jobs:
           # cachato da setup-java `cache: maven`): la prima run e' lenta (decine
           # di minuti), le successive sullo stesso pom hash riusano la cache.
           #
-          # Ogni tentativo ha un tetto di 60 minuti (`timeout`, exit 124): senza,
+          # Ogni tentativo ha un tetto di 75 minuti (`timeout`, exit 124): senza,
           # un feed che risponde a singhiozzo teneva la run appesa finche' non
           # scadeva il timeout del job (6 ore) — una release non puo' restare in
           # attesa di un feed lento. Con il tetto il fallimento e' rapido e dice
-          # il motivo.
+          # il motivo. Il valore e' sopra la durata reale di un primo
+          # scaricamento (40-60 min) per non interrompere lavoro utile.
           for attempt in 1 2 3; do
             rc=0
-            timeout 60m mvn -B org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7 \
+            timeout 75m mvn -B org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7 \
               -Dnvd.api.key="$NVD_API_KEY" > dependency-check.log 2>&1 || rc=$?
             tail -40 dependency-check.log
             if [ "$rc" -eq 0 ]; then
@@ -286,7 +300,7 @@ jobs:
               exit 1
             fi
             if [ "$rc" -eq 124 ]; then
-              echo "::warning::dependency-check attempt $attempt/3 hit the 60-minute cap (NVD feed too slow)"
+              echo "::warning::dependency-check attempt $attempt/3 hit the 75-minute cap (NVD feed too slow)"
             else
               echo "::warning::dependency-check attempt $attempt/3 failed on the NVD feed (rc=$rc); retrying in 60s"
             fi
@@ -321,20 +335,18 @@ jobs:
           pip install -r requirements.txt pip-audit
           pip-audit --desc
 
+      # Syft da immagine pinnata per digest, non dall'azione: l'azione scarica
+      # il binario da GitHub Releases e oggi quella rotta risponde 504, quindi
+      # l'install fallisce per checksum mismatch (verificato sui log: dev e tag
+      # dello STESSO commit rossi per questo, non per il codice). Il registry
+      # Docker e' un'infrastruttura diversa, ed e' la stessa scelta gia' fatta
+      # per Trivy in questo file. La SBOM continua a uscire in SPDX JSON con lo
+      # stesso nome, quindi artefatto e attachment della release non cambiano.
       - name: SBOM (brain + guard)
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
-        with:
-          path: ./
-          format: spdx-json
-          output-file: sbom.spdx.json
-          # Su un tag l'azione prova ad allegare la SBOM alla release: senza
-          # contents:write il GITHUB_TOKEN (read-only di default) risponde
-          # "Resource not accessible by integration" e il job muore DOPO aver
-          # prodotto la SBOM. L'attachment lo fa gia' il job `release`, che
-          # scarica questo artefatto e lo carica con la release vera — quindi
-          # qui l'upload diretto e' un duplicato permesso-sensibile: spento.
-          upload-release-assets: false
-          upload-artifact: false
+        run: |
+          docker run --rm -v "$PWD:/scan" \
+            anchore/syft:v1.42.3@sha256:5999d209a342e55e9edf70bf8930fb5b86d8f2a783fa401178372c50e21b1d36 \
+            dir:/scan -o spdx-json=/scan/sbom.spdx.json
 
       - name: Upload SBOM
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
