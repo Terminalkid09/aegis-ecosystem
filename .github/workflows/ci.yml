@@ -266,21 +266,33 @@ jobs:
           # Il datafeed scaricato vive in ~/.m2/repository (dentro il path
           # cachato da setup-java `cache: maven`): la prima run e' lenta (decine
           # di minuti), le successive sullo stesso pom hash riusano la cache.
+          #
+          # Ogni tentativo ha un tetto di 60 minuti (`timeout`, exit 124): senza,
+          # un feed che risponde a singhiozzo teneva la run appesa finche' non
+          # scadeva il timeout del job (6 ore) — una release non puo' restare in
+          # attesa di un feed lento. Con il tetto il fallimento e' rapido e dice
+          # il motivo.
           for attempt in 1 2 3; do
-            if mvn -B org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7 \
-                 -Dnvd.api.key="$NVD_API_KEY" > dependency-check.log 2>&1; then
-              tail -20 dependency-check.log
+            rc=0
+            timeout 60m mvn -B org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7 \
+              -Dnvd.api.key="$NVD_API_KEY" > dependency-check.log 2>&1 || rc=$?
+            tail -40 dependency-check.log
+            if [ "$rc" -eq 0 ]; then
+              echo "dependency-check clean (no dependency with CVSS >= 7)"
               exit 0
             fi
-            tail -40 dependency-check.log
             if grep -qi "dependencies were identified with vulnerabilities" dependency-check.log; then
               echo "::error::Dependency-Check: dependency with CVSS >= 7 (known vulnerability, not an NVD feed failure)"
               exit 1
             fi
-            echo "::warning::dependency-check attempt $attempt/3 failed on the NVD feed; retrying in 60s"
+            if [ "$rc" -eq 124 ]; then
+              echo "::warning::dependency-check attempt $attempt/3 hit the 60-minute cap (NVD feed too slow)"
+            else
+              echo "::warning::dependency-check attempt $attempt/3 failed on the NVD feed (rc=$rc); retrying in 60s"
+            fi
             sleep 60
           done
-          echo "::error::dependency-check failed after 3 attempts (NVD feed unreachable)"
+          echo "::error::dependency-check failed after 3 attempts (NVD feed unreachable or too slow)"
           exit 1
       - name: Build Aegis Guard
         run: |
