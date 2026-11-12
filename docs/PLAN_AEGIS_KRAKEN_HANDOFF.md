@@ -1,10 +1,15 @@
 # AEGIS ECOSYSTEM + KRAKEN — specifica di lavoro (handoff)
 
-**Versione documento:** 2.0 — 2026-11-12
+**Versione documento:** 2.1 — 2026-11-12
 **Destinatario:** sessione di sviluppo successiva (umana o agente)
 **Repo Aegis:** `Terminalkid09/aegis-ecosystem`, branch analizzato `dev` @ `c9831c5` (albero identico a `main` @ `38e245f`)
 **Repo Kraken:** `Terminalkid09/Kraken`, branch `main` @ `d86c8d5`
 **Report di analisi precedente:** `docs/ANALYSIS_AEGIS_KRAKEN.md` (finding sintetici; questo documento è la specifica operativa)
+
+**Aggiornamento requisiti (v2.1, vincolante):**
+- **Kraken è e resta un microservizio separato** (`services/kraken`): processo, DB, migrazioni, rete, credenziali e UI propri. **Mai fuso nel Brain** (niente logica, tabelle, socket o privilegi di Kraken nel Brain). Il Brain è piano di controllo/detection; Kraken è servizio di deception e lab.
+- **Kraken Lab:** piattaforma/lab configurabile per simulare sottoreti, host e scenari d’attacco riproducibili e verificare il comportamento di Aegis end-to-end (rilevato/non rilevato, correlazione, incidente, risposta) in modalità shadow → attiva, con raccolta evidenze.
+- **UI dedicate e distinte:** Kraken ha una **UI propria** per dati/operazioni sue (sensori/nodi, sessioni, comandi, sample, campagne, topologia e run del lab, configurazione). La SPA Aegis mostra la vista unificata/correlata (eventi, alert, incidenti, timeline, esito detection/risposta) senza sostituire la UI Kraken.
 
 ---
 
@@ -397,39 +402,42 @@ I finding **002** di Aegis e **000/001/002/003** di Kraken bloccano la release: 
 | Rilascio | ogni fix honeypot richiede un redeploy del core SOC | ciclo indipendente |
 | Compliance | dati di attaccanti insieme ai dati dei dipendenti | perimetri e retention distinti |
 
-**Decisione:** Kraken resta un servizio con proprio DB, proprie migrazioni e proprio ciclo di rilascio. Aegis è il **piano di controllo** (identità, eventi, detection, incidenti, risposta); Kraken è un **sensore di deception** che produce eventi. Nessuna tabella condivisa, nessun import Python incrociato.
+**Decisione (vincolante):** Kraken resta un **microservizio separato** con proprio processo, DB, migrazioni, ciclo di rilascio, rete, credenziali e **UI dedicata**. Aegis è il **piano di controllo** (identità, eventi, detection, incidenti, risposta); Kraken è un **servizio di deception e lab** che produce eventi e risultati di verifica. **È vietato fonderlo nel Brain** (logica, tabelle, privilegi, socket, esecuzione). L’unico accoppiamento ammesso è il contratto documentato (§5.3, §5.7).
 
 ### 5.2 Topologia target
 
 ```
                         ┌──────────────────────── Caddy (TLS, CSP, HSTS) ───────────────────────┐
                         │                                                                       │
-   browser SOC ─────────┤ /                  → aegis-frontend   (SPA)                            │
+   browser SOC ─────────┤ /                  → aegis-frontend   (SPA, vista unificata)          │
                         │ /api/*             → aegis-brain      :8000                            │
                         │ /ws/*              → aegis-brain      (WebSocket)                      │
-                        │ /deception/*       → kraken           :9000   (proxy + auth delegated) │
+                        │ /kraken/*          → kraken-ui/api    :9000  (UI dedicata + API)      │
+                        │ /deception/*       → alias/compat verso /kraken/*                     │
                         └───────────────────────────────────────────────────────────────────────┘
                                    │                                     │
                           ┌────────▼─────────┐                 ┌─────────▼──────────┐
                           │   aegis-brain    │◄── ingest ──────│   kraken (app)     │
-                          │  (controllo)     │  HMAC + key     │  (deception)       │
-                          └───┬──────┬───────┘                 └───┬────────┬───────┘
+                          │  (controllo)     │  HMAC + key     │  deception + lab   │
+                          └───┬──────┬───────┘  eventi/risultati└───┬────────┬──────┘
                               │      │                             │        │
                        ┌──────▼──┐ ┌─▼──────────┐          ┌───────▼──┐ ┌───▼────────┐
                        │ Postgres│ │ Redis      │          │ Postgres │ │ Redis      │
                        │ aegis   │ │ aegis:*    │          │ kraken   │ │ kraken:*   │
                        └─────────┘ └────────────┘          └──────────┘ └────────────┘
-                              ▲                                     ▲
-                       agenti Guard/NodeTrace              sensori SSH/HTTP/FTP/Telnet/SMB/RDP
-                                                          broker sandbox ↔ container effimeri
+                              ▲                              ▲     ▲        ▲
+                       agenti Guard/NodeTrace     sensori reali  topologie   run/scenari
+                                                     broker sandbox ↔ container/reti lab (isolate)
 ```
 
-Regole di confine:
+Regole di confine (non negoziabili):
 
-1. **Kraken non legge mai** tabelle Aegis e viceversa. L'unica conversazione è HTTP verso `/api/v1/ingest/kraken`.
-2. **Kraken non firma update, non conosce la PKI, non emette token Aegis.** Per la UI usa un token delegato (vedi §5.5).
-3. **Il Brain non ha socket Docker** né credenziali dei sensori.
-4. **Le reti sono tre**: `edge` (Caddy↔brain↔kraken), `kraken_internal` (app↔db↔redis), `sandbox` (`internal: true`, app↔broker).
+1. **Separazione totale**: Kraken non legge mai tabelle Aegis e viceversa; nessun import condiviso. Il Brain **non** contiene logica/runner/UI/lab di Kraken e **non** ottiene socket o privilegi di sandbox.
+2. **Unica conversazione inter-servizio**: HTTP autenticato verso endpoint Aegis di ingest/risultati (`/api/v1/ingest/kraken` e feed in §5.7) con payload a contratto. Niente code/DB condivisi.
+3. **Kraken non firma update, non conosce la PKI, non emette token Aegis.** Può accettare identità delegata per la UI (§5.5) ma resta autonomo.
+4. **Il Brain non ha socket Docker** né credenziali dei sensori/lab. Solo il broker sandbox di Kraken media il runtime, con allowlist.
+5. **Reti**: `edge`, `kraken_internal`, `sandbox` interna. Il **Kraken Lab** crea reti/container **per scenario**, isolate tra loro e, per default, senza egress verso host/LAN/Internet: l’osservazione verso Aegis avviene tramite eventi/risultati emessi dal servizio Kraken (§5.7), mai con collegamento di rete diretto del lab al Brain/DB di Aegis.
+6. **UI distinte**: Kraken espone **UI dedicata** sotto `/kraken/*` per dati/operazioni proprie (sensori, sessioni, comandi, sample, campagne, topologie/run lab, configurazione). La SPA Aegis mostra solo la vista unificata/correlata (eventi, alert, incidenti, timeline, esito detection/risposta).
 
 ### 5.3 Contratto eventi (riuso di ciò che esiste)
 
@@ -457,7 +465,8 @@ Content-Type: application/json
     "raw": { "sensor": "ssh", "session_id": "5f2c...", "threat_level": "high",
              "geo": { "country": "RU", "asn": 49505 },
              "iocs": ["45.9.20.7", "d41d8cd9..."],
-             "sample_sha256": "…", "mitre": ["T1110.001","T1059.004"] },
+             "sample_sha256": "…", "mitre": ["T1110.001","T1059.004"],
+             "context": "sensor", "run_id": null, "scenario_id": null, "topology_id": null },
     "tags": ["deception", "kraken"]
   }]
 }
@@ -492,16 +501,19 @@ Tre motivi concreti, non ideologici:
 
 Soglie per cambiare idea, da scrivere nel README: >5.000 eventi/s sostenuti, >30 giorni di buffer, più di 3 consumer indipendenti, o necessità di replay/riprocessing. A quel punto si valuta Redpanda, non Kafka.
 
-### 5.5 UI e autenticazione delegata
+### 5.5 UI e autenticazione (dedicata + delegata)
 
-Due opzioni, si sceglie la seconda:
+**Principio:** Kraken è un servizio separato con **UI dedicata**; Aegis non la ingloba.
 
-| Opzione | Come | Problema |
-|---|---|---|
-| Kraken espone login proprio | l'operatore ha due account | due password, due MFA, due revoche |
-| **SSO delegato** (scelta) | Caddy inoltra `/deception/*` a Kraken con un JWT firmato dal Brain (`sub`, `roles`, `exp` 5 min, `aud=kraken`) | richiede una chiave condivisa e validazione dell'`aud` |
+| UI | Dove | Responsabilità | Dati |
+|---|---|---|---|
+| **Kraken UI (dedicata)** | `/kraken/*` servita da Kraken | operazioni e analisi specifiche di Kraken | sensori/nodi, sessioni e comandi, sample/malware, campagne/fingerprint, **topologie e run del Lab**, configurazione, export Kraken |
+| **Aegis SPA (unificata)** | `/` servita dal frontend Aegis | vista SOC unificata/correlata | eventi `source=kraken` normalizzati, alert, incidenti, timeline, esito detection/risposta/playbook |
 
-Implementazione: endpoint `POST /api/v1/deception/token` (solo `admin`/`analyst`) che emette un token breve; il frontend lo passa a Kraken; Kraken verifica con la chiave pubblica Ed25519 del Brain (`KRAKEN_AEGIS_PUBKEY`). Kraken **non** ha più un form di login in produzione (`ALLOW_LOCAL_LOGIN=false`). In questo modo KRAKEN-SEC-001 e KRAKEN-SEC-009 diventano non sfruttabili nel deployment unito, ma vanno corretti lo stesso perché l'app resta installabile da sola.
+Accesso:
+- **SSO delegato (raccomandato nel deploy unito):** il Brain emette un token breve firmato (es. `POST /api/v1/deception/token`, `admin`/`analyst`, `exp` 5 min, `aud=kraken`); Kraken lo verifica con chiave pubblica del Brain (`KRAKEN_AEGIS_PUBKEY`) e mappa ruoli.
+- **Login locale Kraken:** consentito solo per installazione standalone/lab isolato (`ALLOW_LOCAL_LOGIN=true`, profilo `lab`); in produzione unita preferibilmente disabilitato. KRAKEN-SEC-001/009 vanno corretti comunque (servizio distribuibile da solo).
+- **Confini:** il token delegato dà accesso alla UI/API Kraken, non a privilegi Brain/PKI/agenti. La SPA Aegis mostra dati derivati dal contratto (§5.3, §5.7) e non duplica la gestione operativa Kraken-specifica.
 
 ### 5.6 Percorso di migrazione (senza big bang)
 
@@ -509,12 +521,35 @@ Implementazione: endpoint `POST /api/v1/deception/token` (solo `admin`/`analyst`
 |---|---|---|---|
 | 0 | Kraken nel monorepo come `services/kraken`, CI verde, **nessun** contatto col Brain | nullo | rimozione directory |
 | 1 | `POST /api/v1/ingest/kraken` + chiave scope + outbox in Kraken, feature flag `KRAKEN_INGEST_ENABLED=false` | basso | flag off |
-| 2 | Kraken invia eventi **in shadow**: il Brain li salva e li marca `deception`, nessuna detection | basso | flag off |
-| 3 | Regole Sigma su `source=kraken` + pagina "Deception" nella SPA in sola lettura | medio (rumore alert) | disattivare le regole |
-| 4 | Playbook di contenimento su attacchi deception (block IP al firewall, ticket) | medio | disattivare playbook |
-| 5 | SSO delegato e rimozione login Kraken | basso | riabilitare login |
+| 2 | Kraken invia eventi **in shadow**: il Brain li salva e li marca `deception/lab`, nessuna detection | basso | flag off |
+| 3 | UI dedicata Kraken (`/kraken/*`) per dati/ops proprie + vista unificata minima in Aegis SPA (eventi/incidente collegato) in sola lettura; regole Sigma su `source=kraken` abilitate solo a segnale stabile | medio | disattivare regole/vista |
+| 4 | Kraken Lab in shadow: scenari/topologie eseguiti, risultati/evidenze in UI Kraken, correlazione con alert Aegis via contratto (nessuna azione automatica) | medio | disattivare run/scenari |
+| 5 | Playbook/risposta su deception **opt-in** (dopo validazione Lab) e SSO delegato per accesso unificato | medio | disattivare playbook/SSO |
 
 Ogni fase ha un criterio di uscita misurabile in §10.
+
+### 5.7 Kraken Lab: architettura, isolamento e contratto di verifica
+
+**Obiettivo:** rendere Kraken un ambiente di test/deception controllato che simula sottoreti e scenari per misurare se e come Aegis rileva/correla/risponde, senza mai diventare parte del Brain.
+
+**Modello logico (tutto dentro il microservizio Kraken, mai nel Brain):**
+- **Topologia**: definizione dichiarativa (YAML/JSON versionato) di reti, sottoreti/CIDR, host/ruoli, servizi/sensori esposti, profili e parametri.
+- **Scenario**: sequenza riproducibile di azioni/TTP (bruteforce, movimento laterale simulato, beacon finto, drop sample, trigger canary) con seed, durata, intensità e precondizioni; referenzia una topologia.
+- **Run**: istanza di esecuzione (scenario × topologia × ambiente) con stato (`planned/running/passed/failed/aborted`), finestra temporale, log/artefatti, hash della definizione e owner.
+- **Expectation/asserzione**: esito atteso da Aegis (alert su regola X, severità ≥ Y, correlazione/incidente, comando/ack entro T). Le asserzioni sono valutate da Kraken confrontando i risultati osservati.
+- **Evidenza**: pacchetto esportabile (definizioni, eventi emessi, comandi, timestamp, alert/incidenti correlati, esito per asserzione).
+
+**Isolamento e sicurezza (vincoli):**
+- Reti lab **per scenario**, `internal`/senza egress di default; nessun route verso `edge`, host, LAN o Internet salvo proxy egress esplicitamente abilitato, allowlistato e auditato.
+- Esecuzione solo tramite **sandbox-broker** con allowlist; immagini controllate, limiti CPU/RAM/PID, `no-new-privileges`. Mai montare socket/privilegi nel Brain; mai dare al Brain accesso al lab.
+- Separazione “lab” vs “sensori reali”: run marcati (`source=kraken`, `context=lab`, `run_id`, `scenario_id`, `topology_id`); risposta automatica disabilitata sui run `lab` salvo opt-in esplicito.
+- Un fallimento/compromissione in un run non deve impattare altri run, il servizio Kraken core o Aegis.
+
+**Collegamento ad Aegis (contratto, microservizio↔microservizio):**
+- **Eventi**: Kraken emette `UnifiedEvent` verso `POST /api/v1/ingest/kraken` (§5.3) aggiungendo in `raw` `context:"lab"|"sensor"`, `run_id`, `scenario_id`, `topology_id`, `step`, `expected` (opzionale) e tag `["kraken","lab"]`/`["kraken","deception"]`. Idempotenza e HMAC+scope invariati.
+- **Verifica detection**: Kraken consulta/esporta gli esiti (alert/incidente/comandi/ack) tramite API Aegis read-only con chiave scope dedicato (es. `kraken:read_results`) o feed normalizzato; correla per `event_id`/`run_id`/finestra e produce il verdetto (detected, correlated, responded, missed, false_positive) salvato ed esposto nella **UI Kraken**.
+- **Modalità**: `shadow` (eventi marcati lab, nessuna azione automatica, misura detection) → `active` (solo dopo approvazione, scope esplicito, playbook opt-in). Il Brain applica le sue policy; Kraken registra l’esito.
+- **Nessuna dipendenza inversa**: Aegis non chiama runtime interni del lab e non dipende dal DB Kraken; consuma solo contratti.
 
 ---
 
@@ -625,12 +660,11 @@ Ogni voce: problema che risolve, cosa costruire, dove, criterio di accettazione,
 - **Effort:** 4 gg.
 - **Nota:** richiede la rimozione di WinRM dal "rito" del deploy: qui serve, ma con allowlist di comandi e credenziali dedicate, non con l'account di dominio dell'operatore.
 
-### 7.3 Timeline unificata investigativa
+### 7.3 Timeline unificata investigativa (vista Aegis)
 - **Problema:** la SPA ha pagine per alert, eventi SIEM, telemetria, incidenti, ma nessuna vista che li metta **in ordine** per un host o un IP.
-- **Costruire:** `GET /api/v1/timeline?subject=ip:1.2.3.4&from=...&to=...` che unisce `siem_events`, `telemetry_events`, `alerts`, `agent_commands`, `deception_events` con `source`, `severity`, `link`; UI con virtualizzazione (10k righe), filtri e "pin"; export JSON.
-- **Accettazione:** per un IP con eventi da 3 sorgenti, la vista mostra l'ordine corretto, p95 < 400 ms su 10k righe, link a ogni entità.
+- **Costruire:** `GET /api/v1/timeline?subject=ip:1.2.3.4&from=...&to=...` che unisce `siem_events`, `telemetry_events`, `alerts`, `agent_commands`, `deception_events` (inclusi eventi `context=lab` marcati) con `source`, `severity`, `link`; UI con virtualizzazione (10k righe), filtri (incluso `context` lab/sensor) e "pin"; export JSON. Dettagli operativi Kraken-specifici (topologia, step scenario, sessione raw) restano nella **UI dedicata Kraken** via deep-link.
+- **Accettazione:** per un IP con eventi da 3 sorgenti, la vista mostra l'ordine corretto, p95 < 400 ms su 10k righe, link a ogni entità; eventi lab distinguibili e filtrabili.
 - **Effort:** 3 gg (1 backend, 2 frontend).
-- **Perché:** riduce il tempo medio di indagine più di qualunque nuova detection.
 
 ### 7.4 ATT&CK coverage navigabile
 - **Problema:** 14 tecniche MITRE sono un numero, non una vista. Il cliente non sa cosa è coperto e cosa no.
@@ -759,24 +793,47 @@ Regola comune: **un sensore = un modulo** con interfaccia `Sensor` (`name`, `lis
 - **Accettazione:** la dashboard si popola da dati reali del compose demo; i numeri tornano con query SQL dirette (test di coerenza).
 
 ### 8.11 Roadmap tecnica Kraken (riordino del codice)
-Oggi: `app/api/v1/endpoints/*`, `services/*`, `models/models.py` monolitico, sensori in `honeypot/`. Proposta per il monorepo:
+Oggi: `app/api/v1/endpoints/*`, `services/*`, `models/models.py` monolitico, sensori in `honeypot/`. Proposta per il monorepo (microservizio separato, con UI e Lab propri):
 
 ```
 services/kraken/
   app/
-    api/v1/endpoints/{auth,nodes,sensors,events,malware,intel,metrics,health}.py
+    api/v1/endpoints/{auth,nodes,sensors,events,malware,intel,lab,results,metrics,health}.py
     core/{config,security,logging,metrics}.py
     db/{session,redis}.py
-    models/{base,attack,node,malware,ioc,canary}.py      # split del monolite
-    services/{attack,sandbox_broker,siem,telegram,enrich,outbox}.py
+    models/{base,attack,node,malware,ioc,canary,lab,run}.py
+    services/{attack,sandbox_broker,siem,telegram,enrich,outbox,lab_runner,verifier}.py
     sensors/{base,ssh,http,ftp,telnet,smb,rdp,ldap,sql}.py
-    schemas/{auth,event,node,malware,intel}.py
+    lab/{topologies,scenarios,assertions,profiles}/
+    schemas/{auth,event,node,malware,intel,lab,run}.py
+  ui/                                                     # UI dedicata Kraken
   alembic/versions/
-  tests/{unit,integration,fixtures}/
+  tests/{unit,integration,lab,fixtures}/
   deploy/{docker-compose.yml,Dockerfile,sandbox-proxy/}
 ```
 
 Nessuna riscrittura: si sposta e si divide mentre si toccano i file per i fix. Il "big bang refactor" è vietato.
+
+### 8.12 Kraken Lab — sottoreti simulabili, scenari e verifica detection Aegis
+
+**Scopo:** trasformare Kraken in un lab configurabile e riproducibile per simulare sottoreti/ambienti e verificare se Aegis rileva, correla e risponde (ambiente di test collegato ad Aegis), mantenendo Kraken come **microservizio separato** con UI dedicata.
+
+**Capacità da costruire (incrementale):**
+1. **Topologie configurabili (sottoreti):** definire reti e sottoreti (CIDR, segmenti es. `dmz`, `corp`, `ot`, `guest`), host/nodi virtuali, servizi/sensori per host, isolamento tra segmenti e profili riusabili; versionate e validate (no overlap invalido, limiti risorse).
+2. **Scenari riproducibili:** catalogo di scenari/TTP (bruteforce, spray, enum, movimento laterale simulato, beacon finto, drop/esecuzione sample controllata, trigger canary) con parametri, seed e mapping a regole/tecniche MITRE attese; composizione scenario+topologia.
+3. **Runner e orchestrazione:** avvio/stop run, pianificazione, concorrenza limitata, stato live, log/artefatti, timeout e cleanup garantito; esecuzione solo via broker e reti per-scenario (§5.7).
+4. **Verifica end-to-end con Aegis:** emissione eventi `context=lab` verso ingest Aegis e raccolta esiti (alert, correlazione/incidente, comando/ack, tempi) tramite contratto read-only/feed; valutazione asserzioni e verdetto (detected/correlated/responded/missed/false_positive) con tempi (MTTD/MTTR di test).
+5. **Evidenze e report:** in UI Kraken, dettaglio run (topologia, step, eventi, esiti Aegis correlati, verdetti) ed export evidenze; sintesi in Aegis solo come stato/esito correlato (link alla UI Kraken).
+6. **Modalità e safety:** `shadow` di default (misura detection, nessuna risposta automatica reale); `active` solo opt-in con scope approvato. Run sempre etichettati per escluderli dalle metriche operative reali.
+7. **Libreria e regressione:** scenari "golden" legati alla copertura detection (§7.4/7.5) per evitare regressioni (ripetibili su CI con Docker, marcati lab).
+
+**Accettazione (complessiva, per fasi):**
+- Una topologia con ≥2 sottoreti e ≥3 host viene creata, validata ed eseguita in reti isolate; teardown completo.
+- Uno scenario mappato a una regola nota produce evento lab → alert/risultato Aegis correlato → verdetto ed evidenza in UI Kraken.
+- Nessuna logica di lab eseguita nel Brain; Brain/DB Aegis non raggiungibili dal piano dati del lab se non tramite ingest/contratto.
+- UI Kraken mostra topologie, run, risultati e sample/sessioni; SPA Aegis mostra solo esito/correlazione unificata.
+
+**Effort:** 10–14 gg complessivi, incrementale per release (base 4.2/4.3, copertura/regressione 5.0).
 
 ---
 ## 9. Modello dati e deployment
@@ -797,7 +854,7 @@ CREATE TABLE api_keys (
   revoked_at    timestamptz
 );
 
--- 0021_deception: eventi Kraken normalizzati (o riuso di siem_events con source=kraken)
+-- 0021_deception: eventi Kraken normalizzati (o riuso di siem_events con source=kraken; includere context lab/sensor in raw/mapping)
 CREATE TABLE deception_sessions (
   id                uuid PRIMARY KEY,
   external_id       text NOT NULL UNIQUE,      -- session_id di Kraken
@@ -855,13 +912,15 @@ outbox(id, payload jsonb, attempts, next_attempt_at, status)   -- per l'invio ad
 ```
 E **rimozione** di `AttackEvent.password` in chiaro → `password_sha256`, `password_len`, `password_classes`.
 
+Tabelle **Kraken Lab** (microservizio Kraken, non in Aegis DB): `lab_topologies`, `lab_networks`, `lab_hosts`, `lab_scenarios`, `lab_runs`, `lab_run_steps`, `lab_assertions`, `lab_evidences` (o equivalenti) con stato, hash definizione, finestra temporale, esiti/verdetti e riferimenti a eventi/alert correlati. Nessuna di queste tabelle nel Brain.
+
 ### 9.3 Deployment: compose del monorepo
 
 Un `docker-compose.prod.yml` radice con profili:
 
 ```yaml
 services:
-  caddy:        { profiles: [prod], ... }                 # TLS, CSP, routing /deception
+  caddy:        { profiles: [prod], ... }                 # TLS, CSP, routing /kraken (UI+API dedicate) e /api,/ws Aegis
   aegis-brain:  { profiles: [prod], depends_on: [postgres, redis] }
   aegis-link:   { profiles: [prod] }
   frontend:     { profiles: [prod] }
@@ -947,12 +1006,12 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 
 ### 4.2.0 — "Unified SOC" (settimane 4–9)
 
-**Tema:** Kraken diventa un sensore di Aegis e il SOC ha una sola verità. Nessun contenimento nuovo: solo visibilità unificata.
+**Tema:** Kraken, come **microservizio separato** con UI dedicata, diventa sensore/lab collegato ad Aegis: visibilità unificata e verifica della detection, senza fondere i servizi. Nessun contenimento nuovo.
 
 #### 4.2.1 Ingestione Kraken→Aegis (fase 1–2 di §5.6)
 - Costruire: `POST /api/v1/ingest/kraken` con `X-Api-Key` scope `kraken:write` + HMAC del body; parser che mappa su `UnifiedEvent`; dedup per `event_id`; `deception_sessions` aggiornate in upsert; outbox con retry e backoff in Kraken.
 - Dove: `aegis-brain/app/api/v1/ingest.py`, `app/ingest/kraken.py`, `services/kraken/app/services/outbox.py`.
-- Accettazione: 1.000 eventi in batch → 1.000 righe, 0 duplicati al retry; evento con HMAC errato → 401; evento >7 giorni → 422; Kraken con Brain spento → outbox cresce e si svuota al ritorno, senza perdita.
+- Accettazione: 1.000 eventi in batch → 1.000 righe, 0 duplicati al retry; evento con HMAC errato → 401; evento >7 giorni → 422; Kraken con Brain spento → outbox cresce e si svuota al ritorno, senza perdita; eventi `context=lab` accettati, marcati e distinguibili dai `sensor`.
 - Effort: 3 gg · Dipendenze: 4.1.0.
 
 #### 4.2.2 Regole di detection su deception
@@ -965,10 +1024,11 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 - Accettazione: p95 < 400 ms su 10k eventi; ordinamento corretto; link funzionanti.
 - Effort: 3 gg · Dipendenze: 4.2.1.
 
-#### 4.2.4 Pagina Deception nella SPA
-- Costruire: sessioni, comandi, credenziali tentate (solo pattern), mappa IP, filtri per sensore/paese/severità, dettaglio sessione con timeline dei comandi; accesso delegato SSO (§5.5).
-- Accettazione: nessun login separato; nessun dato in chiaro; la pagina si popola dal compose demo.
-- Effort: 4 gg (2 backend, 2 frontend) · Dipendenze: 4.2.1, 4.2.3.
+#### 4.2.4 UI Kraken dedicata + vista unificata Aegis (non sostitutiva)
+- **Kraken UI dedicata (`/kraken/*`, servizio Kraken):** sessioni e comandi, credenziali tentate (solo pattern/hash), mappa IP, sensori/nodi, sample, campagne, filtri e dettaglio operativo; base per topologie/run del Lab (§8.12). UI primaria per dati Kraken-specifici.
+- **Aegis SPA (vista unificata):** widget/pagina di correlazione in sola lettura (eventi deception/lab, alert/incidente collegato, stato detection/risposta) con deep-link alla UI Kraken; nessuna duplicazione della gestione operativa Kraken nel Brain/frontend Aegis.
+- **Accettazione:** nessun dato in chiaro; UI Kraken raggiungibile e funzionante in standalone e dietro `/kraken/*`; SPA Aegis mostra correlazione senza esporre operazioni Kraken-specifiche; SSO delegato funzionante dove abilitato (§5.5).
+- Effort: 5 gg (2 Kraken UI/API, 2 integrazione/SSO, 1 vista Aegis) · Dipendenze: 4.2.1, 4.2.3.
 
 #### 4.2.5 ATT&CK coverage (§7.4)
 - Accettazione: matrice coerente con `coverage()`; buchi visibili; export.
@@ -992,10 +1052,11 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 - Effort: 4 gg · Dipendenze: 4.1.5.
 
 **Definition of done 4.2.0**
-- [ ] Un attacco SSH su Kraken produce: sessione, evento `siem_events`, alert, incidente, riga in timeline — entro 10 s.
-- [ ] Nessuna doppia autenticazione per l'operatore.
-- [ ] Le 6 nuove regole hanno test di replay.
-- [ ] Load test documentato (200 rps, 2 worker).
+- [ ] Un attacco SSH su Kraken produce: sessione in UI Kraken, evento `siem_events`, alert/incidente, riga in timeline Aegis — entro 10 s (via contratto, microservizi separati).
+- [ ] UI Kraken dedicata operativa per dati Kraken-specifici; SPA Aegis mostra correlazione senza sostituirla.
+- [ ] Nessuna doppia autenticazione per l'operatore (SSO delegato dove abilitato).
+- [ ] Base Kraken Lab (topologia + scenario + run shadow) produce evidenze correlate in UI Kraken.
+- [ ] Le 6 nuove regole hanno test di replay; load test documentato (200 rps, 2 worker).
 - [ ] Tag `v4.2.0`.
 
 ---
@@ -1052,8 +1113,14 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 - Accettazione: avvio <2 s, nessun file reale, watcher su file esca.
 - Effort: 4 gg · Dipendenze: 4.3.4.
 
+#### 4.3.12 Kraken Lab: scenari di verifica detection end-to-end (§8.12)
+- Costruire: libreria di scenari riproducibili mappati a regole/tecniche Aegis, runner di run con asserzioni (alert/correlazione/risposta attesa entro T), correlazione con esiti Aegis via contratto, report evidenze in UI Kraken; modalità shadow di default.
+- Accettazione: suite di scenari base eseguibile → report pass/fail/missed per asserzione con riferimenti a eventi/alert; nessuna azione distruttiva automatica in shadow; esecuzione confinata a reti lab isolate; risultati visibili in UI Kraken e riassunti nella vista unificata Aegis.
+- Effort: 5 gg · Dipendenze: 4.2.1, 4.2.4, 4.3.4 (per scenari con sample).
+
 **Definition of done 4.3.0**
 - [ ] Una catena completa: scanner → brute force → login esca → comandi → download malware → canary → blocco IP + incidente + report PDF.
+- [ ] Una suite Lab shadow produce evidenze pass/fail/missed sulla detection/risposta Aegis (senza fondere Kraken nel Brain).
 - [ ] Ogni azione distruttiva ha TTL, dry-run e audit a due identità.
 - [ ] Nessuna azione esegue comandi arbitrari sul server.
 - [ ] Tag `v4.3.0`.
@@ -1105,8 +1172,8 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 | Release | Settimane | Contenuto | Dipendenza critica |
 |---|---|---|---|
 | 4.1.0 | 1–3 | fix bloccanti, CI verde, Kraken avviabile e non pericoloso | nessuna |
-| 4.2.0 | 4–9 | ingestione, SSO, timeline, ATT&CK, soppressioni, flotta, SMB/RDP | 4.1 completa |
-| 4.3.0 | 10–17 | contenimento rete/credenziali, catalogo azioni, YARA/detonazione, canary, blocklist, PDF, routing | 4.2 completa |
+| 4.2.0 | 4–9 | ingestione, UI Kraken dedicata + vista unificata, timeline, ATT&CK, soppressioni, flotta, SMB/RDP, base Lab shadow | 4.1 completa |
+| 4.3.0 | 10–17 | contenimento rete/credenziali, catalogo azioni, YARA/detonazione, canary, blocklist, PDF, routing, scenari Lab e verifica detection | 4.2 completa |
 | 5.0.0 | 18–30 | IdP enterprise, HA, audit/compliance, intel, performance, SDK | un cliente che paga |
 
 ### 10.2 Cosa può slittare senza rompere nulla
@@ -1116,7 +1183,7 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 
 ### 10.3 Cosa non può slittare
 - Tutto 4.1.0, senza eccezioni: è il debito che rende falso ogni altro numero del prodotto.
-- 4.2.1 (ingestione) se si vuole davvero "due microservizi": senza, Kraken resta un'app separata e l'unione è solo un `git subtree`.
+- 4.2.1 (ingestione/contratto) e 4.2.4 (UI Kraken dedicata + vista unificata) se si vuole l'ecosistema a microservizi: senza, Kraken resta scollegato e la verifica detection via Lab non è dimostrabile end-to-end.
 - 4.3.3 (catalogo azioni): finché `script` esiste, un admin può eseguire comandi sul server che custodisce la PKI.
 
 ---
@@ -1272,7 +1339,7 @@ Regole:
 - [ ] `RATE_LIMIT_STORAGE_URI` su Redis e `TRUST_FORWARDED_FOR=true` solo dietro proxy.
 - [ ] Caddy con TLS valido, HSTS, CSP; nessuna porta di servizio pubblicata.
 - [ ] `POSTGRES_PASSWORD`/`REDIS_PASSWORD`/`GRAFANA_PASSWORD` senza default.
-- [ ] Kraken: nessun socket, rete sandbox `internal`, register off, TLS non auto-generato.
+- [ ] Kraken: nessun socket, rete sandbox/lab `internal`, register off, TLS non auto-generato, run lab marcati `context=lab` e shadow di default.
 - [ ] Backup cifrato + restore provato negli ultimi 7 giorni.
 - [ ] Audit attivo, retention configurata, `RETENTION_REQUIRE_BACKUP=true`.
 - [ ] Log senza segreti (grep su `password`, `token`, `Authorization` nei log di 24 h).
@@ -1294,7 +1361,7 @@ Regole:
 | 8 | Il cliente chiede multi-tenant e si accetta | Media | Alto | risposta scritta: 5.0+, con stima |
 
 **Decisioni che spettano a te (non alla sessione successiva)**
-1. Kraken resta servizio separato (raccomandato) o lo vuoi dentro il Brain? La separazione è già argomentata in §5.1.
+1. Kraken resta **microservizio separato** con UI e Lab propri (vincolo v2.1, §5.1/§5.7): confermare scope Lab/risorse; non riaprire la fusione nel Brain.
 2. Licenza e modello di distribuzione: Apache-2.0 attuale è compatibile con un prodotto commerciale? Vuoi un `LICENSE` commerciale per Kraken?
 3. Quanto personale hai davvero: la 4.1.0 in 3 settimane presuppone ~30 h/settimana su un solo fuoco.
 4. Vuoi che `script` nei playbook sparisca del tutto (raccomandato) o resti dietro flag per un cliente specifico?
@@ -1400,6 +1467,7 @@ tests/security/                         # test di sicurezza eseguibili
 | **Deception** | honeypot e esche (Kraken) |
 | **Sandbox** | container effimero dove l'attaccante esegue comandi |
 | **Broker** | proxy che media l'accesso al Docker socket (da costruire) |
+| **Kraken Lab** | ambiente di test/deception nel microservizio Kraken (topologie/sottoreti, scenari, run, evidenze) per verificare detection Aegis |
 | **Canary** | esca che genera un evento quando viene toccata |
 | **HASSH / JA3** | fingerprint di client SSH / TLS |
 | **MTTD / MTTA** | tempo medio a rilevare / a riconoscere |
