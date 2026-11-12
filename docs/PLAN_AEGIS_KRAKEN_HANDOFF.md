@@ -1,0 +1,1424 @@
+# AEGIS ECOSYSTEM + KRAKEN — specifica di lavoro (handoff)
+
+**Versione documento:** 2.0 — 2026-11-12
+**Destinatario:** sessione di sviluppo successiva (umana o agente)
+**Repo Aegis:** `Terminalkid09/aegis-ecosystem`, branch analizzato `dev` @ `c9831c5` (albero identico a `main` @ `38e245f`)
+**Repo Kraken:** `Terminalkid09/Kraken`, branch `main` @ `d86c8d5`
+**Report di analisi precedente:** `docs/ANALYSIS_AEGIS_KRAKEN.md` (finding sintetici; questo documento è la specifica operativa)
+
+---
+
+## 0. Come usare questo documento
+
+Questa non è una lista di idee: è un piano eseguibile. Ogni voce ha un ID, un file o un'area di intervento, un criterio di accettazione e un test. Le regole per chi lavora:
+
+1. **Non chiudere una voce senza il suo test.** Se un test non può esistere, va scritto perché nel campo "Verifica".
+2. **Non riordinare a piacere le sezioni 6 e 10.** L'ordine è per dipendenza: i fix bloccanti di Kraken precedono qualunque integrazione, perché oggi Kraken non si avvia.
+3. **Ogni PR tocca una cosa.** Un finding = una PR, con test di regressione che fallisce prima e passa dopo.
+4. **Le misure si rifanno, non si citano.** I numeri in §1 sono del 2026-11-12: vanno riprodotti con i comandi in §11.1 prima di dichiarare "fatto".
+5. **Niente feature prima dei fix bloccanti.** La 4.1.0 ha un cancello: §6.1 verde.
+
+Legenda severità: **Critical** = compromissione host o bypass di autenticazione; **High** = takeover di agente, perdita/alterazione di dati, CI rossa su security gate; **Medium** = DoS, privacy, isolamento parziale; **Low** = igiene, incoerenza, osservabilità.
+Legenda stato: **V** verificato in questa analisi, **D** documentato, **I** ipotesi, **R** raccomandazione.
+
+---
+
+## 1. Stato verificato al 2026-11-12
+
+### 1.1 Ambiente usato per i test
+
+| Pezzo | Versione / note |
+|---|---|
+| Python | 3.12.3, venv dedicata, dipendenze da `aegis-brain/requirements.txt` |
+| PostgreSQL | 16 (binari portabili `pgserver`), DB `aegis_test`, `aegis_migrate`, `krakendb` |
+| Redis | 7 (`redislite`), porta 6379 |
+| Java | Temurin 21.0.13 + Maven 3.9.9 (userland) |
+| Node | 26.13.0 / npm 11.20.0 |
+| Docker | CLI 29.1.3 + compose 2.40.3, **nessun daemon** (compose solo `config`, niente `up`) |
+
+### 1.2 Risultati misurati
+
+| Area | Comando | Esito |
+|---|---|---|
+| Brain, senza DB | `pytest -q` | **572 passed, 210 skipped, 5 failed** (7,7 s) |
+| Brain, con PG+Redis | `REQUIRE_INTEGRATION=1 pytest -q` | **785 passed, 2 failed** (37,6 s) |
+| Brain, schema da zero | `alembic upgrade head` ×2 | **36 tabelle**, head `0019`, seconda run idempotente |
+| Brain, API | `app.openapi()` | **131 path, 153 operazioni**, 24 famiglie |
+| Brain, detection | `replay_report.py --all` | 21 regole; TP/FP/FN = 16/0/0 (validation), 7/0/0 (regression), training ok; F1 1.0 |
+| Brain, Sigma | `get_engine().coverage()` | 14 regole, **14 eseguibili, 0 escluse**, 14 tecniche MITRE |
+| Brain, correlazione | `get_correlation_engine().coverage()` | 5 regole, 5 eseguibili, 6 tecniche |
+| Brain, SAST | `bandit -r app -ll` | **0 Medium, 0 High** (63 Low) |
+| Brain, SCA | `pip-audit -r requirements.txt` | **7 vulnerabilità** (PyJWT 2.14.0 ×2 → 2.15.0; pymongo 4.9.2 ×5 → 4.18.3) |
+| Guard | `mvn -B test` | **136 test, 0 failure**, BUILD SUCCESS |
+| Link | `mvn -B test` | **17 test, 0 failure**, BUILD SUCCESS |
+| eBPF | `check-contract.py` | **RESULT: ALL PASS** (v1, v2, ETW, seq senza boot_id rifiutata) |
+| Frontend, lint | `npm run lint` | **0 errori**, 25 warning |
+| Frontend, tipi | `tsc -b --noEmit` | exit 0 |
+| Frontend, build | `npm run build` | OK in 1,03 s; chunk principale 682 kB (202 kB gzip) |
+| Frontend, SCA | `npm audit --audit-level=high` | **3 high** (vite, launch-editor) |
+| Aegis, compose | `docker compose config` | valido con env fittizio |
+| Kraken, import | `python -c "import app.main"` | **FALLISCE**: `ArgumentError` su `AttackEvent.commands` |
+| Kraken, migrazioni | `alembic upgrade head` | **fallisce** (stesso errore) → 0 tabelle |
+| Kraken, test | `pytest tests/unit` | **collection error** (stesso errore) |
+| Kraken, dopo fix 1 riga | alembic + pytest | **6 tabelle**, **58 passed / 7 failed** (i 7 scrivono in `/app`) |
+| Kraken, runtime | uvicorn + curl | health 200; **register `is_admin:true` → admin**; `/containers/active` e `/export/csv` 200; ingest senza chiave 403 |
+| Kraken, SAST | `bandit -r app honeypot -ll` | 0 High, **7 Medium**, 6 Low |
+| Kraken, SCA | `pip-audit -r requirements.txt` | **30+ advisory** su 5 pacchetti |
+
+### 1.3 Le cinque conclusioni che governano il piano
+
+1. **Aegis è un prodotto**: 489 file, 61.789 LOC, 131 endpoint, 787 test raccolti, 36 tabelle, migrazioni riproducibili, 0 finding High da bandit, hardening superiore alla media open source.
+2. **Kraken è un prototipo che non si avvia** con le sue stesse dipendenze pinnate. Il fix è una riga, ma finché non è applicato nessuna delle sue affermazioni è verificabile.
+3. **La CI di Aegis oggi è rossa** su tre fronti: `pip-audit` (7), `npm audit` (3 high), 2 test dipendenti dal calendario. `main` era verde al merge, non lo è più.
+4. **`dev` e `main` non divergono**: `git diff HEAD origin/main` è vuoto. Lavorare su `dev` non introduce differenze di contenuto.
+5. **L'integrazione ha senso solo dopo i fix**: portare un servizio che non parte dentro un monorepo che passa i test sposta il problema, non lo risolve.
+
+---
+
+## 2. Inventario Aegis
+
+### 2.1 Numeri
+
+| Voce | Valore |
+|---|---|
+| File tracciati | 489 |
+| LOC totali (py/java/ts/tsx/sh/yml) | 61.789 |
+| Python | 239 file (~19k LOC in `aegis-brain/app`) |
+| Java | 68 file (Guard 53, Link 15, test inclusi) |
+| TypeScript/React | 36 file (SPA Vite) |
+| Migrazioni Alembic | 19 (0001 → 0019) |
+| Tabelle risultanti | 36 (32 ORM + 4 di servizio) |
+| Endpoint HTTP | 131 path / 153 operazioni |
+| WebSocket | 2 (`/ws/overview`, `/ws/alerts`) |
+| Test | 787 raccolti (Brain) + 136 (Guard) + 17 (Link) |
+| Docs | README 45 KB + 11 file in `docs/` |
+| Compose | base + 4 overlay (prod, mtls, ha, observability) |
+
+### 2.2 Componenti e responsabilità
+
+| Componente | Tecnologia | Cosa fa | Cosa **non** fa |
+|---|---|---|---|
+| `aegis-brain` | FastAPI, SQLAlchemy async, Alembic, Redis | API, auth, RBAC, audit, detection, correlazione, incidenti, playbook, PKI, deploy, AI, SIEM, Total | nessuna sandbox dinamica, nessun supporto multi-tenant, 1 worker |
+| `aegis-link` | Spring Boot 3 | accetta eventi endpoint e li accoda su Redis `aegis:events` | nessun parsing, nessuna detection |
+| `aegis-guard` | Java 21 | process monitor, FIM, YARA, ETW/eBPF ingest, remediation, OTA | Linux remediation parziale (vedi AEGIS-SEC-007) |
+| `NodeTrace` | Python stdlib + curl | telemetria periodica, eBPF/auditd, scan di rete, heartbeat | nessuna remediation (by design: telemetry-only) |
+| `aegis-ebpf` | C/CO-RE | collector exec, contratto eventi golden | solo Linux, opt-in |
+| `frontend` | React 19, Vite, Zustand, react-query | 19 pagine SOC + login | nessuna controparte mobile |
+| `Caddy` | Caddy 2 | TLS, CSP dashboard, proxy `/api` e `/ws` | nessun WAF |
+
+### 2.3 Pipeline eventi (verificata)
+
+```
+agente → POST /telemetry/report[/batch]  (Bearer device secret + mTLS opzionale)
+        → dedup event_id (Redis LRU + fallback memoria)
+        → SeqTracker (gap/reset/late per agent+boot)
+        → telemetry_service: persistenza + alert
+        → detection_context (Sigma 14 regole + euristica + correlazione 5 regole)
+        → alert → incident_grouping → playbook_engine → Redis aegis:commands:<agent>
+        → agente: GET /commands/batch → esegue → POST /commands/ack
+
+shipper → POST /ingest/{source} (X-Api-Key) → registry parser (7) → UnifiedEvent
+        → siem_events (partizionata per mese) → Sigma → alert
+```
+
+Punti di rottura noti: coda comandi limitata a 100 elementi (`ltrim`), revoca agente fail-open su errore DB, `script` come shell sul server.
+
+### 2.4 Cosa è dichiarato e non c'è
+
+| Dichiarazione | Realtà |
+|---|---|
+| Deploy SSH/WinRM massivo | **rimosso**: `POST /deploy/jobs` risponde 501 se `method != oneline` (`deploy.py:407`) |
+| HA multi-nodo | overlay di 39 righe e consumer in-process: dichiarato più che provato |
+| mTLS di default | implementato, ma `MTLS_MODE=off` è il default |
+| Copertura MITRE ampia | 14 tecniche su ~200: buona base Windows/persistence, debole su credential access, lateral movement, C2, exfil |
+| Sandbox file | assente: Aegis Total è statica |
+
+---
+
+## 3. Inventario Kraken
+
+### 3.1 Numeri e stato
+
+| Voce | Valore |
+|---|---|
+| LOC Python | 4.054 (app 2.078 + honeypot 505 + test) |
+| Test | 108 funzioni, 65 unit; **0 eseguibili** senza fix |
+| Migrazioni | 2 → 6 tabelle |
+| Servizi compose | 9 + 3 volumi |
+| CI | solo `.gitlab-ci.yml`; workflow GitHub rimosso in `d86c8d5` |
+| Auth | JWT HS256 access 15 min, refresh 7 giorni, cookie `SameSite=Lax` |
+| Sensori | SSH (asyncssh), HTTP, FTP, Telnet |
+| Sandbox | container Alpine via Docker SDK, 128 MB, 64 PID, `cap_drop ALL` |
+| Coverage dichiarata | 54% |
+
+### 3.2 Cosa fa davvero
+
+Honeypot multi-protocollo che accetta ogni credenziale, registra i comandi, li esegue in un container sandbox, arricchisce con GeoIP, salva in PostgreSQL, notifica Telegram, scrive un JSONL SIEM, mostra dashboard Jinja e produce export CSV/JSON/PDF.
+
+### 3.3 Difetti strutturali (prima dei finding)
+
+1. **Non si avvia** (import models, §5.3 KRAKEN-SEC-000).
+2. **Il modello di isolamento è invertito**: la sandbox ha rete Internet (per scelta, vedi `scripts/secure_sandbox.sh` che *permette* 80/443) mentre l'app ha il Docker socket. È l'opposto di ciò che serve: l'app non deve poter parlare col daemon, la sandbox non deve poter parlare col mondo.
+3. **L'autenticazione è decorativa**: register pubblico con ruolo scelto dal client, refresh non revocabile, logout solo sull'access.
+4. **La privacy non è progettata**: password in chiaro, backup non cifrati, malware in tar non cifrato.
+
+---
+## 4. Registro completo dei finding
+
+Formato: ID · severità · confidence · file:riga · impatto · fix · test · release.
+I finding **002** di Aegis e **000/001/002/003** di Kraken bloccano la release: sono i primi cinque lavori.
+
+### 4.1 Aegis — sicurezza
+
+#### AEGIS-SEC-001 — Re-enroll senza prova di possesso dell'host
+- **Severità:** High · **Confidence:** Alta · **File:** `aegis-brain/app/api/v1/enroll.py:76-107`
+- **Evidenza:** se esiste un `Agent` con stesso `hostname`+`os_type`, il codice genera `new_secret` e lo scrive in `existing.device_token_hash`. Nessuna prova che il chiamante sia lo stesso host; l'unico stop è la revoca.
+- **Impatto:** con la enroll key statica (distribuita a ogni install) si ottiene un secret valido per l'`agent_id` di un endpoint reale: si leggono i comandi di remediation (kill, isolate, quarantine), si invia telemetria falsa per quell'host. Con `MTLS_MODE=off` non c'è certificato a fermarlo.
+- **Fix:** legare l'identità a `machine-id`/TPM/instance-id; re-enroll solo con token single-use emesso per quell'host; audit come `re-enrollment sospetto` + notifica; rotazione della chiave statica.
+- **Test:** due enroll con stesso hostname/os → il secondo deve fallire senza token dedicato; con token dedicato deve funzionare e produrre audit.
+- **Release:** 4.1.0 (bloccante)
+
+#### AEGIS-SEC-002 — Una chiave per due mestieri: enroll e firma OTA
+- **Severità:** High · **Confidence:** Alta · **File:** `aegis-brain/app/api/v1/deploy.py:312` (installer), `:sign_artifact`, `NodeTrace/.../updater.py`, `aegis-guard/.../UpdateManager.java`
+- **Evidenza:** l'installer scrive `AEGIS_ENROLL_KEY=$ENROLL_TOKEN` nell'env del servizio; il Brain firma con `settings.AGENT_ENROLL_KEY` (statica); l'agente verifica con `Config.ENROLL_KEY` (il token). Due chiavi diverse per lo stesso controllo.
+- **Impatto:** (a) gli agenti installati via one-liner rifiutano ogni update legittimo (OTA rotta in silenzio); (b) chi conosce la enroll key statica può firmare qualunque digest.
+- **Fix:** tre chiavi separate (enroll, firma manifest, device secret); Ed25519 obbligatorio in ogni profilo; HMAC solo con data di rimozione; non scrivere il token di enroll nell'env persistente.
+- **Test:** agente installato con token riceve update Ed25519 firmato → applicato; HMAC con chiave diversa → rifiutato.
+- **Release:** 4.1.0 (bloccante)
+
+#### AEGIS-SEC-003 — Playbook `script`: comando arbitrario sul Brain
+- **Severità:** Medium · **Confidence:** Alta · **File:** `aegis-brain/app/services/playbook_engine.py:280-300`
+- **Evidenza:** `subprocess.run(target.split(), timeout=min(120))`; doppio gate (flag `PLAYBOOK_SCRIPT_ENABLED=false` + ruolo admin).
+- **Impatto:** da admin di piattaforma a root del server che custodisce PKI, audit e credenziali di tutti gli agenti.
+- **Fix:** rimuovere l'azione e sostituirla con catalogo di azioni nominate; se deve restare, eseguire in container effimero senza rete e senza volumi.
+- **Test:** `script` → `blocked` con flag off; nessun path che raggiunga `subprocess` (grep test).
+- **Release:** 4.3.0 (rimozione), 4.1.0 se resta (hardening)
+
+#### AEGIS-SEC-004 — Decompressione non limitata in Aegis Total
+- **Severità:** Medium (DoS) · **Confidence:** Alta · **File:** `aegis-brain/app/api/v1/total.py:913-918`
+- **Evidenza:** `gzip.decompress(raw)` / `bz2` / `lzma` sul payload grezzo fino a `TOTAL_MAX_ZIP_MB` (200 MB). Il cap per-entry (64 MB) è applicato dopo, sul risultato già in RAM.
+- **Impatto:** una bomba 1:1000 esaurisce la memoria; il Brain gira a un worker → SOC offline.
+- **Fix:** `zlib.decompressobj(..., max_length)` incrementale, cap progressivo, rifiuto oltre N× il dichiarato, analisi in worker separato con `RLIMIT_AS`.
+- **Test:** payload 1:1000 oltre il cap → 422 senza superare il limite di memoria (misurare RSS).
+- **Release:** 4.1.0
+
+#### AEGIS-SEC-005 — Rate limit in memoria e IP del proxy
+- **Severità:** Medium · **Confidence:** Alta · **File:** `aegis-brain/app/core/config.py` (blocco rate limiting), `app/core/rate_limit.py`
+- **Evidenza:** `RATE_LIMIT_STORAGE_URI=None` → storage in-process; `RATE_LIMIT_TRUST_FORWARDED_FOR=False` → dietro Caddy tutti gli IP sono il proxy. Il warning è loggato all'avvio.
+- **Impatto:** il limite login (10/min) diventa globale: 10 tentativi bloccano tutti gli operatori (DoS), mentre un attaccante distribuito non è limitato per account (resta il throttle per email).
+- **Fix:** nel compose prod `RATE_LIMIT_STORAGE_URI=redis://...` e `RATE_LIMIT_TRUST_FORWARDED_FOR=true`; validazione che rifiuta storage in memoria fuori da DEBUG.
+- **Test:** due IP dietro proxy → bucket distinti; Redis down → comportamento dichiarato.
+- **Release:** 4.1.0
+
+#### AEGIS-SEC-006 — API key globale unica per l'ingestione
+- **Severità:** Medium · **Confidence:** Alta · **File:** `app/core/deps.py:verify_api_key`, `app/api/v1/ingest.py:ingest_auth`
+- **Evidenza:** confronto constant-time corretto, ma una sola chiave per Link, shipper e tooling; nessuna revoca per sorgente, nessuno scope.
+- **Impatto:** un firewall compromesso può iniettare eventi in **qualsiasi** sorgente e sopprimere i veri alert (avvelenamento SIEM); la rotazione ferma tutte le integrazioni.
+- **Fix:** tabella `api_keys(id, name, hash, scopes, source, revoked_at, last_used)`; `X-Api-Key` risolve la chiave e limita la sorgente; rate limit per chiave.
+- **Test:** chiave A non scrive sulla sorgente B; revoca immediata senza impatto sulle altre.
+- **Release:** 4.1.0
+
+#### AEGIS-SEC-007 — `REMOVE_PERSISTENCE` distruttivo e disonesto
+- **Severità:** High · **Confidence:** Alta · **File:** `aegis-guard/src/main/java/com/aegis/guard/Main.java:505` e blocco Linux `:560-575`
+- **Evidenza:** `exec("reg","delete", key, "/f","/va")` quando **qualsiasi** voce della chiave contiene il nome del processo: `/va` cancella il valore di default dell'intera chiave Run. Su Linux il ramo else si limita a `removed.add("cron:"+line)` senza modificare nulla, e `processCommand` invia comunque ack `ok`.
+- **Impatto:** (a) disponibilità: si perde persistenza legittima su un host di produzione durante un incidente; (b) integrità del SOC: remediation dichiarata applicata e non applicata.
+- **Fix:** cancellare il singolo valore (`/v <name>`), mai `/va`; se non si rimuove nulla → `failed/partial`; su Linux implementare la rimozione o dichiarare `unsupported`.
+- **Test:** chiave Run con due valori → rimosso solo il matching; Linux → ack ≠ ok finché non c'è rimozione reale.
+- **Release:** 4.1.0 (bloccante)
+
+#### AEGIS-SEC-008 — Postura mTLS permissiva
+- **Severità:** Medium · **Confidence:** Alta · **File:** `app/core/config.py`, `docker-compose.yml`, `docker-compose.prod.yml`
+- **Evidenza:** `MTLS_MODE=off`, `ENTERPRISE_STRICT=false`; il guard `enforce_enterprise_strict` esiste ed è corretto, ma è opt-in.
+- **Impatto:** un deploy "pilot" crede di avere identità device e ha solo bearer token; revocare un certificato non ha effetto perché non esiste.
+- **Fix:** profili espliciti: `lab` (off), `pilot` (optional + log), `prod` (required + strict); un solo `AEGIS_PROFILE` che deriva i flag.
+- **Test:** `AEGIS_PROFILE=prod` con MTLS_MODE=off → il Brain non parte.
+- **Release:** 4.1.0
+
+#### AEGIS-SEC-009 — mTLS via header = certificato come credenziale portabile
+- **Severità:** Medium · **Confidence:** Media-Alta · **File:** `app/services/mtls.py`
+- **Evidenza:** il certificato viaggia in `X-Client-Cert` e viene verificato per catena/CN/revoca. Nessun proof-of-possession: la chiave privata non serve al server.
+- **Impatto:** chi legge l'header (log del proxy, dump di memoria, trace) può replayarlo insieme al bearer token. Il "secondo fattore" è una seconda stringa, non un secondo fattore.
+- **Fix:** terminare TLS con client auth in Caddy (`Caddyfile.mtls` già presente) e far verificare al Brain solo il fingerprint iniettato dal proxy, con strip degli header client; in alternativa firma di nonce con la chiave device.
+- **Test:** header `X-Client-Cert` inviato direttamente al Brain (bypass proxy) → rifiutato.
+- **Release:** 4.2.0
+
+#### AEGIS-SEC-011 — Device secret in argv di `curl`
+- **Severità:** High · **Confidence:** Alta · **File:** `NodeTrace/agents/python/utils/curl_http.py:84-100`
+- **Evidenza:** `_curl_request` passa `-H "Authorization: Bearer <secret>"` e `-H "X-Client-Cert: ..."` come argomenti del processo; `request()` preferisce curl quando esiste. Su Linux `/proc/<pid>/cmdline` è leggibile da ogni utente locale.
+- **Impatto:** un utente non privilegiato sulla macchina legge il device secret e impersona l'agente (telemetria falsa, polling dei comandi, ack). È esattamente il segreto che il prodotto esiste per proteggere.
+- **Fix:** preferire `urllib` (già implementato) e usare curl solo con `--config` da file 0600 o header da stdin (`-H @-`); oppure rimuovere il ramo curl.
+- **Test:** avviare l'agente e verificare che `/proc/<pid>/cmdline` non contenga il token; unit test sul builder di comando.
+- **Release:** 4.1.0 (bloccante per ambienti multiutente)
+
+### 4.2 Aegis — logica, affidabilità, osservabilità
+
+| ID | Titolo | Sev | File | Impatto | Fix | Release |
+|---|---|---|---|---|---|---|
+| AEGIS-LOGIC-001 | `isolate` risponde `agent.isolated` senza aggiornarlo | Low | `api/v1/telemetry.py:786` | UI incoerente col comando accodato | aggiornare stato su ack, non su enqueue | 4.1.0 |
+| AEGIS-LOGIC-002 | Idempotenza playbook (playbook, alert) blocca la riesecuzione dopo riapertura | Low | `playbook_engine.py:139` | alert riaperto non riattiva il contenimento entro 24 h | chiave con `revision`, TTL configurabile | 4.2.0 |
+| AEGIS-LOGIC-003 | Coda comandi `ltrim 0..99` perde i più vecchi | Medium | `playbook_engine.py:_send_agent_command` | durante un burst i comandi svaniscono senza contatore | coda per priorità + metrica `commands_dropped` | 4.1.0 |
+| AEGIS-LOGIC-004 | Revoca agente fail-open su errore DB | Medium | `agent_deps.py` (blocco `RevokedCert`) | con mTLS off un agente revocato continua | fail-closed: 503 su errore, non `pass` | 4.1.0 |
+| AEGIS-LOGIC-005 | `queue_depth` legge `aegis:events:pending` ma la coda è `aegis:events` | Low | `app/core/health.py:121` | readiness mostra sempre 0 | usare la chiave vera + `LLEN processing/dlq` | 4.1.0 |
+| AEGIS-LOGIC-006 | 2 test SIEM dipendono dal calendario (corpus 2026-09-15, cap 720 h) | High (CI) | `tests/integration/test_siem_ingest.py:37,301` | CI rossa 30 giorni dopo ogni aggiornamento corpus | `freezegun` o corpus generato relativo a `now` | 4.1.0 |
+| AEGIS-LOGIC-007 | 5 test falliscono senza DB invece di skippare | Low | `tests/integration/test_retention_siem.py`, `test_syslog_listener.py` | segnale CI ambiguo | usare fixture `db_session` o marker `integration` | 4.1.0 |
+| AEGIS-LOGIC-008 | `pymongo`/`motor` dipendenze mai importate | Medium (SCA) | `aegis-brain/requirements.txt` | 5 CVE da codice inutilizzato | rimozione | 4.1.0 |
+| AEGIS-LOGIC-009 | PyJWT 2.14.0 con 2 advisory | Medium | `requirements.txt` | gate pip-audit rosso | bump a 2.15.0 + test token legacy | 4.1.0 |
+| AEGIS-OPS-001 | Backup: passphrase in env del container | Low | `scripts/backup-db.sh` | visibile in `docker inspect` | secret file 0400 + `--passphrase-file` | 4.2.0 |
+| AEGIS-OPS-002 | Nessun test automatico di restore | Medium | `scripts/restore-db.sh` | backup non verificato = backup inesistente | job notturno: restore su DB usa-e-getta + checksum | 4.1.0 |
+| AEGIS-OPS-003 | Bundle frontend 682 kB in un chunk | Low | `frontend/vite.config.ts` | first paint lento su rete lenta | `manualChunks` per vendor/pagine | 4.2.0 |
+| AEGIS-OPS-004 | 25 warning lint frontend | Low | vari `.tsx` | rumore che nasconde regressioni | `npm run lint -- --fix` + regola su exhaustive-deps | 4.2.0 |
+| AEGIS-OPS-005 | Vite con 3 advisory high (dev-only) | Medium (CI) | `frontend/package-lock.json` | `npm audit --audit-level=high` rosso | bump Vite; separare audit dev/prod | 4.1.0 |
+| AEGIS-OPS-006 | Discovery usa `create_subprocess_shell("arp -a")` | Low | `api/v1/discovery.py:84,97` | shell non necessaria su percorso privilegiato | `exec` con argv + parsing | 4.2.0 |
+
+### 4.3 Kraken — sicurezza
+
+#### KRAKEN-SEC-000 — Il servizio non si avvia (blocker assoluto)
+- **Severità:** Critical (funzionale) · **Confidence:** Alta · **File:** `app/models/models.py:38-54`, `app/db/session.py:14`
+- **Evidenza:** `commands: Any = relationship(...)` (idem `credentials`, `malware_samples`) su `class Base(DeclarativeBase)`. SQLAlchemy 2.0.30 solleva `ArgumentError: Type annotation for "AttackEvent.commands" can't be correctly interpreted for Annotated Declarative Table form`. Riprodotto: import, Alembic, pytest, avvio container.
+- **Impatto:** nulla del progetto è utilizzabile; `docker compose up` va in crash loop; i "65+ test" non sono eseguibili.
+- **Fix (1 riga):** `class Base(DeclarativeBase): __allow_unmapped__ = True` oppure `commands: Mapped[list["AttackCommand"]] = relationship(...)`.
+- **Test:** `import app.main`, `alembic upgrade head`, `pytest tests/unit` verdi; immagine che parte.
+- **Release:** 4.1.0 (primo lavoro in assoluto)
+
+#### KRAKEN-SEC-001 — Registrazione pubblica con ruolo admin dal client
+- **Severità:** Critical · **Confidence:** Alta · **File:** `app/api/v1/endpoints/auth.py:82-95`, `app/schemas/schemas.py:26-29`
+- **Evidenza (provata dal vivo):** `POST /api/v1/auth/register {"username":"pwner","password":"...","is_admin":true}` → `{"id":1,"is_admin":true}`; login → `/containers/active` 200, `/export/csv` 200.
+- **Impatto:** chiunque diventa admin: export di tutti gli attacchi, comandi arbitrari nei sandbox (`/containers/exec`), distruzione sandbox, e con il socket montato la catena verso l'host.
+- **Fix:** rimuovere `is_admin` da `UserCreate`; `is_admin=False` sempre; register disabilitato (`ALLOW_REGISTRATION=false`); primo admin solo via `scripts/create_admin.py`; audit dell'evento.
+- **Test:** register con `is_admin:true` → 422 o utente non admin; register con flag off → 403.
+- **Release:** 4.1.0 (bloccante)
+
+#### KRAKEN-SEC-002 — Docker socket nel processo applicativo
+- **Severità:** Critical · **Confidence:** Alta · **File:** `docker-compose.yml:65`
+- **Evidenza:** `- /var/run/docker.sock:/var/run/docker.sock:ro`. `:ro` limita il filesystem del socket, non le API: chi lo apre crea container privilegiati, monta `/` dell'host ed esegue come root.
+- **Impatto:** compromissione dell'host: tutti gli attacchi raccolti, `.env`, rete interna.
+- **Fix:** rimuovere il socket dall'app; introdurre un `sandbox-broker` (socket-proxy con allowlist di soli `POST /containers/create`, `POST /containers/{id}/exec`, `DELETE /containers/{id}`, `GET /containers/json`) su rete dedicata, oppure runtime senza socket (rootless podman API, gVisor).
+- **Test:** `/var/run/docker.sock` non esiste nel container app; create/exec/destroy funzionano via broker; tentativo di `POST /containers/create` con `Privileged:true` → 403 dal proxy.
+- **Release:** 4.1.0 (bloccante)
+
+#### KRAKEN-SEC-003 — Sandbox con uscita Internet
+- **Severità:** Critical · **Confidence:** Alta · **File:** `app/services/docker_manager.py:120`, `app/core/config.py:31`, `docker-compose.yml:246`, `scripts/secure_sandbox.sh`
+- **Evidenza:** `network=settings.SANDBOX_NETWORK` = `kraken_sandbox_net`, bridge con subnet e **senza** `internal: true`; `secure_sandbox.sh` blocca solo la LAN e **permette** 80/443 e DNS. Il servizio compose `kraken_sandbox` con `network_mode: none` non è quello usato dall'app. La docstring dichiara "no network access".
+- **Impatto:** l'attaccante nell'honeypot usa la sandbox come pivot: C2, scansione, download payload, esfiltrazione. La promessa di isolamento è falsa proprio nella configurazione consigliata.
+- **Fix:** rete `internal: true` senza gateway, DNS disabilitato, `network_mode: none` sul container creato; se serve detonazione con rete, rete separata con proxy egress allowlist e registrazione del traffico.
+- **Test:** dalla sandbox `curl https://example.com` e `getent hosts example.com` falliscono; test in CI con `docker network inspect` che verifica `Internal: true`.
+- **Release:** 4.1.0 (bloccante)
+
+#### KRAKEN-SEC-004 — Estrazione sample senza limiti
+- **Severità:** High · **Confidence:** Alta · **File:** `app/services/docker_manager.py:17-35`
+- **Evidenza:** `content = f.read()` per ogni membro; path traversal corretto (verificato con tar malevolo: `../etc/passwd`, `/abs/evil`, `sub/../../escape` scartati), dimensione no.
+- **Impatto:** un file grande scritto nella sandbox esaurisce la RAM dell'app durante la distruzione.
+- **Fix:** cap per file (es. 64 MB) e per sessione (256 MB), streaming su disco con hash incrementale, contatore `malware_oversize`.
+- **Test:** file 512 MB → scartato, evento registrato, RSS stabile.
+- **Release:** 4.1.0
+
+#### KRAKEN-SEC-005 — Password degli attaccanti in chiaro
+- **Severità:** High · **Confidence:** Alta · **File:** `app/models/models.py:70`, `app/services/attack_service.py:34-38`, `app/services/siem.py`, `app/services/telegram.py`
+- **Evidenza:** `password = Column(String(256))` valorizzata con `payload.password`; nessuna redaction; il sample va anche su Telegram e nel JSONL.
+- **Impatto:** GDPR e sicurezza: gli honeypot ricevono credenziali reali digitate per errore; un dump o un export le espone, Telegram le porta fuori perimetro.
+- **Fix:** salvare solo hash SHA-256 + pattern (lunghezza, classi, top-1000), redaction in log/report/Telegram, retention 30 giorni, esclusione dal backup.
+- **Test:** ingest con password nota → nessun campo in chiaro su DB, log, JSONL, Telegram.
+- **Release:** 4.1.0 (bloccante)
+
+#### KRAKEN-SEC-006 — Segreti di default non validati
+- **Severità:** High · **Confidence:** Alta · **File:** `docker-compose.yml:78,108,137`, `app/core/config.py:validate_secrets`
+- **Evidenza:** `POSTGRES_PASSWORD:-kraken_pass`, `REDIS_PASSWORD:-kraken_redis_pass`, `GRAFANA_PASSWORD:-admin`; la validazione copre solo `SECRET_KEY` e `INTERNAL_API_KEY`.
+- **Impatto:** accesso a dati degli attacchi e alle dashboard; Grafana admin espone datasource e credenziali.
+- **Fix:** `:?` su tutti i segreti (compose non parte senza), validazione in `Settings` per DB/Redis/Grafana, nessuna porta pubblicata per db/redis/grafana.
+- **Test:** compose senza `.env` → exit non-zero con messaggio; con password debole → rifiuto all'avvio.
+- **Release:** 4.1.0 (bloccante)
+
+#### KRAKEN-SEC-007 — API key interna non constant-time
+- **Severità:** Low · **Confidence:** Alta · **File:** `app/core/security.py:86`, `app/api/v1/endpoints/containers.py:22`
+- **Evidenza:** `api_key != settings.INTERNAL_API_KEY` e `==`.
+- **Impatto:** timing attack sulla chiave che sblocca i sandbox.
+- **Fix:** `hmac.compare_digest`.
+- **Test:** unit sul comparatore.
+- **Release:** 4.1.0
+
+#### KRAKEN-SEC-008 — Nessuna CI sul repo GitHub
+- **Severità:** Medium · **Confidence:** Alta · **File:** `.gitlab-ci.yml` (unico), `d86c8d5`
+- **Evidenza:** nessuna `.github/workflows`; README dichiara 65+ test.
+- **Impatto:** nessun gate su lint/test/bandit/pip-audit/build per il codice che va nel monorepo.
+- **Fix:** portare i job in `.github/workflows/ci.yml` (ruff, pytest, bandit, pip-audit, `docker build`, trivy), con service container PG+Redis.
+- **Test:** PR con test rotto → rossa; PR con CVE → rossa.
+- **Release:** 4.1.0 (prima del merge)
+
+#### KRAKEN-SEC-009 — Refresh token non revocabile
+- **Severità:** Medium · **Confidence:** Alta · **File:** `app/api/v1/endpoints/auth.py` (login/refresh/logout), `app/db/redis.py`
+- **Evidenza:** blacklist per jti solo dell'access; refresh è un JWT autonomo di 7 giorni, nessuna rotazione, nessun legame col dispositivo.
+- **Impatto:** un refresh rubato sopravvive a logout e revoca; non esiste "termina tutte le sessioni".
+- **Fix:** jti del refresh su Redis con single-use e rotazione, revoca globale per utente, riuso rilevato → invalidazione famiglia.
+- **Test:** logout → refresh 401; riuso di un refresh consumato → 401 e revoca famiglia.
+- **Release:** 4.1.0 (se esposto a Internet) altrimenti 4.2.0
+
+#### KRAKEN-SEC-010 — TLS self-signed generato a runtime
+- **Severità:** Medium · **Confidence:** Alta · **File:** `nginx/entrypoint.sh:1-12`, `nginx/nginx.conf`
+- **Evidenza:** se mancano i certificati, il container genera `CN=localhost` e serve 443: il deploy "sembra" in TLS.
+- **Impatto:** falsa percezione di sicurezza; client e browser falliscono la verifica, o l'operatore la disabilita.
+- **Fix:** niente generazione automatica in produzione: fallire con messaggio esplicito; self-signed solo con `PROFILE=lab` dichiarato; HSTS solo con cert valido.
+- **Test:** avvio prod senza cert → exit non-zero.
+- **Release:** 4.1.0 (con KRAKEN-SEC-006)
+
+#### KRAKEN-SEC-011 — Backup che chiama `docker exec`, non cifrato
+- **Severità:** High · **Confidence:** Alta · **File:** `scripts/backup.sh`, `Dockerfile.backup`, `docker-compose.yml:kraken_backup`
+- **Evidenza:** `docker exec kraken_db pg_dump ...` dentro il container di backup (nessun socket montato → il job fallisce), `redis-cli -a <password>` in argv, `tar ... || true` che nasconde gli errori, nessuna cifratura del dump, dei sample e della config.
+- **Impatto:** backup inesistente o non verificato + copia in chiaro di malware e credenziali su un volume.
+- **Fix:** `pg_dump` diretto via rete con `PGPASSWORD` da file, cifratura GPG AES-256 (`BACKUP_PASSPHRASE` obbligatoria), checksum, test di restore, sample esclusi o cifrati, retention con verifica.
+- **Test:** backup eseguito in CI su compose; restore su DB vuoto; checksum confrontato; nessun file `.sql` in chiaro.
+- **Release:** 4.1.0
+
+### 4.4 Kraken — logica e affidabilità
+
+| ID | Titolo | Sev | File | Impatto | Fix | Release |
+|---|---|---|---|---|---|---|
+| KRAKEN-LOGIC-001 | Ingest non idempotente (`session_id` UNIQUE, nessun upsert) | High | `models.py:33`, `attack_service.ingest_sensor_event` | il retry del sensore dopo timeout → IntegrityError → 500, evento perso | `INSERT ... ON CONFLICT (session_id) DO UPDATE` o upsert applicativo; risposta 200 con `duplicate: true` | 4.1.0 |
+| KRAKEN-LOGIC-002 | Limite sandbox concorrenti fuori dal lock | Low | `docker_manager.py:58` | si superano i 20 dichiarati | check+insert sotto `async with self._lock` | 4.1.0 |
+| KRAKEN-LOGIC-003 | Blacklist usata con `token[:32]` invece del jti | Low | `containers.py:35` | revoca non applicata su quegli endpoint | estrarre jti come in `deps.py` | 4.1.0 |
+| KRAKEN-LOGIC-004 | `SANDBOX_API_URL` inutilizzato, URL hardcoded nei sensori | Low | `config.py`, `honeypot/sensors/*` | riconfigurazione impossibile | usare `settings.SANDBOX_API_URL` | 4.2.0 |
+| KRAKEN-LOGIC-005 | Test unit scrivono in `/app` | Low | `tests/conftest.py:30` | 7 test falliscono fuori dal container | `tmp_path` + env `DATA_DIR` | 4.1.0 |
+| KRAKEN-LOGIC-006 | Nessun limite a `commands[]` per sessione | Medium | `schemas.py:SensorEventIn` | un sensore ostile gonfia il DB | `max_length=200` + troncamento dichiarato | 4.1.0 |
+| KRAKEN-OPS-001 | Prometheus: label `sha256_prefix` su counter | Medium | `app/core/metrics.py` | cardinalità illimitata → TSDB esploso | rimuovere la label, usare un counter senza label + esempio nel log | 4.1.0 |
+| KRAKEN-OPS-002 | `attacks_total{country}` senza cap | Low | `app/core/metrics.py` | fino a ~250 serie (ok) ma cresce con GeoIP errato | normalizzare a ISO-3166 e `unknown` | 4.2.0 |
+| KRAKEN-OPS-003 | Nessuna retention sui sample | High (legale) | `docker_manager._destroy` | crescita illimitata di malware su disco, senza scadenza | retention 30 giorni, quota volume, cancellazione sicura con audit | 4.2.0 |
+| KRAKEN-OPS-004 | `eventi`/`comandi` senza paginazione dichiarata oltre 200 | Low | `endpoints/events.py` | export limitato a 10000 in memoria | cursore + streaming CSV | 4.2.0 |
+
+---
+## 5. Architettura di unione: due servizi, un piano di controllo
+
+### 5.1 Perché due servizi e non un merge
+
+| Criterio | Fondere Kraken nel Brain | Servizio separato |
+|---|---|---|
+| Blast radius | l'exploit dell'honeypot arriva al processo che firma gli update degli agenti | l'exploit resta in un container senza PKI né chiavi agenti |
+| Privilegi | il Brain dovrebbe avere il Docker socket (peggior privilegio possibile) | solo Kraken ha il broker sandbox |
+| Rischio malware | sample nello stesso filesystem del DB di audit | volume separato, retention separata |
+| Scala | Brain pinned a 1 worker (stato in process) | Kraken scala orizzontalmente per numero di sensori |
+| Rilascio | ogni fix honeypot richiede un redeploy del core SOC | ciclo indipendente |
+| Compliance | dati di attaccanti insieme ai dati dei dipendenti | perimetri e retention distinti |
+
+**Decisione:** Kraken resta un servizio con proprio DB, proprie migrazioni e proprio ciclo di rilascio. Aegis è il **piano di controllo** (identità, eventi, detection, incidenti, risposta); Kraken è un **sensore di deception** che produce eventi. Nessuna tabella condivisa, nessun import Python incrociato.
+
+### 5.2 Topologia target
+
+```
+                        ┌──────────────────────── Caddy (TLS, CSP, HSTS) ───────────────────────┐
+                        │                                                                       │
+   browser SOC ─────────┤ /                  → aegis-frontend   (SPA)                            │
+                        │ /api/*             → aegis-brain      :8000                            │
+                        │ /ws/*              → aegis-brain      (WebSocket)                      │
+                        │ /deception/*       → kraken           :9000   (proxy + auth delegated) │
+                        └───────────────────────────────────────────────────────────────────────┘
+                                   │                                     │
+                          ┌────────▼─────────┐                 ┌─────────▼──────────┐
+                          │   aegis-brain    │◄── ingest ──────│   kraken (app)     │
+                          │  (controllo)     │  HMAC + key     │  (deception)       │
+                          └───┬──────┬───────┘                 └───┬────────┬───────┘
+                              │      │                             │        │
+                       ┌──────▼──┐ ┌─▼──────────┐          ┌───────▼──┐ ┌───▼────────┐
+                       │ Postgres│ │ Redis      │          │ Postgres │ │ Redis      │
+                       │ aegis   │ │ aegis:*    │          │ kraken   │ │ kraken:*   │
+                       └─────────┘ └────────────┘          └──────────┘ └────────────┘
+                              ▲                                     ▲
+                       agenti Guard/NodeTrace              sensori SSH/HTTP/FTP/Telnet/SMB/RDP
+                                                          broker sandbox ↔ container effimeri
+```
+
+Regole di confine:
+
+1. **Kraken non legge mai** tabelle Aegis e viceversa. L'unica conversazione è HTTP verso `/api/v1/ingest/kraken`.
+2. **Kraken non firma update, non conosce la PKI, non emette token Aegis.** Per la UI usa un token delegato (vedi §5.5).
+3. **Il Brain non ha socket Docker** né credenziali dei sensori.
+4. **Le reti sono tre**: `edge` (Caddy↔brain↔kraken), `kraken_internal` (app↔db↔redis), `sandbox` (`internal: true`, app↔broker).
+
+### 5.3 Contratto eventi (riuso di ciò che esiste)
+
+Il Brain ha già il contratto giusto: `app/ingest/base.py` definisce `UnifiedEvent`, `make_event_id`, e `EventSource` enum. Kraken deve parlare **quello**, non inventarne un altro.
+
+```jsonc
+POST /api/v1/ingest/kraken
+X-Api-Key: <chiave dedicata, scope "kraken:write", source "kraken">
+Content-Type: application/json
+
+{
+  "events": [{
+    "event_id": "kraken:5f2c...:1731530000:ssh",   // stabile, calcolato dal sensore
+    "occurred_at": "2026-11-12T10:00:00Z",
+    "host": { "hostname": "kraken-node-01", "os": "linux" },
+    "source": "kraken",
+    "category": "intrusion_attempt",
+    "action": "login_attempt",
+    "outcome": "failure",
+    "severity": "medium",
+    "user": { "name": "root" },                     // solo nome, mai password
+    "network": { "src_ip": "45.9.20.7", "src_port": 51244,
+                 "dst_ip": "203.0.113.10", "dst_port": 22, "protocol": "ssh" },
+    "process": { "command_line": "uname -a" },      // comandi registrati dall'honeypot
+    "raw": { "sensor": "ssh", "session_id": "5f2c...", "threat_level": "high",
+             "geo": { "country": "RU", "asn": 49505 },
+             "iocs": ["45.9.20.7", "d41d8cd9..."],
+             "sample_sha256": "…", "mitre": ["T1110.001","T1059.004"] },
+    "tags": ["deception", "kraken"]
+  }]
+}
+```
+
+Vincoli da rispettare nel codice:
+
+- **Idempotenza**: `event_id` deterministica (`sha256(sensor|session_id|timestamp|command_index)`); il Brain già deduplica per `event_id` (LRU Redis + fallback memoria). Il retry di Kraken diventa sicuro.
+- **Batch**: massimo 500 eventi o 1 MB per richiesta; Kraken bufferizza su Redis (`kraken:outbox`) e invia con backoff esponenziale + jitter; su 5xx ritenta, su 4xx scarta e logga (veleno).
+- **Ordine**: nessuna garanzia globale; il Brain ordina per `occurred_at` e usa `SeqTracker` solo per gli agenti. Per Kraken, `occurred_at` è sufficiente (le sessioni durano minuti).
+- **Auth**: HMAC-SHA256 del body con `KRAKEN_INGEST_SECRET` **più** `X-Api-Key` (scope `kraken:write`, vedi AEGIS-SEC-006). Così un replay senza firma non passa e una chiave rubata da sola non basta.
+- **Timestamp**: se `occurred_at` è più vecchio di 24 h il Brain lo accetta ma marca `late=true`; oltre 7 giorni rifiuta (protezione da backfill malevolo).
+
+**Mappatura sui campi esistenti** (non aggiungere campi al contratto se non serve):
+
+| Concetto Kraken | `UnifiedEvent` | Tabella |
+|---|---|---|
+| sessione | `event_id` + `raw.session_id` | `siem_events` |
+| comando eseguito | `process.command_line` | `siem_events` |
+| credenziale tentata | `user.name` (solo nome) | `siem_events` |
+| IP attaccante | `network.src_ip` | `siem_events` (indice) |
+| livello di minaccia | `severity` | `siem_events` |
+| sample | `raw.sample_sha256` | `malware_samples` (nuova, §9.3) |
+
+### 5.4 Perché non Kafka, non Kubernetes, non object storage (oggi)
+
+Tre motivi concreti, non ideologici:
+
+1. **Volume reale**: un honeypot con 4 sensori produce 10³–10⁵ eventi/giorno. Redis list + HTTP batch regge, Kafka no (tre broker per essere serio, e va orchestrato).
+2. **Competenza richiesta**: il progetto è gestito da una persona; ogni pezzo in più è un pezzo che si rompe di notte.
+3. **Requisito di prodotto**: Aegis vende semplicità di deploy (`docker compose up`). Aggiungere un cluster contraddice il posizionamento.
+
+Soglie per cambiare idea, da scrivere nel README: >5.000 eventi/s sostenuti, >30 giorni di buffer, più di 3 consumer indipendenti, o necessità di replay/riprocessing. A quel punto si valuta Redpanda, non Kafka.
+
+### 5.5 UI e autenticazione delegata
+
+Due opzioni, si sceglie la seconda:
+
+| Opzione | Come | Problema |
+|---|---|---|
+| Kraken espone login proprio | l'operatore ha due account | due password, due MFA, due revoche |
+| **SSO delegato** (scelta) | Caddy inoltra `/deception/*` a Kraken con un JWT firmato dal Brain (`sub`, `roles`, `exp` 5 min, `aud=kraken`) | richiede una chiave condivisa e validazione dell'`aud` |
+
+Implementazione: endpoint `POST /api/v1/deception/token` (solo `admin`/`analyst`) che emette un token breve; il frontend lo passa a Kraken; Kraken verifica con la chiave pubblica Ed25519 del Brain (`KRAKEN_AEGIS_PUBKEY`). Kraken **non** ha più un form di login in produzione (`ALLOW_LOCAL_LOGIN=false`). In questo modo KRAKEN-SEC-001 e KRAKEN-SEC-009 diventano non sfruttabili nel deployment unito, ma vanno corretti lo stesso perché l'app resta installabile da sola.
+
+### 5.6 Percorso di migrazione (senza big bang)
+
+| Fase | Cosa | Rischio | Rollback |
+|---|---|---|---|
+| 0 | Kraken nel monorepo come `services/kraken`, CI verde, **nessun** contatto col Brain | nullo | rimozione directory |
+| 1 | `POST /api/v1/ingest/kraken` + chiave scope + outbox in Kraken, feature flag `KRAKEN_INGEST_ENABLED=false` | basso | flag off |
+| 2 | Kraken invia eventi **in shadow**: il Brain li salva e li marca `deception`, nessuna detection | basso | flag off |
+| 3 | Regole Sigma su `source=kraken` + pagina "Deception" nella SPA in sola lettura | medio (rumore alert) | disattivare le regole |
+| 4 | Playbook di contenimento su attacchi deception (block IP al firewall, ticket) | medio | disattivare playbook |
+| 5 | SSO delegato e rimozione login Kraken | basso | riabilitare login |
+
+Ogni fase ha un criterio di uscita misurabile in §10.
+
+---
+
+## 6. Piano dei fix, in ordine di esecuzione
+
+Gli effort sono per una persona che conosce il codice; includono test e PR, non la review.
+
+### 6.1 Cancello A — "Kraken esiste" (3–4 ore)
+
+Ordine obbligato, perché tutto il resto presuppone un servizio che parte.
+
+| # | ID | Azione | Effort | Verifica |
+|---|---|---|---|---|
+| 1 | KRAKEN-SEC-000 | `__allow_unmapped__ = True` in `Base` **o** annotazioni `Mapped[...]` | 15 min | `import app.main`; `alembic upgrade head`; `pytest` |
+| 2 | KRAKEN-LOGIC-005 | test in `tmp_path`, `DATA_DIR` configurabile | 45 min | `pytest tests/unit` 65/65 |
+| 3 | KRAKEN-SEC-008 | `.github/workflows/ci.yml` con PG+Redis | 90–120 min | PR rossa se test/audit falliscono |
+| 4 | — | `ruff check`, `ruff format`, `mypy` (soft) | 30 min | job verde |
+
+**Uscita:** `pytest` verde su GitHub, immagine che parte, `/health` 200.
+
+### 6.2 Cancello B — "Kraken non è un rischio" (2–3 giornate)
+
+| # | ID | Azione | Effort | Note |
+|---|---|---|---|---|
+| 1 | KRAKEN-SEC-001 | `is_admin` fuori da `UserCreate`; register off; script primo admin; audit | 3 h | la più urgente: privesc banale |
+| 2 | KRAKEN-SEC-002 | broker socket-proxy con allowlist; app senza socket | 1–1,5 gg | il lavoro più delicato del cancello |
+| 3 | KRAKEN-SEC-003 | rete `internal: true`, `network_mode: none`, DNS off, test `docker network inspect` | 3 h | |
+| 4 | KRAKEN-SEC-005 | hash+pattern password, redaction su log/SIEM/Telegram | 4 h | |
+| 5 | KRAKEN-SEC-006 | `:?` su tutti i segreti, validazione, porte non pubblicate | 2 h | |
+| 6 | KRAKEN-SEC-010 | niente TLS auto-generato fuori da `lab` | 1 h | |
+| 7 | KRAKEN-SEC-007 | `hmac.compare_digest` | 15 min | |
+| 8 | KRAKEN-SEC-004 | cap per file/sessione, streaming con hash | 3 h | |
+| 9 | KRAKEN-SEC-011 | backup senza `docker exec`, GPG, checksum, restore testato | 6 h | |
+| 10 | KRAKEN-SEC-009 | refresh single-use con rotazione e revoca famiglia | 5 h | |
+| 11 | KRAKEN-LOGIC-001/002/003/006, KRAKEN-OPS-001 | upsert idempotente, lock, jti, limiti, rimozione label `sha256_prefix` | 6 h | |
+
+**Uscita:** nessun Critical aperto; privesc e pivot riprodotti e non più possibili; backup restaurabile.
+
+### 6.3 Cancello C — "Aegis torna verde" (3–4 giornate)
+
+| # | ID | Azione | Effort |
+|---|---|---|---|
+| 1 | AEGIS-LOGIC-006 | corpus sintetico relativo a `now` o `freezegun`; 2 test verdi a qualunque data | 3 h |
+| 2 | AEGIS-LOGIC-007 | marker `integration` o fixture DB sui 5 test | 2 h |
+| 3 | AEGIS-LOGIC-008/009 | rimozione `pymongo`/`motor`; PyJWT 2.15.0 | 1 h + verifica |
+| 4 | AEGIS-OPS-005 | bump Vite; audit dev separato dal gate prod | 2 h |
+| 5 | AEGIS-SEC-011 | rimozione ramo curl o `--config` 0600 in NodeTrace | 3 h |
+| 6 | AEGIS-SEC-001 | re-enroll con prova di possesso (machine-id + token dedicato) | 1–1,5 gg |
+| 7 | AEGIS-SEC-002 | separazione chiavi enroll/firma/device; Ed25519 nel one-liner | 1 gg |
+| 8 | AEGIS-SEC-007 | `reg delete /v`, esiti onesti, Linux `unsupported` | 4 h + test Windows |
+| 9 | AEGIS-SEC-004 | decompressione incrementale con cap | 3 h |
+| 10 | AEGIS-SEC-005/008 | profili `lab/pilot/prod`, Redis per rate limit, FFP on in prod | 4 h |
+| 11 | AEGIS-LOGIC-003/004/005 | coda con priorità + contatori, revoca fail-closed, chiave health corretta | 2 h |
+| 12 | AEGIS-SEC-003 | `script` → catalogo azioni (o container effimero) | 5 h |
+| 13 | AEGIS-SEC-006 | tabella `api_keys` con scope e revoca | 1 gg |
+| 14 | AEGIS-OPS-002 | job di restore verificato | 3 h |
+
+**Uscita:** CI completamente verde, 0 High da `pip-audit`/`npm audit`, nessun finding Critical/High aperto in Aegis.
+
+### 6.4 Cancello D — "integrazione" (3–4 giornate)
+
+Solo dopo A+B+C. Voci: §5.3 (ingest), §5.5 (SSO), §5.6 fasi 1–3, §10 (4.2.0).
+
+**Totale fino a 4.1.0 production-ready: 9–13 giornate uomo**, di cui 5–7 su Kraken. È coerente con la stima precedente (10–14) e la sostituisce.
+
+### 6.5 Come provare ogni fix (ricette)
+
+```bash
+# Kraken, prima e dopo KRAKEN-SEC-000
+cd services/kraken && python -c "import app.main" && alembic upgrade head && pytest -q
+
+# Privesc (deve fallire dopo il fix)
+curl -s -X POST localhost:9000/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"x","password":"Str0ng!pass","email":"x@y.z","is_admin":true}' | jq
+
+# Isolamento sandbox (deve fallire dentro il container)
+docker run --rm --network kraken_sandbox_net alpine sh -c 'wget -T2 -qO- https://example.com; echo rc=$?'
+
+# Socket (deve mancare)
+docker compose exec kraken ls -l /var/run/docker.sock   # atteso: No such file
+
+# Aegis CI
+cd aegis-brain && REQUIRE_INTEGRATION=1 pytest -q && pip-audit -r requirements.txt
+cd ../frontend && npm audit --audit-level=high --omit=dev && npm run build
+
+# Firma OTA (dopo AEGIS-SEC-002)
+curl -s -X POST localhost:8000/api/v1/deploy/artifacts/.../sign ... && \
+  java -jar aegis-guard/... # verifica del manifest firmato
+```
+
+---
+## 7. Feature nuove per Aegis (oltre i fix)
+
+Ogni voce: problema che risolve, cosa costruire, dove, criterio di accettazione, effort. Sono ordinate per rapporto valore/costo, non per release: la distribuzione è in §10.
+
+### 7.1 Contenimento di rete vero (host isolation)
+- **Problema:** `isolate` oggi è un flag nel DB (`agent.isolated`) più un comando all'agente; se l'agente non risponde, l'host resta in rete. Non esiste isolamento lato infrastruttura.
+- **Costruire:** connettore al firewall/switch (API pfSense/OPNsense, FortiGate, UniFi) e alle security group cloud (AWS SG, Azure NSG, GCP firewall) con azione `quarantine_host(ip, duration)`; TTL obbligatorio (default 60 min) e ripristino automatico; audit con motivazione; "kill switch" globale che rifiuta nuovi isolamenti se il controllo è degradato.
+- **Accettazione:** incidente con IP → regola creata in <3 s sul firewall di test, host non raggiungibile da altro host, ripristino automatico a scadenza, audit completo; integrazione provata su un target simulato (nessun hardware in CI).
+- **Effort:** 4–5 gg (uno per famiglia di connettore).
+- **Perché conta:** è l'unica azione che funziona quando l'agente è compromesso o spento. Oggi il prodotto promette contenimento e consegna un flag.
+
+### 7.2 Contenimento credenziali (disable/reset con approvazione)
+- **Problema:** dopo un attacco a credenziali (T1110, T1078) il SOC isola la macchina ma non la credenziale: l'attaccante la riusa altrove.
+- **Costruire:** azione `disable_account` verso AD (LDAP modify / `Disable-ADAccount` via WinRM), Okta, Google Workspace, M365; flusso a due persone (richiesta + approvazione) con scadenza; registro delle azioni con esito.
+- **Accettazione:** alert brute-force → proposta di disabilitazione → approvazione → account disabilitato sull'AD di test → audit con due identità.
+- **Effort:** 4 gg.
+- **Nota:** richiede la rimozione di WinRM dal "rito" del deploy: qui serve, ma con allowlist di comandi e credenziali dedicate, non con l'account di dominio dell'operatore.
+
+### 7.3 Timeline unificata investigativa
+- **Problema:** la SPA ha pagine per alert, eventi SIEM, telemetria, incidenti, ma nessuna vista che li metta **in ordine** per un host o un IP.
+- **Costruire:** `GET /api/v1/timeline?subject=ip:1.2.3.4&from=...&to=...` che unisce `siem_events`, `telemetry_events`, `alerts`, `agent_commands`, `deception_events` con `source`, `severity`, `link`; UI con virtualizzazione (10k righe), filtri e "pin"; export JSON.
+- **Accettazione:** per un IP con eventi da 3 sorgenti, la vista mostra l'ordine corretto, p95 < 400 ms su 10k righe, link a ogni entità.
+- **Effort:** 3 gg (1 backend, 2 frontend).
+- **Perché:** riduce il tempo medio di indagine più di qualunque nuova detection.
+
+### 7.4 ATT&CK coverage navigabile
+- **Problema:** 14 tecniche MITRE sono un numero, non una vista. Il cliente non sa cosa è coperto e cosa no.
+- **Costruire:** matrice ATT&CK Enterprise in UI con stato per tecnica (`covered` con N regole, `partial`, `none`), filtro per piattaforma, click → regole e ultimi alert; endpoint `GET /api/v1/detections/coverage?platform=windows`; export per il report al cliente.
+- **Accettazione:** la matrice riflette `get_engine().coverage()` (stessa fonte, nessun dato duplicato); aggiungere una regola cambia la vista senza deploy.
+- **Effort:** 2 gg.
+- **Onestà:** mostrare i buchi è un rischio commerciale, ma è l'unica cosa che rende credibile il numero.
+
+### 7.5 Detection-as-code con validazione in CI
+- **Problema:** regole Sigma e di correlazione si aggiungono a mano; non c'è un test che dica "questa regola non compila" prima del merge.
+- **Costruire:** `scripts/validate-rules.py` (compila ogni regola, verifica campi, MITRE, severità, `falsepositives`, presenza di almeno un evento positivo e uno negativo nel corpus), job CI, pre-commit hook; `make rules`.
+- **Accettazione:** regola con campo inesistente → CI rossa con messaggio preciso; corpus replay resta F1 1.0.
+- **Effort:** 1,5 gg.
+
+### 7.6 Report PDF unificato (incidente + deception)
+- **Problema:** Kraken ha un export PDF proprio, Aegis ha export CSV/JSON ma nessun report d'incidente impaginato. Il cliente chiede un PDF.
+- **Costruire:** generatore server-side (WeasyPrint o ReportLab) con template: executive summary, timeline, host coinvolti, IOC, azioni intraprese, eventi deception, allegati; `GET /api/v1/incidents/{id}/report.pdf`; brandizzabile; watermark "CONFIDENTIAL".
+- **Accettazione:** PDF generato in <5 s per un incidente con 500 eventi; nessun nome utente/password in chiaro; test di regressione sul testo estratto.
+- **Effort:** 3 gg.
+
+### 7.7 Threat intel: feed e arricchimento
+- **Problema:** gli IP sono arricchiti con GeoIP, non con reputazione. Il SOC vede `45.9.20.7` e non sa che è un noto scanner.
+- **Costruire:** import di feed (MISP, AlienVault OTX, abuse.ch, liste CIDR custom) in tabella `ioc(type, value, source, confidence, first_seen, last_seen, tags)`; arricchimento async con cache Redis 24 h; l'IP catturato da Kraken è automaticamente arricchito; matching nelle regole come campo `ioc.reputation`.
+- **Accettazione:** IP presente in feed → `reputation: malicious` in <1 s dalla cache; feed irraggiungibile → degradazione senza errori; nessuna chiamata esterna per IP privati (RFC1918) — importante: oggi l'arricchimento non distingue.
+- **Effort:** 4 gg.
+
+### 7.8 Notifiche e turni (alert routing)
+- **Problema:** un solo canale (Telegram nei playbook, email opzionale). Nessuna escalazione, nessuna finestra di reperibilità, nessun "chi è di turno".
+- **Costruire:** canali multipli (Slack, Teams, webhook generico, PagerDuty-compatibile), routing per severità/tag/orario, dedup con finestra, acknowledge con tracking (`ack_by`, `ack_at`, MTTA), escalazione a T+15/T+30.
+- **Accettazione:** alert high fuori orario → canale secondario; ack ferma l'escalazione; MTTA esposto in dashboard.
+- **Effort:** 4 gg.
+- **Perché:** è la feature che i SOC piccoli chiedono per prima dopo il deploy.
+
+### 7.9 Soppressioni governate
+- **Problema:** la tentazione dell'analista è disattivare la regola; poi nessuno la riattiva.
+- **Costruire:** `suppressions(rule_id, scope, reason, created_by, expires_at)` con TTL obbligatorio (max 90 gg), contatore "alert soppressi", pagina di revisione settimanale, alert quando una soppressione scade.
+- **Accettazione:** soppressione senza `expires_at` → 422; scaduta → alert torna; report mensile dei soppressi.
+- **Effort:** 2 gg.
+
+### 7.10 Affidabilità del Brain
+- **Problema:** il Brain gira con un worker e stato in process (dedup, rate limit, cache). In HA l'overlay esiste ma non è provato; un riavvio perde lo stato.
+- **Costruire:** stato condiviso su Redis con chiavi namespaced e TTL; `uvicorn --workers N` dietro Caddy; test di concorrenza su dedup; `/readyz` che fallisce se Redis non è raggiungibile e lo stato è richiesto.
+- **Accettazione:** 2 worker, stesso `event_id` inviato in parallelo → 1 record; riavvio di un worker senza perdita di coda; test di carico 200 rps sostenuti con p95 < 300 ms.
+- **Effort:** 4 gg.
+
+### 7.11 Onboarding e proof-of-value in 15 minuti
+- **Problema:** il primo deploy richiede secret, migrazioni, enroll, agenti, regole: un consulente impiega mezza giornata e il cliente non vede valore.
+- **Costruire:** `make demo` che alza compose con dati sintetici (3 host, 20 alert, 2 incidenti, 1 attacco deception), una pagina "Guided tour" e `scripts/smoke-test.sh` che verifica 12 percorsi critici.
+- **Accettazione:** da clone pulito a dashboard popolata in <15 min su un portatile; nessun secret reale; `smoke-test.sh` verde.
+- **Effort:** 2 gg.
+
+### 7.12 Cosa NON fare adesso (e perché)
+| Idea | Motivo del rinvio |
+|---|---|
+| Multi-tenancy | cambia lo schema di ogni tabella e le policy di ogni endpoint: 6+ settimane, e nessun cliente lo ha chiesto |
+| EDR completo (kernel driver Windows) | richiede firma del driver, WHQL, supporto: è un altro prodotto |
+| Market di playbook | senza clienti non c'è domanda; prima servono 20 playbook interni solidi |
+| Case management con SLA e bolle di fatturazione | utile, ma dopo la timeline unificata (7.3), che ne è il presupposto |
+| AI generativa che "decide" il contenimento | rischio troppo alto; l'AI resta in supporto all'analista (riassunti, query) |
+
+---
+
+## 8. Espansione significativa di Kraken
+
+Kraken oggi è un honeypot che raccoglie attacchi. Per avere valore nel prodotto deve diventare **una piattaforma di deception**: sensori, esche, detonazione, intelligence e reporting. Le voci sono ordinate per dipendenza.
+
+### 8.1 Sensori aggiuntivi (impegno: 6–8 gg)
+1. **SMB (porta 445)** — il più richiesto: cattura EternalBlue-like, PsExec, ransomware che cifra share esche. Implementazione: server SMB minimale (impacket o implementazione async) che accetta NTLM e registra hash NetNTLMv2 (utilissimi: cracking e relay detection), share `Documents`, `Backup`, file esca con canary. **Attenzione:** non implementare relay/SMB signing debole; solo cattura.
+2. **RDP (3389)** — non si emula il protocollo: si registra il tentativo (TCP + negoziazione), si offre un banner credibile e si logga l'IP; opzionale integrazione con `xrdp` in container per sessioni finte.
+3. **Modbus/ICS (502) e S7 (102)** — honeypot per reti OT: risponde a read/write di registri finti, registra le scritture (indicatore di attacco a processo fisico). Richiede cautela: nessuna risposta che possa simulare un impianto reale in produzione.
+4. **LDAP (389)** — cattura bind e query di enumerazione.
+5. **MySQL/Postgres finti (3306/5432)** — cattura credenziali e tentativi di `COPY ... FROM PROGRAM` (RCE storica).
+6. **HTTP "vulnerabile"** — template per WordPress/phpMyAdmin/ Jenkins/Confluence con endpoint che fingono CVE note (path specifici: `/wp-content/plugins/...`, `/solr/admin/cores`, `/script` di Jenkins), registrando il payload.
+7. **SMTP aperto (25)**, **DNS (53)** — misura di abuso (open relay, amplification) con registrazione delle query.
+
+Regola comune: **un sensore = un modulo** con interfaccia `Sensor` (`name`, `listen`, `parse`, `emit`), configurazione da YAML, abilitabile per nodo, health check, metriche `kraken_sensor_up`.
+
+### 8.2 Sensori come flotta (2–3 gg)
+- Ogni nodo ha `node_id`, una **chiave per nodo** (non una condivisa), registrazione con token monouso, heartbeat, versione, configurazione applicata, stato sensori.
+- `POST /api/v1/nodes/register` + `GET /api/v1/nodes/{id}/config` (firma Ed25519 come per gli agenti Aegis: riuso del pattern, non della chiave).
+- Aggiornamento configurazione con conferma (desired/applied) e rollback automatico se il nodo non conferma in 10 min.
+- **Accettazione:** un nodo compromesso non può impersonarne un altro né leggere la config degli altri; revoca immediata; nessun secret in chiaro nel DB (solo hash).
+- **Perché:** senza flotta, "honeypot" significa un server. Con flotta significa 20 esche in 20 subnet, che è ciò che rende la deception efficace.
+
+### 8.3 Detonazione e analisi sample (4–6 gg)
+- **YARA** sui sample catturati (regole proprie + `yara-rules` community), con regola di quarantena e `malware_samples.detections`.
+- **Hashing e identificazione**: SHA-256, ssdeep, `file(1)`/`python-magic`, strings estratte con IOC (IP, domini, URL, base64 lungo), ClamAV opzionale.
+- **Sandbox di detonazione separata** (non la sandbox interattiva): container `internal`, timeout 120 s, `strace`/`sysdig` se disponibile, cattura di file creati e processi, nessuna rete. Output: `behavior` JSON, `iocs[]`, MITRE mappate.
+- **Accettazione:** caricare un ELF di test → hash, tipo, IOC, YARA match, report; nessuna rete usata (verificato); timeout rispettato; sample non eseguibile dall'app.
+- **Nota di sicurezza:** la detonazione è la parte più pericolosa del prodotto. Deve stare in un container senza socket, con utente non privilegiato, `seccomp` default, `no-new-privileges`, e non deve mai condividere il volume con l'app.
+
+### 8.4 Threat intelligence e attribuzione (3 gg)
+- Arricchimento IP/ASN/paese con cache; **cluster di campagne**: raggruppare sessioni per `src_ip` + fingerprint comandi (hash dei comandi normalizzati) + user-agent, con soglia temporale.
+- **Fingerprint attaccante**: `HASSH` per SSH (client), `JA3/JA4` per TLS se il sensore lo consente, `p0f`-like per TCP; salvare e usare per collegare sessioni da IP diversi (botnet, proxy rotation).
+- **Accettazione:** due sessioni dallo stesso client SSH con IP diversi → stesso `attacker_fingerprint`; la UI le mostra raggruppate.
+- **Perché:** è la differenza tra "log di attacchi" e "intelligence".
+
+### 8.5 Deception attiva: canary token e file esca (3 gg)
+- Generatore di canary token (URL, DNS, documento Word/PDF con beacon, AWS key finta, cookie) con tracking del trigger → evento `canary_triggered` ad alta severità.
+- Distribuzione di file esca nei share e nelle directory utente (via agente Aegis o manuale) con nome credibile e `canary_id` nel contenuto.
+- **Accettazione:** aprire il PDF esca genera un evento con IP, user-agent, `canary_id`, host di provenienza; il file non contiene macro attive.
+- **Perché:** è la feature che sposta Kraken da "attira attaccanti esterni" a "scopre attaccanti interni e ransomware", che è ciò che il cliente compra.
+
+### 8.6 Risposta automatica su deception (2–3 gg)
+- Su `deception_event` con `severity >= high`: arricchisci → crea incidente in Aegis → proponi playbook `block_ip` (firewall) e `disable_account` se la credenziale esca è stata usata → ticket.
+- Regola d'oro: **le credenziali esca non devono esistere** in AD; se qualcuno le usa, è un attaccante (o un test). Questo va scritto nell'UI, perché un falso positivo qui è costoso.
+- **Accettazione:** attacco a sensore SSH → incidente creato in <10 s, playbook proposto, IP bloccato al firewall di test, audit completo.
+
+### 8.7 Blocklist e export operativo (2 gg)
+- Export per famiglia: CIDR/IP, domini, hash, user-agent, JA3, con TTL e formato per firewall (iptables, pfSense, FortiGate, Cloudflare, `ipset`).
+- API `GET /api/v1/intel/blocklist?since=...&format=...` con firma e versione, pensata per il consumo automatico.
+- **Accettazione:** blocklist generata in <2 s con 10k IP, deduplicata e normalizzata, nessun IP privato incluso.
+
+### 8.8 STIX/TAXII e MISP (3–4 gg)
+- Export STIX 2.1 di indicatori e campagne; server TAXII minimale (collections read-only) o push verso MISP con `MISP_URL`/`MISP_KEY`.
+- **Accettazione:** un bundle STIX validato con `stix2-validator`; import in MISP di test; nessuna dipendenza da servizi esterni in CI (mock).
+
+### 8.9 Dollhouse e contenuti dinamici (4 gg)
+- Generazione di filesystem e servizi finti per il container sandbox (utenti finti, `/etc/passwd` credibile, cron, `.ssh`, `.aws/credentials` esca, `/var/www` con sorgenti finti) così che l'attaccante scarichi altro materiale e riveli TTP.
+- **Accettazione:** il container parte con il dollhouse in <2 s; nessun file reale; ogni file esca ha `canary_id` e, se letto, genera evento (watcher `inotify`).
+- **Perché:** aumenta il tempo di dwell e la qualità dei comandi raccolti, che è il dato che si vende.
+
+### 8.10 Metriche di prodotto (1–2 gg)
+- Dashboard "Deception effectiveness": sessioni/giorno, IP unici, comandi per sessione, tempo medio di dwell, credenziali provate, sample catturati, top TTP, paesi, campagne.
+- Report settimanale automatico (PDF) con la stessa pipeline del report d'incidente (§7.6).
+- **Accettazione:** la dashboard si popola da dati reali del compose demo; i numeri tornano con query SQL dirette (test di coerenza).
+
+### 8.11 Roadmap tecnica Kraken (riordino del codice)
+Oggi: `app/api/v1/endpoints/*`, `services/*`, `models/models.py` monolitico, sensori in `honeypot/`. Proposta per il monorepo:
+
+```
+services/kraken/
+  app/
+    api/v1/endpoints/{auth,nodes,sensors,events,malware,intel,metrics,health}.py
+    core/{config,security,logging,metrics}.py
+    db/{session,redis}.py
+    models/{base,attack,node,malware,ioc,canary}.py      # split del monolite
+    services/{attack,sandbox_broker,siem,telegram,enrich,outbox}.py
+    sensors/{base,ssh,http,ftp,telnet,smb,rdp,ldap,sql}.py
+    schemas/{auth,event,node,malware,intel}.py
+  alembic/versions/
+  tests/{unit,integration,fixtures}/
+  deploy/{docker-compose.yml,Dockerfile,sandbox-proxy/}
+```
+
+Nessuna riscrittura: si sposta e si divide mentre si toccano i file per i fix. Il "big bang refactor" è vietato.
+
+---
+## 9. Modello dati e deployment
+
+### 9.1 Nuove tabelle Aegis (migrazione 0020+)
+
+```sql
+-- 0020_api_keys: sostituisce la chiave globale (AEGIS-SEC-006)
+CREATE TABLE api_keys (
+  id            uuid PRIMARY KEY,
+  name          text NOT NULL UNIQUE,
+  key_hash      text NOT NULL,                 -- sha256, mai in chiaro
+  scopes        text[] NOT NULL DEFAULT '{}',  -- {ingest:write, kraken:write}
+  source        text,                          -- vincolo: questa chiave scrive solo qui
+  created_by    uuid REFERENCES users(id),
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  last_used_at  timestamptz,
+  revoked_at    timestamptz
+);
+
+-- 0021_deception: eventi Kraken normalizzati (o riuso di siem_events con source=kraken)
+CREATE TABLE deception_sessions (
+  id                uuid PRIMARY KEY,
+  external_id       text NOT NULL UNIQUE,      -- session_id di Kraken
+  node_id           text NOT NULL,
+  sensor            text NOT NULL,             -- ssh|http|ftp|telnet|smb|rdp|...
+  src_ip            inet NOT NULL,
+  src_port          int,
+  country           text,
+  asn               int,
+  first_seen        timestamptz NOT NULL,
+  last_seen         timestamptz NOT NULL,
+  command_count     int NOT NULL DEFAULT 0,
+  credential_count  int NOT NULL DEFAULT 0,
+  fingerprint       text,                      -- HASSH/JA3
+  severity          text NOT NULL,
+  campaign_id       uuid REFERENCES campaigns(id)
+);
+
+-- 0022_malware
+CREATE TABLE malware_samples (
+  sha256        text PRIMARY KEY,
+  size_bytes    bigint NOT NULL,
+  file_type     text,
+  first_seen    timestamptz NOT NULL,
+  last_seen     timestamptz NOT NULL,
+  yara_matches  text[] DEFAULT '{}',
+  iocs          jsonb DEFAULT '{}',
+  storage_path  text,                          -- cifrato, fuori dal DB
+  expires_at    timestamptz NOT NULL
+);
+
+-- 0023_ioc / campaigns / suppressions / canaries
+CREATE TABLE iocs (id uuid PRIMARY KEY, type text NOT NULL, value text NOT NULL,
+  source text NOT NULL, confidence int NOT NULL, first_seen timestamptz,
+  last_seen timestamptz, tags text[] DEFAULT '{}', UNIQUE(type, value, source));
+CREATE TABLE campaigns (id uuid PRIMARY KEY, name text, fingerprint text,
+  first_seen timestamptz, last_seen timestamptz, description text);
+CREATE TABLE suppressions (id uuid PRIMARY KEY, rule_id text NOT NULL, scope jsonb,
+  reason text NOT NULL, created_by uuid, created_at timestamptz, expires_at timestamptz NOT NULL);
+CREATE TABLE canaries (id uuid PRIMARY KEY, kind text, label text, token_hash text,
+  deployed_at timestamptz, triggered_at timestamptz, trigger_count int DEFAULT 0);
+```
+
+Regole: ogni tabella nuova ha `created_at`, indice su `(source, occurred_at)`, e nessuna colonna con dati sensibili in chiaro (password, token).
+
+### 9.2 Kraken: tabelle da aggiungere
+
+```sql
+nodes(id, node_id UNIQUE, name, key_hash, version, last_seen, config_applied_at, revoked_at)
+sensors(id, node_id, name, port, enabled, last_event_at, status)
+samples(sha256 PK, size, type, first_seen, yara jsonb, behavior jsonb, expires_at)   -- metadati; file su volume cifrato
+attacker_fingerprints(id, hassh, ja3, first_seen, last_seen, session_count)
+campaigns(id, name, fingerprint_id, first_seen, last_seen)
+outbox(id, payload jsonb, attempts, next_attempt_at, status)   -- per l'invio ad Aegis
+```
+E **rimozione** di `AttackEvent.password` in chiaro → `password_sha256`, `password_len`, `password_classes`.
+
+### 9.3 Deployment: compose del monorepo
+
+Un `docker-compose.prod.yml` radice con profili:
+
+```yaml
+services:
+  caddy:        { profiles: [prod], ... }                 # TLS, CSP, routing /deception
+  aegis-brain:  { profiles: [prod], depends_on: [postgres, redis] }
+  aegis-link:   { profiles: [prod] }
+  frontend:     { profiles: [prod] }
+  postgres:     { profiles: [prod, kraken], volumes: [pgdata] }
+  redis:        { profiles: [prod, kraken] }
+  kraken:       { profiles: [kraken], networks: [edge, kraken_internal], secrets: [...] }
+  kraken-postgres: { profiles: [kraken] }
+  sandbox-broker:  { profiles: [kraken], volumes: [/var/run/docker.sock:ro], networks: [kraken_internal] }
+  # la rete sandbox è definita ma i container effimeri la creano a runtime con internal: true
+networks:
+  edge: {}
+  kraken_internal: { internal: true }
+```
+
+Punti non negoziabili:
+- `kraken` **non** monta il socket; solo `sandbox-broker`, che espone un'API allowlist.
+- `sandbox-broker` non è raggiungibile da `edge`.
+- Porte di DB, Redis, Grafana non pubblicate (`expose`, non `ports`).
+- Ogni segreto con `:?` (nessun default).
+- Healthcheck su tutti i servizi; `depends_on: condition: service_healthy`.
+
+### 9.4 Ordine di avvio e dipendenze
+
+`postgres` → `redis` → `aegis-brain` (`alembic upgrade head` nell'entrypoint, idempotente) → `aegis-link` → `frontend` → `caddy`. Per il profilo kraken: `kraken-postgres` → `kraken` → `sandbox-broker`. Se `sandbox-broker` non è pronto, Kraken parte in modalità degradata (`SANDBOX_ENABLED=false`) e lo dichiara in `/health`.
+
+---
+
+## 10. Roadmap per release, feature per feature
+
+Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di accettazione, effort, dipendenze. Le date sono relative a un singolo sviluppatore a tempo pieno; con due persone si comprimono le parti frontend/backend in parallelo.
+
+---
+
+### 4.1.0 — "Foundation" (settimane 1–3)
+
+**Tema:** rendere vere le cose già scritte. Nessuna feature nuova. Cancello: tutto ciò che è in §6.1–6.3 verde.
+
+#### 4.1.1 Kraken si avvia e ha una CI
+- Obiettivo: `import`, migrazioni, test, immagine, pipeline.
+- Dove: `services/kraken/app/db/session.py` (o annotazioni), `.github/workflows/ci.yml`.
+- Accettazione: `pytest` 65/65 su GitHub; `alembic upgrade head` da DB vuoto; `docker build` verde; `ruff` pulito.
+- Effort: 0,5 gg · Dipendenze: nessuna.
+
+#### 4.1.2 Kraken non è più una privilege escalation
+- Obiettivo: eliminare la classe di finding Critical (SEC-001, 002, 003, 006, 010).
+- Dove: `endpoints/auth.py`, `schemas.py`, `docker-compose.yml`, `nginx/entrypoint.sh`, nuovo `deploy/sandbox-proxy/`.
+- Accettazione: register non crea admin; il container app non vede `/var/run/docker.sock`; dalla sandbox `wget https://example.com` fallisce; compose senza `.env` non parte; senza certificato non serve TLS finto.
+- Effort: 2,5 gg · Dipendenze: 4.1.1.
+
+#### 4.1.3 Kraken non conserva più dati che non deve
+- Obiettivo: password hashed, sample limitati, retention, backup cifrato.
+- Dove: `models.py`, `attack_service.py`, `siem.py`, `telegram.py`, `docker_manager.py`, `scripts/backup.sh`, nuove migrazioni.
+- Accettazione: ingest con password → nessun chiaro su DB/log/JSONL/Telegram; file 512 MB scartato; backup GPG + restore testato; retention 30 gg attiva.
+- Effort: 2 gg · Dipendenze: 4.1.2.
+
+#### 4.1.4 Aegis: integrità degli agenti
+- Obiettivo: AEGIS-SEC-001, 002, 011, 007.
+- Dove: `enroll.py`, `deploy.py`, `NodeTrace/agents/python/utils/curl_http.py`, `aegis-guard/.../Main.java`.
+- Accettazione: re-enroll senza token → 409 con audit; agente installato da one-liner riceve e applica un update Ed25519; `ps` non mostra il device secret; `REMOVE_PERSISTENCE` rimuove solo il valore giusto e dichiara `failed` quando non rimuove nulla.
+- Effort: 3 gg · Dipendenze: nessuna (può procedere in parallelo).
+
+#### 4.1.5 Aegis: postura e DoS
+- Obiettivo: AEGIS-SEC-004, 005, 006, 008, LOGIC-003/004/005.
+- Dove: `total.py`, `config.py` (profili), `rate_limit.py`, `deps.py`, nuova `api_keys`, `playbook_engine.py`, `agent_deps.py`, `health.py`.
+- Accettazione: zip bomb respinta senza crescita di RSS oltre il limite; due IP distinti hanno bucket distinti; chiave A non scrive su sorgente B e la revoca è immediata; `AEGIS_PROFILE=prod` con mTLS off non parte; coda comandi espone `commands_dropped`; revoca fail-closed; `/health` mostra la coda vera.
+- Effort: 3 gg · Dipendenze: 4.1.4 (per la parte agenti).
+
+#### 4.1.6 Aegis: CI verde
+- Obiettivo: AEGIS-LOGIC-006/007/008/009, OPS-002/005.
+- Dove: `tests/integration/test_siem_ingest.py`, `tests/conftest.py`, `requirements.txt`, `frontend/package.json`, `scripts/`.
+- Accettazione: suite verde a qualunque data (test con `freezegun` a 2026-09-15, 2027-01-01, 2030-06-01); `pip-audit` 0; `npm audit --omit=dev` 0 high; job di restore notturno verde.
+- Effort: 1,5 gg · Dipendenze: 4.1.5.
+
+**Definition of done 4.1.0**
+- [ ] Nessun finding Critical/High aperto in §4 (esclusi quelli esplicitamente spostati a 4.2 con motivazione).
+- [ ] `pytest` Aegis 787 raccolti, 0 failed, 0 error, con e senza DB.
+- [ ] Kraken: 65+ test verdi in CI, immagine che parte, privesc e pivot non riproducibili.
+- [ ] `bandit` 0 High su entrambi; `pip-audit` 0; `npm audit --omit=dev` 0 high.
+- [ ] Documento `docs/SECURITY.md` aggiornato con la nuova postura.
+- [ ] Tag `v4.1.0`, release notes con tabella "prima/dopo".
+
+---
+
+### 4.2.0 — "Unified SOC" (settimane 4–9)
+
+**Tema:** Kraken diventa un sensore di Aegis e il SOC ha una sola verità. Nessun contenimento nuovo: solo visibilità unificata.
+
+#### 4.2.1 Ingestione Kraken→Aegis (fase 1–2 di §5.6)
+- Costruire: `POST /api/v1/ingest/kraken` con `X-Api-Key` scope `kraken:write` + HMAC del body; parser che mappa su `UnifiedEvent`; dedup per `event_id`; `deception_sessions` aggiornate in upsert; outbox con retry e backoff in Kraken.
+- Dove: `aegis-brain/app/api/v1/ingest.py`, `app/ingest/kraken.py`, `services/kraken/app/services/outbox.py`.
+- Accettazione: 1.000 eventi in batch → 1.000 righe, 0 duplicati al retry; evento con HMAC errato → 401; evento >7 giorni → 422; Kraken con Brain spento → outbox cresce e si svuota al ritorno, senza perdita.
+- Effort: 3 gg · Dipendenze: 4.1.0.
+
+#### 4.2.2 Regole di detection su deception
+- Costruire: 6 regole Sigma nuove (`deception_ssh_bruteforce`, `deception_post_auth_commands`, `deception_credential_stuffing`, `deception_malware_download`, `deception_canary_trigger` — quest'ultima in 4.3, `deception_lateral_scan`), con `logsource: kraken`; correlazione `multi_sensor_same_ip`.
+- Accettazione: replay su corpus Kraken sintetico → ogni regola ha almeno un positivo e un negativo; F1 resta 1.0 sul corpus Aegis; nessun alert per traffico scanner "solo banner".
+- Effort: 2 gg · Dipendenze: 4.2.1.
+
+#### 4.2.3 Timeline unificata (§7.3)
+- Costruire: endpoint `timeline`, UI, unione di 5 sorgenti, virtualizzazione.
+- Accettazione: p95 < 400 ms su 10k eventi; ordinamento corretto; link funzionanti.
+- Effort: 3 gg · Dipendenze: 4.2.1.
+
+#### 4.2.4 Pagina Deception nella SPA
+- Costruire: sessioni, comandi, credenziali tentate (solo pattern), mappa IP, filtri per sensore/paese/severità, dettaglio sessione con timeline dei comandi; accesso delegato SSO (§5.5).
+- Accettazione: nessun login separato; nessun dato in chiaro; la pagina si popola dal compose demo.
+- Effort: 4 gg (2 backend, 2 frontend) · Dipendenze: 4.2.1, 4.2.3.
+
+#### 4.2.5 ATT&CK coverage (§7.4)
+- Accettazione: matrice coerente con `coverage()`; buchi visibili; export.
+- Effort: 2 gg · Dipendenze: nessuna.
+
+#### 4.2.6 Soppressioni governate (§7.9)
+- Accettazione: TTL obbligatorio; report mensile; alert alla scadenza.
+- Effort: 2 gg · Dipendenze: nessuna.
+
+#### 4.2.7 Flotta sensori Kraken (§8.2)
+- Costruire: nodi, chiavi per nodo, config firmata, heartbeat, desired/applied.
+- Accettazione: nodo compromesso non impersona altri; revoca immediata; nessun secret in chiaro.
+- Effort: 3 gg · Dipendenze: 4.1.2 (broker) e 4.2.1.
+
+#### 4.2.8 Nuovi sensori SMB e RDP (§8.1)
+- Accettazione: SMB cattura hash NetNTLMv2 e file esca; RDP registra tentativi e banner; entrambi con health e metriche; nessuna implementazione di relay.
+- Effort: 4 gg · Dipendenze: 4.2.7.
+
+#### 4.2.9 Hardening mTLS reale (AEGIS-SEC-009) e Brain multi-worker (§7.10)
+- Accettazione: header `X-Client-Cert` diretto rifiutato; 2 worker senza duplicati; p95 < 300 ms a 200 rps.
+- Effort: 4 gg · Dipendenze: 4.1.5.
+
+**Definition of done 4.2.0**
+- [ ] Un attacco SSH su Kraken produce: sessione, evento `siem_events`, alert, incidente, riga in timeline — entro 10 s.
+- [ ] Nessuna doppia autenticazione per l'operatore.
+- [ ] Le 6 nuove regole hanno test di replay.
+- [ ] Load test documentato (200 rps, 2 worker).
+- [ ] Tag `v4.2.0`.
+
+---
+
+### 4.3.0 — "Containment & Deception" (settimane 10–17)
+
+**Tema:** dalla visibilità all'azione, e Kraken da honeypot a piattaforma di deception.
+
+#### 4.3.1 Contenimento di rete (§7.1)
+- Costruire: connettori firewall/SG, `quarantine_host` con TTL, ripristino automatico, audit, kill switch.
+- Accettazione: host isolato in <3 s su target simulato; ripristino a scadenza; nessuna azione senza TTL; audit a due campi (chi, perché).
+- Effort: 5 gg · Dipendenze: 4.2.
+- Rischio: un bug qui spegne la rete di un cliente → serve approvazione esplicita, TTL breve, dry-run di default in `pilot`.
+
+#### 4.3.2 Contenimento credenziali (§7.2)
+- Accettazione: disabilitazione con doppia approvazione su AD di test; audit; nessuna credenziale salvata.
+- Effort: 4 gg · Dipendenze: 4.3.1 (stesso motore di azioni).
+
+#### 4.3.3 Playbook come catalogo di azioni nominate
+- Costruire: sostituire `script` (AEGIS-SEC-003) con azioni tipizzate (`isolate_host`, `block_ip`, `disable_account`, `quarantine_file`, `collect_forensics`, `notify`), parametri validati, dry-run, idempotenza per `(action, target, revision)`.
+- Accettazione: nessun path raggiunge `subprocess` con input utente; grep test; dry-run non produce effetti.
+- Effort: 3 gg · Dipendenze: 4.3.1/4.3.2.
+
+#### 4.3.4 Detonazione, YARA e analisi sample (§8.3)
+- Accettazione: ELF di test → hash, tipo, IOC, YARA; nessuna rete; timeout 120 s; sample mai eseguito dall'app.
+- Effort: 6 gg · Dipendenze: 4.1.2/4.1.3.
+- Rischio: alto (malware). Richiede container dedicato, `no-new-privileges`, seccomp, volume separato.
+
+#### 4.3.5 Canary token e file esca (§8.5)
+- Accettazione: apertura PDF → evento con `canary_id`, IP, user-agent; nessuna macro; distribuzione via agente.
+- Effort: 3 gg · Dipendenze: 4.2.1.
+
+#### 4.3.6 Risposta automatica su deception (§8.6)
+- Accettazione: attacco high → incidente + playbook proposto + IP bloccato (target simulato) + audit, in <10 s.
+- Effort: 2 gg · Dipendenze: 4.3.1, 4.3.5.
+
+#### 4.3.7 Blocklist e export operativo (§8.7)
+- Accettazione: 10k IP in <2 s, formati firewall, nessun IP privato, firma e versione.
+- Effort: 2 gg · Dipendenze: 4.2.1.
+
+#### 4.3.8 Report PDF unificato (§7.6)
+- Accettazione: <5 s per 500 eventi; nessun dato sensibile; testo estraibile e testato.
+- Effort: 3 gg · Dipendenze: 4.2.3.
+
+#### 4.3.9 Alert routing e turni (§7.8)
+- Accettazione: escalazione a T+15; ack ferma; MTTA in dashboard; canali Slack/Teams/webhook/PagerDuty-compat.
+- Effort: 4 gg · Dipendenze: nessuna.
+
+#### 4.3.10 Threat intel feed (§7.7)
+- Accettazione: MISP/OTX/abuse.ch; cache 24 h; nessuna query per IP privati; degradazione silenziosa ma misurata.
+- Effort: 4 gg · Dipendenze: 4.2.1.
+
+#### 4.3.11 Dollhouse (§8.9)
+- Accettazione: avvio <2 s, nessun file reale, watcher su file esca.
+- Effort: 4 gg · Dipendenze: 4.3.4.
+
+**Definition of done 4.3.0**
+- [ ] Una catena completa: scanner → brute force → login esca → comandi → download malware → canary → blocco IP + incidente + report PDF.
+- [ ] Ogni azione distruttiva ha TTL, dry-run e audit a due identità.
+- [ ] Nessuna azione esegue comandi arbitrari sul server.
+- [ ] Tag `v4.3.0`.
+
+---
+
+### 5.0.0 — "Platform" (settimane 18–30)
+
+**Tema:** ciò che serve per vendere a un cliente che ha requisiti, non per convincere un tecnico. Da fare solo con almeno un cliente pagante che lo chiede.
+
+#### 5.0.1 Identità e accesso enterprise
+- OIDC/SAML (Entra ID, Okta, Keycloak), mapping gruppi→ruoli, SCIM per provisioning, MFA obbligatoria, sessioni con timeout e "termina tutte".
+- Accettazione: login con Entra ID di test, mapping corretto, deprovisioning entro 1 min, audit di ogni cambio ruolo.
+- Effort: 8–10 gg.
+
+#### 5.0.2 Alta disponibilità vera
+- Brain stateless, Redis Sentinel o cluster, Postgres con replica e failover, migrazioni senza downtime (expand/contract), readiness che esclude il nodo malato.
+- Accettazione: uccidere un nodo sotto carico → 0 richieste perse, RTO < 60 s; migrazione con traffico attivo.
+- Effort: 10 gg.
+
+#### 5.0.3 Audit e compliance
+- Audit immutabile (hash chain o WORM), export per revisore, retention configurabile, report SOC 2-ish (controlli, evidenze), DPA e registro trattamenti.
+- Accettazione: manomissione di una riga di audit rilevata; export completo in <1 min per 100k righe.
+- Effort: 6 gg.
+
+#### 5.0.4 Intelligence e federation (§8.4/8.8)
+- Campagne, fingerprint (HASSH/JA3), STIX/TAXII, MISP push, condivisione opzionale tra tenant (opt-in, anonimizzata).
+- Effort: 8 gg.
+
+#### 5.0.5 Performance e scala
+- Obiettivi: 2.000 eventi/s in ingestione, 50k alert/giorno, 500 agenti, p95 API < 300 ms, retention 90 gg con partizioni e drop automatico.
+- Come: batching, `COPY` per insert, partizioni mensili già presenti, indici rivisti, cache, worker separati per detection.
+- Accettazione: benchmark con `k6` o `locust` documentato e riproducibile; nessuna regressione oltre il 10%.
+- Effort: 8 gg.
+
+#### 5.0.6 Estensibilità
+- SDK playbook (Python) con azioni firmate, webhook in uscita con HMAC, API versionata con deprecation policy, plugin di detection in sandbox (nessun import arbitrario nel processo).
+- Effort: 8 gg.
+
+**Definition of done 5.0.0**
+- [ ] Un cliente può fare login con il proprio IdP, ricevere un report per il revisore, e sopravvivere alla perdita di un nodo.
+- [ ] Benchmark pubblico nel repo.
+- [ ] Tag `v5.0.0`.
+
+---
+
+### 10.1 Riepilogo temporale
+
+| Release | Settimane | Contenuto | Dipendenza critica |
+|---|---|---|---|
+| 4.1.0 | 1–3 | fix bloccanti, CI verde, Kraken avviabile e non pericoloso | nessuna |
+| 4.2.0 | 4–9 | ingestione, SSO, timeline, ATT&CK, soppressioni, flotta, SMB/RDP | 4.1 completa |
+| 4.3.0 | 10–17 | contenimento rete/credenziali, catalogo azioni, YARA/detonazione, canary, blocklist, PDF, routing | 4.2 completa |
+| 5.0.0 | 18–30 | IdP enterprise, HA, audit/compliance, intel, performance, SDK | un cliente che paga |
+
+### 10.2 Cosa può slittare senza rompere nulla
+- 5.0.4 (federation) e 5.0.6 (SDK): utili, non urgenti.
+- 4.3.11 (dollhouse) e 4.3.10 (feed): valore alto ma non bloccano il contenimento.
+- 4.2.5 (ATT&CK) può andare in 4.3.
+
+### 10.3 Cosa non può slittare
+- Tutto 4.1.0, senza eccezioni: è il debito che rende falso ogni altro numero del prodotto.
+- 4.2.1 (ingestione) se si vuole davvero "due microservizi": senza, Kraken resta un'app separata e l'unione è solo un `git subtree`.
+- 4.3.3 (catalogo azioni): finché `script` esiste, un admin può eseguire comandi sul server che custodisce la PKI.
+
+---
+## 11. Piano di test
+
+### 11.1 Come ricostruire l'ambiente (comandi esatti, verificati)
+
+```bash
+# --- Python ---
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r aegis-brain/requirements.txt pytest pytest-asyncio pgserver redislite bandit pip-audit
+
+# --- PostgreSQL 16 portabile ---
+mkdir -p .work/pgdata
+PG=.venv/lib/python3.12/site-packages/pgserver/pginstall/bin
+$PG/initdb -D .work/pgdata -U postgres --auth=trust
+$PG/pg_ctl -D .work/pgdata -o "-p 5432 -k /tmp -c listen_addresses=127.0.0.1" -l .work/pg.log start
+$PG/createdb -h 127.0.0.1 -U postgres aegis_test
+$PG/createdb -h 127.0.0.1 -U postgres aegis_migrate
+
+# --- Redis 7 ---
+.venv/lib/python3.12/site-packages/redislite/bin/redis-server --port 6379 --daemonize yes --save ""
+
+# --- variabili per la suite ---
+export DATABASE_URL='postgresql+asyncpg://postgres@127.0.0.1:5432/aegis_test'
+export TEST_DATABASE_URL="$DATABASE_URL"
+export REDIS_URL='redis://127.0.0.1:6379/0'
+export REQUIRE_INTEGRATION=1 DEBUG=true
+
+# --- Alembic (richiede l'intero set di secret + DEBUG=true) ---
+cd aegis-brain && alembic upgrade head && alembic upgrade head   # seconda run idempotente
+
+# --- Java ---
+curl -L -o jdk.tgz 'https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jdk/hotspot/normal/eclipse'
+tar xzf jdk.tgz -C .work && export JAVA_HOME="$PWD/.work/jdk-21.0.13+11"
+curl -L -o mvn.tgz 'https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz'
+tar xzf mvn.tgz -C .work && export PATH="$PWD/.work/apache-maven-3.9.9/bin:$PATH"
+```
+
+### 11.2 Matrice dei test per area
+
+| Area | Tipo | Comando | Criterio |
+|---|---|---|---|
+| Brain unit | unit | `pytest tests/unit -q` | 0 failed, 0 error |
+| Brain integrazione | integration | `REQUIRE_INTEGRATION=1 pytest tests/integration -q` | 0 failed |
+| Brain contratto API | contract | `pytest tests/test_openapi_contract.py` | 131 path invariati o migrati con nota |
+| Detection | replay | `python scripts/replay_report.py --all` | F1 = 1.0, 0 FP |
+| Sigma | engine | `python -c "...coverage()"` | 14/14 eseguibili |
+| Guard | unit | `cd aegis-guard && mvn -B test` | 0 failure |
+| Link | unit | `cd aegis-link && mvn -B test` | 0 failure |
+| eBPF | contract | `python aegis-ebpf/tests/check-contract.py` | ALL PASS |
+| Frontend | lint/tipi/build | `npm run lint && npx tsc -b --noEmit && npm run build` | 0 errori, build OK |
+| SCA | audit | `pip-audit -r requirements.txt` + `npm audit --omit=dev --audit-level=high` | 0 |
+| SAST | bandit | `bandit -r app -ll` | 0 High |
+| Compose | config | `docker compose -f docker-compose.yml config -q` (+ prod) | exit 0 |
+| Kraken | unit | `pytest services/kraken/tests/unit -q` | 65/65 |
+| Kraken | integrazione | `pytest services/kraken/tests/integration -q` con PG+Redis | 0 failed |
+| Kraken | isolamento | script `tests/security/test_isolation.sh` | rete sandbox `internal`, no socket, no egress |
+| Privesc | sicurezza | `tests/security/test_register_admin.py` | 422/403 |
+| Ingestione | e2e | `tests/e2e/test_kraken_ingest.py` | 1000 eventi, 0 duplicati, retry sicuro |
+| Carico | perf | `k6 run tests/perf/ingest.js` | p95 < 300 ms a 200 rps |
+
+### 11.3 Test che devono esistere e oggi non ci sono
+
+1. **Regressione sul privesc** (`KRAKEN-SEC-001`): il test deve fare la richiesta esatta con `is_admin:true` e pretendere che l'utente risultante non sia admin. È il test più importante del progetto Kraken perché è l'unico che impedisce il ritorno del bug.
+2. **Isolamento sandbox** (`KRAKEN-SEC-003`): test che ispeziona `docker network inspect` e verifica `Internal: true`, più un test funzionale che dalla sandbox tenta HTTP/DNS e fallisce.
+3. **Socket assente** (`KRAKEN-SEC-002`): test che verifica l'assenza di `/var/run/docker.sock` e che il broker rifiuta `Privileged:true`.
+4. **Password** (`KRAKEN-SEC-005`): ingest con password nota, poi grep su DB, log, JSONL, coda Telegram (mock) → nessuna occorrenza.
+5. **Backup restore** (`KRAKEN-SEC-011`): in CI, dump cifrato → restore su DB vuoto → confronto conteggi tabelle e checksum.
+6. **Re-enroll** (`AEGIS-SEC-001`): secondo enroll senza token → rifiutato; con token → ok + audit.
+7. **OTA** (`AEGIS-SEC-002`): manifest firmato Ed25519 accettato; manifest HMAC con chiave diversa rifiutato; test end-to-end con l'agente Python.
+8. **Secret in argv** (`AEGIS-SEC-011`): avvio agente, lettura `/proc/<pid>/cmdline`, assert che il token non compaia.
+9. **REMOVE_PERSISTENCE** (`AEGIS-SEC-007`): su JVM con registry mock (o test Windows in CI matrice) verificare che venga rimosso un solo valore.
+10. **Zip bomb** (`AEGIS-SEC-004`): payload 1:1000 con `RLIMIT_AS` e misura RSS; deve rispondere 422 senza OOM.
+11. **Data-indipendenza della suite** (`AEGIS-LOGIC-006`): parametrizzare il test con `freezegun` su tre date lontane.
+12. **Idempotenza ingestione Kraken** (`KRAKEN-LOGIC-001`): stesso `session_id` due volte → una riga, 200.
+
+### 11.4 Cosa non è testabile in questo ambiente (e va dichiarato)
+- **Docker runtime**: nessun daemon → `up`, isolamento reale, broker, sandbox: solo `compose config` qui; i test vanno eseguiti su una macchina con Docker (runner GitHub hosted ce l'ha).
+- **Windows**: Guard e registry (`reg delete`) richiedono un runner `windows-latest`.
+- **eBPF**: richiede kernel con BTF e privilegi; il contratto è testato, il runtime no.
+- **Browser/e2e UI**: nessun browser in questo ambiente; i test Playwright vanno aggiunti in 4.2 con il runner CI.
+- **Windows/AD**: i connettori di 4.3 vanno testati su un lab (AD DS in VM) o con mock.
+
+---
+
+## 12. CI/CD target
+
+### 12.1 Job per il monorepo
+
+```yaml
+name: ci
+on: [push, pull_request]
+jobs:
+  brain:        # python 3.12, services postgres:16 + redis:7
+    steps: [lint(ruff), mypy --ignore-missing-imports, pytest -q --cov, bandit -ll, pip-audit]
+  guard:        # temurin 21
+    steps: [mvn -B verify, spotbugs (soft)]
+  link:         # temurin 21
+    steps: [mvn -B verify]
+  ebpf:         # ubuntu, clang, libbpf
+    steps: [make, check-contract.py]
+  frontend:
+    steps: [npm ci, lint, tsc --noEmit, build, npm audit --omit=dev --audit-level=high]
+  kraken:       # services postgres:16 + redis:7 (+ docker per i test di isolamento)
+    steps: [ruff, mypy (soft), pytest -q, bandit -ll, pip-audit]
+  security:
+    steps: [trivy fs --severity HIGH,CRITICAL, gitleaks, semgrep (soft)]
+  compose:
+    steps: [docker compose config -q, docker compose -f docker-compose.prod.yml config -q,
+            docker build ., docker build services/kraken]
+  e2e:          # solo su main, con docker
+    steps: [compose up -d, smoke-test.sh, playwright test, compose down -v]
+```
+
+Regole:
+- **Nessun gate `continue-on-error`** su security e test. Oggi ce ne sono su alcuni punti: vanno rimossi progressivamente con la stessa PR che corregge i finding.
+- **Pinning per SHA** delle action (già fatto in Aegis: mantenerlo).
+- **Cache** per pip/npm/maven per stare sotto i 10 minuti.
+- **Nightly**: restore test, `pip-audit`, `trivy`, e2e completo, benchmark.
+
+### 12.2 Release
+- Tag semver, `CHANGELOG.md` generato dai PR label, SBOM (CycloneDX) allegato, immagini firmate (cosign), `docker-compose.prod.yml` con digest pinnati (non `:latest`).
+- Firma degli artefatti con la stessa chiave Ed25519 del prodotto? **No**: chiave di release separata da quella degli agenti (lezione di AEGIS-SEC-002).
+
+---
+
+## 13. Sicurezza operativa e runbook
+
+### 13.1 Segreti: dove vivono
+
+| Segreto | Dove | Rotazione | Chi può leggerlo |
+|---|---|---|---|
+| `SECRET_KEY` (JWT) | env / secret file | 90 gg, con doppia validità | brain |
+| `AGENT_ENROLL_KEY` | secret file 0400 | 180 gg | brain (per emettere token) |
+| `AGENT_SIGNING_KEY` (Ed25519) | file 0400, offline | 1 anno | brain |
+| api key per fonte | DB, hash | 90 gg | nessuno in chiaro |
+| `KRAKEN_INGEST_SECRET` | secret file | 90 gg | brain + kraken |
+| device secret | solo DB hash + host | su re-enroll | agente |
+| `BACKUP_PASSPHRASE` | secret file | 1 anno | job di backup |
+
+### 13.2 Runbook essenziali (da scrivere in `docs/runbooks/`)
+
+1. **Agente compromesso**: revoca (subito, fail-closed) → rotazione enroll key se sospetta → raccolta forense dal DB → ricerca eventi dello stesso `agent_id`.
+2. **Brain compromesso**: isolare il nodo → ruotare `SECRET_KEY`, chiavi PKI, api key → invalidare sessioni → verificare integrità audit → notifica.
+3. **Kraken compromesso**: spegnere i sensori → revocare chiavi nodo → preservare i sample per l'analisi → ricostruire l'immagine → verificare che il broker non sia raggiungibile da `edge`.
+4. **Malware "escapato" dalla sandbox**: kill del container, snapshot del volume, analisi dell'immagine, verifica delle regole iptables del broker, review dei log del daemon.
+5. **Perdita di un backup**: verificare cifratura, valutare notifica GDPR (72 h), ruotare passphrase.
+
+### 13.3 Checklist prima di esporre su Internet
+
+- [ ] `AEGIS_PROFILE=prod` (mTLS required, strict, registrazione chiusa).
+- [ ] `RATE_LIMIT_STORAGE_URI` su Redis e `TRUST_FORWARDED_FOR=true` solo dietro proxy.
+- [ ] Caddy con TLS valido, HSTS, CSP; nessuna porta di servizio pubblicata.
+- [ ] `POSTGRES_PASSWORD`/`REDIS_PASSWORD`/`GRAFANA_PASSWORD` senza default.
+- [ ] Kraken: nessun socket, rete sandbox `internal`, register off, TLS non auto-generato.
+- [ ] Backup cifrato + restore provato negli ultimi 7 giorni.
+- [ ] Audit attivo, retention configurata, `RETENTION_REQUIRE_BACKUP=true`.
+- [ ] Log senza segreti (grep su `password`, `token`, `Authorization` nei log di 24 h).
+- [ ] `pip-audit` e `npm audit` a 0; immagini scansionate.
+
+---
+
+## 14. Rischi, decisioni e cose da non sbagliare
+
+| # | Rischio | Probabilità | Impatto | Mitigazione |
+|---|---|---|---|---|
+| 1 | Il fix di Kraken è "solo 1 riga" e si sottovaluta il resto | Alta | Alto | cancello A/B espliciti, nessun merge senza privesc test |
+| 2 | Il broker sandbox introduce una nuova superficie | Media | Alto | allowlist stretta, niente `exec` arbitrario dall'esterno, test di `Privileged:true` |
+| 3 | La deception produce rumore e il SOC la spegne | Alta | Medio | regole con negativi nel corpus, soppressioni con TTL, dashboard precisione |
+| 4 | Il contenimento di rete spegne un host di produzione | Media | Critico | TTL breve, dry-run di default in pilot, doppia approvazione, audit |
+| 5 | La detonazione malware diventa il buco più grande | Media | Critico | container dedicato, no rete, no socket, seccomp, volume separato |
+| 6 | Il monorepo diventa un container di servizi che nessuno aggiorna | Media | Alto | un solo compose, un solo `make`, CI che builda tutto |
+| 7 | La roadmap si allarga e la 4.1 non esce | Alta | Alto | 4.1 = solo fix; nessuna feature ammessa |
+| 8 | Il cliente chiede multi-tenant e si accetta | Media | Alto | risposta scritta: 5.0+, con stima |
+
+**Decisioni che spettano a te (non alla sessione successiva)**
+1. Kraken resta servizio separato (raccomandato) o lo vuoi dentro il Brain? La separazione è già argomentata in §5.1.
+2. Licenza e modello di distribuzione: Apache-2.0 attuale è compatibile con un prodotto commerciale? Vuoi un `LICENSE` commerciale per Kraken?
+3. Quanto personale hai davvero: la 4.1.0 in 3 settimane presuppone ~30 h/settimana su un solo fuoco.
+4. Vuoi che `script` nei playbook sparisca del tutto (raccomandato) o resti dietro flag per un cliente specifico?
+5. Il contenimento di rete tocca infrastruttura del cliente: serve un contratto/consenso esplicito, non solo un flag.
+
+---
+
+## 15. Prossimi 7 / 30 / 90 giorni
+
+**7 giorni**
+- Giorno 1: KRAKEN-SEC-000 + test in `tmp_path` + CI Kraken. Kraken si avvia.
+- Giorno 2: KRAKEN-SEC-001 (privesc) con test di regressione; KRAKEN-SEC-007.
+- Giorno 3: KRAKEN-SEC-002 broker socket-proxy (prima versione allowlist).
+- Giorno 4: KRAKEN-SEC-003 rete `internal` + test di isolamento.
+- Giorno 5: KRAKEN-SEC-005 password hashed + redaction.
+- Giorno 6: AEGIS-LOGIC-006 (data-bomb) + 007; CI Aegis torna verde.
+- Giorno 7: AEGIS-LOGIC-008/009, AEGIS-OPS-005; `pip-audit`/`npm audit` a 0.
+
+**30 giorni**
+- Chiudere il cancello B e C (§6.2, §6.3) → 4.1.0 taggata.
+- Scrivere `docs/SECURITY.md`, `docs/runbooks/` (5 runbook), e i 12 test di §11.3.
+- Provare l'intero compose su una macchina con Docker: `up`, smoke test, backup+restore.
+- Iniziare 4.2.1 (ingestione) con feature flag off.
+
+**90 giorni**
+- 4.2.0 completa: ingestione, timeline, pagina Deception, flotta, SMB/RDP, ATT&CK, soppressioni.
+- 4.3.0 avviata: contenimento di rete su target simulato, catalogo azioni, canary.
+- Un pilot reale (anche interno) con 3 host e 1 nodo Kraken, con numeri misurati (MTTD, MTTA, alert/day).
+
+---
+
+## 16. Mappa dei file (dove mettere le mani)
+
+### Aegis — i 20 file che contano
+
+| File | Perché |
+|---|---|
+| `aegis-brain/app/main.py` | composizione app, router, lifespan, worker |
+| `aegis-brain/app/core/config.py` | tutti i flag di postura (profili, mTLS, rate limit) |
+| `aegis-brain/app/core/deps.py` | auth, ruoli, api key |
+| `aegis-brain/app/core/agent_deps.py` | autenticazione agente, revoca (fail-open) |
+| `aegis-brain/app/core/health.py` | liveness/readiness, chiave coda sbagliata |
+| `aegis-brain/app/core/rate_limit.py` | storage e FFP |
+| `aegis-brain/app/api/v1/enroll.py` | re-enroll (SEC-001) |
+| `aegis-brain/app/api/v1/deploy.py` | installer, firma (SEC-002) |
+| `aegis-brain/app/api/v1/telemetry.py` | ingestione agenti, isolate |
+| `aegis-brain/app/api/v1/ingest.py` | ingestione shipper/kraken (SEC-006) |
+| `aegis-brain/app/api/v1/total.py` | decompressione (SEC-004) |
+| `aegis-brain/app/services/playbook_engine.py` | azioni, coda, idempotenza |
+| `aegis-brain/app/services/detection*.py` + `sigma/` | regole |
+| `aegis-brain/app/ingest/base.py` | contratto `UnifiedEvent` (riuso per Kraken) |
+| `aegis-brain/requirements.txt` | SCA |
+| `aegis-guard/src/main/java/com/aegis/guard/Main.java` | remediation (SEC-007) |
+| `NodeTrace/agents/python/utils/curl_http.py` | secret in argv (SEC-011) |
+| `frontend/vite.config.ts` + `package.json` | build, audit |
+| `docker-compose.prod.yml` + `Caddyfile` | postura di deploy |
+| `.github/workflows/ci.yml` | gate |
+
+### Kraken — i file che contano
+
+| File | Perché |
+|---|---|
+| `app/db/session.py` / `app/models/models.py` | blocker di avvio, password in chiaro |
+| `app/api/v1/endpoints/auth.py` | privesc, refresh |
+| `app/api/v1/endpoints/containers.py` | sandbox, blacklist |
+| `app/services/docker_manager.py` | socket, rete, sample |
+| `app/services/attack_service.py` | ingestione, idempotenza |
+| `app/core/config.py` | segreti, validazione |
+| `app/core/metrics.py` | cardinalità |
+| `docker-compose.yml` | socket, reti, segreti |
+| `nginx/entrypoint.sh` | TLS finto |
+| `scripts/backup.sh` | backup rotto |
+| `scripts/secure_sandbox.sh` | egress permesso |
+| `honeypot/sensors/*` | nuovi sensori |
+
+### Dove mettere i nuovi file
+
+```
+docs/PLAN_AEGIS_KRAKEN_HANDOFF.md      # questo documento
+docs/SECURITY.md                        # postura, minacce, modello
+docs/runbooks/{agent,brain,kraken,malware,backup}.md
+docs/adr/0001-kraken-as-service.md      # decisione di §5.1
+docs/adr/0002-event-contract.md         # decisione di §5.3
+services/kraken/                        # il servizio nel monorepo
+tests/security/                         # test di sicurezza eseguibili
+```
+
+---
+
+## 17. Glossario minimo
+
+| Termine | Significato nel progetto |
+|---|---|
+| **Agente** | Guard (Java) o NodeTrace (Python) installato su un endpoint |
+| **Brain** | API/centro di controllo Aegis |
+| **Link** | collector Spring che accoda eventi su Redis |
+| **UnifiedEvent** | contratto normalizzato eventi (`app/ingest/base.py`) |
+| **Sigma** | formato di regola di detection, eseguito dall'engine interno |
+| **Correlazione** | regole multi-evento che producono alert composti |
+| **Playbook** | catena di azioni su un alert/incidente |
+| **Enroll** | registrazione di un agente e consegna del device secret |
+| **mTLS** | mutual TLS, qui implementato via header verificati |
+| **Deception** | honeypot e esche (Kraken) |
+| **Sandbox** | container effimero dove l'attaccante esegue comandi |
+| **Broker** | proxy che media l'accesso al Docker socket (da costruire) |
+| **Canary** | esca che genera un evento quando viene toccata |
+| **HASSH / JA3** | fingerprint di client SSH / TLS |
+| **MTTD / MTTA** | tempo medio a rilevare / a riconoscere |
+
+---
+
+## 18. Ultima pagina: cosa fare appena apri la sessione
+
+```bash
+git checkout dev && git pull
+python -c "import sys; print(sys.version)"   # 3.12
+sed -n '1,60p' docs/PLAN_AEGIS_KRAKEN_HANDOFF.md   # questo documento
+# 1. riproduci il blocker di Kraken
+git subtree add --prefix services/kraken https://github.com/Terminalkid09/Kraken.git main --squash
+cd services/kraken && python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt && python -c "import app.main"   # deve fallire oggi
+# 2. applica KRAKEN-SEC-000 (una riga), riprova
+# 3. scrivi il test di regressione del privesc PRIMA di correggerlo
+# 4. apri la PR "fix(kraken): make service bootable and remove privilege escalation"
+```
+
+Regola finale: **nessuna feature, nessun refactor estetico, nessuna nuova dipendenza** finché il cancello A non è verde. Tutto il resto di questo documento presuppone che Kraken parta e che Aegis abbia la CI verde: senza quelle due cose, ogni riga successiva è una promessa non verificabile.
