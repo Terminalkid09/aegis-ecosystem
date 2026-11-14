@@ -27,6 +27,13 @@ Da **Deployment Manager** creare un token per `Aegis-Guard`, `NodeTrace` o
 `Both agents`. Il token è breve e monouso per ogni tipo di agent: con `Both`
 Guard e NodeTrace effettuano due enrollment separati sullo stesso host.
 
+Per **ri-enrollare** un host già registrato il token deve essere creato con
+`target_hostname` uguale all'hostname esistente. La chiave statica
+`AGENT_ENROLL_KEY` serve solo al primo enrollment: non può sostituire il device
+secret di un host già presente. Gli agent inviano anche il machine-id
+(`MachineGuid` su Windows, `/etc/machine-id` su Linux); il Brain ne conserva
+solo l'hash e registra l'eventuale cambio identità nell'audit.
+
 Il comando generato:
 
 - scarica l'artefatto dal Brain usando il token bootstrap;

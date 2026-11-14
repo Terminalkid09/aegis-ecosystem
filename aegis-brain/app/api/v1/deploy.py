@@ -83,6 +83,10 @@ class EnrollTokenRequest(BaseModel):
     ttl_minutes: int = Field(default=15, ge=5, le=1440)
     dashboard_remote: bool = True
     dashboard_local: bool = False
+    # Re-enroll: il token è valido solo per questo host. Un token senza
+    # target_hostname resta utilizzabile per il primo enrollment, mai per
+    # sostituire un agente già registrato.
+    target_hostname: Optional[str] = Field(default=None, max_length=255)
 
 
 @router.post("/token")
@@ -95,19 +99,24 @@ async def create_enroll_token(
     _require_deploy_operator(user)
     if payload.dashboard_local:
         raise HTTPException(status_code=422, detail="Local dashboard packaging is not available yet")
+    target_hostname = (payload.target_hostname or "").strip() or None
     raw = secrets.token_urlsafe(32)
+    install_config = {"dashboard_remote": payload.dashboard_remote}
+    if target_hostname:
+        install_config["target_hostname"] = target_hostname
     rec = EnrollToken(
         token_hash=_hash_token(raw),
         label=payload.label,
         agent_type=payload.agent_type,
         created_by=user.id,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=payload.ttl_minutes),
-        install_config={"dashboard_remote": payload.dashboard_remote},
+        install_config=install_config,
     )
     db.add(rec)
     await log_audit(
         db, action="deploy_token_create", resource="enroll_token",
-        details={"label": payload.label, "agent_type": payload.agent_type},
+        details={"label": payload.label, "agent_type": payload.agent_type,
+                 "target_hostname": target_hostname},
         user_id=user.id, username=user.username,
         ip_address=request.client.host if request else None,
     )
@@ -119,9 +128,10 @@ async def create_enroll_token(
     return {
         "token": raw,
         "expires_at": rec.expires_at.isoformat(),
-            "agent_type": payload.agent_type,
-            "dashboard_remote": payload.dashboard_remote,
-            "dashboard_local": payload.dashboard_local,
+        "agent_type": payload.agent_type,
+        "target_hostname": target_hostname,
+        "dashboard_remote": payload.dashboard_remote,
+        "dashboard_local": payload.dashboard_local,
         "oneline_windows": ps1,
         "oneline_linux": sh,
         "note": "Single-use, short-lived. Never commit it. Regenerate per rollout batch.",
@@ -133,8 +143,10 @@ async def list_enroll_tokens(db: AsyncSession = Depends(get_db), user=Depends(ge
     result = await db.execute(select(EnrollToken).order_by(EnrollToken.created_at.desc()).limit(50))
     out = []
     for t in result.scalars().all():
+        cfg = t.install_config if isinstance(t.install_config, dict) else {}
         out.append({
             "id": t.id, "label": t.label, "agent_type": t.agent_type,
+            "target_hostname": cfg.get("target_hostname"),
             "expires_at": t.expires_at.isoformat() if t.expires_at else None,
             "used_at": t.used_at.isoformat() if t.used_at else None,
             "revoked": t.revoked,

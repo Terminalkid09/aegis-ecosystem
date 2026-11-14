@@ -234,10 +234,12 @@ class Agent:
         if not enroll_token:
             raise RuntimeError(
                 "No enrollment token: set AEGIS_ENROLL_TOKEN_FILE or AEGIS_ENROLL_KEY")
+        from services import device_identity as _di
         payload = {
             "hostname": self.config["device_name"],
             "os": system_info["os"],
             "agent_type": "nodetrace",
+            "machine_id": _di.machine_id(),
             "os_version": system_info["os_version"],
             "cpu_model": system_info["cpu_model"],
             "total_ram": system_info["total_ram"],

@@ -50,6 +50,9 @@ the tag audit and the release policy.
   enrollment key was removed (AEGIS-SEC-002). The one-liner installer writes
   the single-use enrollment token to a `0600` file instead of the persistent
   environment and injects the manifest public key.
+- Re-enrollment of an existing hostname now requires a token issued for that
+  host; the static enrollment key only creates new agents. Agents send a
+  machine-id, of which the Brain stores only the hash (AEGIS-SEC-001).
 - Other findings are documented in the handoff plan; this section lists only
   changes present on `dev`. They ship only after merge.
 

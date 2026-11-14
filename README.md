@@ -319,6 +319,8 @@ curl -fsSL -H 'X-Enroll-Token: <token>' '<brain>/api/v1/deploy/install.sh?agent=
 
 The installer downloads the artifact for that agent, extracts it (Guard into `C:\Aegis\Guard`, NodeTrace into `C:\Aegis\NodeTrace`), sets the brain URL, the Ed25519 manifest public key and a `0600` enrollment-token file (the token is never written into the persistent environment), and **registers the service** (`New-Service` on Windows, systemd on Linux) — the same service model as a local install. It refuses to pretend: if remote-dashboard connectivity was not selected in the token, it says that no service was registered instead of reporting success.
 
+For a host that is already enrolled, issue the token with `target_hostname` set to that host's existing hostname. Re-enrollment without a host-bound token is rejected with `409` and audited; the static `AGENT_ENROLL_KEY` cannot replace an existing device secret.
+
 One preparative step is yours — **publish the artifacts the brain serves** (they are build outputs, never committed):
 
 ```bash
@@ -352,7 +354,7 @@ jre-new\bin\java.exe -jar target\aegis-guard.jar
 Two details that fail with unreadable errors:
 
 - **A JVM 25+ is required**, and the `java` on the `PATH` is not automatically suitable: if it is an 8, the service installs, starts and dies with `UnsupportedClassVersionError`. The installer verifies the **version** and uses the resolved path, not the `java` string.
-- **`AEGIS_ENROLL_KEY` is only needed for the first enrollment** when no `secret.json`/`token.json` exists. The one-liner installer writes the single-use token to a `0600` file and sets `AEGIS_ENROLL_TOKEN_FILE`; the token is not persisted in the environment. `AEGIS_MANIFEST_PUBKEY` is mandatory for OTA and is injected by the installer.
+- **`AEGIS_ENROLL_KEY` is only needed for the first enrollment** when no `secret.json`/`token.json` exists. The one-liner installer writes the single-use token to a `0600` file and sets `AEGIS_ENROLL_TOKEN_FILE`; the token is not persisted in the environment. Re-enrollment of an already registered host requires a token with `target_hostname` for that host. `AEGIS_MANIFEST_PUBKEY` is mandatory for OTA and is injected by the installer.
 
 ### Standalone agent builds
 

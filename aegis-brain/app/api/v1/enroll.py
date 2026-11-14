@@ -21,6 +21,7 @@ from app.core.rate_limit import limiter
 from app.core.security import hash_password
 from app.core.logging import get_logger
 from app.core.redis_utils import get_redis_url
+from app.services.enrollment import consume_enroll_token, token_target_hostname, validate_enroll_token
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["Agent Enrollment"])
@@ -30,11 +31,36 @@ class EnrollRequest(BaseModel):
     os: str
     enroll_key: str
     agent_type: str = "aegis-guard"
+    machine_id: str = Field(default="", max_length=512)
 
 class EnrollResponse(BaseModel):
     agent_id: str
     agent_secret: str
     status: str
+
+
+def _machine_id_hash(value: str) -> str:
+    normalized = (value or "").strip()
+    return hashlib.sha256(normalized.encode()).hexdigest() if normalized else ""
+
+
+async def _deny_reenroll(db: AsyncSession, request: Request, existing: Agent,
+                         payload: EnrollRequest, *, reason: str, detail: str,
+                         status_code: int = status.HTTP_409_CONFLICT):
+    """Audit e rifiuto esplicito: un re-enroll senza prova non deve passare."""
+    try:
+        await log_audit(
+            db, action="agent_reenroll_denied", resource="agent",
+            resource_id=str(existing.agent_id),
+            details={"hostname": payload.hostname, "reason": reason},
+            username=payload.hostname,
+            ip_address=request.client.host if request.client else None,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+    raise HTTPException(status_code=status_code, detail=detail)
+
 
 @router.post("/enroll", response_model=EnrollResponse)
 @limiter.limit("10/minute")
@@ -48,9 +74,8 @@ async def enroll_agent(request: Request, payload: EnrollRequest, db: AsyncSessio
     )
     used_token: EnrollToken | None = None
     if not valid_static:
-        from app.services.enrollment import consume_enroll_token
         try:
-            used_token = await consume_enroll_token(
+            used_token = await validate_enroll_token(
                 db, payload.enroll_key, payload.agent_type, payload.hostname)
         except HTTPException:
             logger.warning(f"Invalid enrollment attempt from {payload.hostname}")
@@ -86,9 +111,52 @@ async def enroll_agent(request: Request, payload: EnrollRequest, db: AsyncSessio
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                                 detail=f"PKI unavailable: {e}")
-        # Re-enroll: issue a fresh secret so agent can authenticate again
+        # AEGIS-SEC-001: la chiave statica iscrive solo host nuovi. Un host
+        # gia' registrato può ri-enrollarsi solo con un token emesso per lui.
+        token_target = token_target_hostname(used_token)
+        if not used_token or not token_target:
+            await _deny_reenroll(
+                db, request, existing, payload,
+                reason="missing_host_bound_token",
+                detail="Re-enrollment requires a host-bound enrollment token",
+            )
+        if token_target.casefold() != (existing.hostname or "").strip().casefold():
+            await _deny_reenroll(
+                db, request, existing, payload,
+                reason="token_bound_to_another_host",
+                detail="Enrollment token is bound to another host",
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        machine_hash = _machine_id_hash(payload.machine_id)
+        meta = dict(existing.meta) if isinstance(existing.meta, dict) else {}
+        stored_machine = str(meta.get("machine_id_hash") or "")
+        machine_match = bool(
+            stored_machine and machine_hash
+            and hmac.compare_digest(stored_machine, machine_hash)
+        )
+        identity_changed = bool(stored_machine and machine_hash and not machine_match)
+
+        # Consuma il token solo dopo aver superato i controlli: un tentativo
+        # senza token non deve bruciare un token valido di un altro host.
+        await consume_enroll_token(
+            db, payload.enroll_key, payload.agent_type, payload.hostname)
         new_secret = secrets.token_urlsafe(32)
         existing.device_token_hash = hash_password(new_secret)
+        if machine_hash:
+            meta["machine_id_hash"] = machine_hash
+            meta["identity_bound"] = True
+            existing.meta = meta
+        await log_audit(
+            db, action="agent_reenroll", resource="agent",
+            resource_id=str(existing.agent_id),
+            details={"hostname": payload.hostname, "token_id": used_token.id,
+                     "token_target": token_target,
+                     "machine_id_match": machine_match,
+                     "identity_changed": identity_changed},
+            username=payload.hostname,
+            ip_address=request.client.host if request.client else None,
+        )
         await db.commit()
 
         # Update Redis cache (best-effort — auth falls back to DB verify)
@@ -100,6 +168,9 @@ async def enroll_agent(request: Request, payload: EnrollRequest, db: AsyncSessio
         except Exception:
             pass
 
+        if identity_changed:
+            logger.warning("Re-enroll con machine-id diverso: %s (%s)",
+                           existing.agent_id, payload.hostname)
         logger.info(f"Agent re-enrolled: {existing.agent_id} ({payload.hostname})")
         return EnrollResponse(
             agent_id=str(existing.agent_id),
@@ -107,14 +178,27 @@ async def enroll_agent(request: Request, payload: EnrollRequest, db: AsyncSessio
             status="re-enrolled"
         )
     
+    machine_hash = _machine_id_hash(payload.machine_id)
+    if used_token:
+        await consume_enroll_token(
+            db, payload.enroll_key, payload.agent_type, payload.hostname)
     new_agent = Agent(
         agent_id=agent_id,
         hostname=payload.hostname,
         os_type=payload.os,
         agent_type=payload.agent_type,
-        device_token_hash=hash_password(agent_secret)
+        device_token_hash=hash_password(agent_secret),
+        meta={"machine_id_hash": machine_hash, "identity_bound": True} if machine_hash else None,
     )
     db.add(new_agent)
+    await log_audit(
+        db, action="agent_enroll", resource="agent", resource_id=str(agent_id),
+        details={"hostname": payload.hostname, "agent_type": payload.agent_type,
+                 "identity_bound": bool(machine_hash),
+                 "token_id": used_token.id if used_token else None},
+        username=payload.hostname,
+        ip_address=request.client.host if request.client else None,
+    )
     await db.commit()
     await db.refresh(new_agent)
 
