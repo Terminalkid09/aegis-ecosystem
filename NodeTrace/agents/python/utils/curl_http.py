@@ -4,6 +4,8 @@ import urllib.parse
 import shutil
 import ssl
 import os
+import subprocess
+import tempfile
 
 _USE_CURL = None
 _CURL_PATH = None
@@ -26,6 +28,24 @@ def _client_cert_files():
     if _CLIENT_CERT and _CLIENT_KEY and os.path.isfile(_CLIENT_CERT) and os.path.isfile(_CLIENT_KEY):
         return _CLIENT_CERT, _CLIENT_KEY
     return None, None
+
+
+def _curl_config_escape(value):
+    """Escape a value for a quoted curl config string."""
+    return (str(value).replace("\\", "\\\\").replace('"', '\\"')
+            .replace("\r", "").replace("\n", ""))
+
+
+def _curl_config(headers, json_data):
+    lines = []
+    for key, value in (headers or {}).items():
+        lines.append(
+            f'header = "{_curl_config_escape(key)}: {_curl_config_escape(value)}"'
+        )
+    if json_data is not None:
+        lines.append('header = "Content-Type: application/json"')
+    return "\n".join(lines)
+
 
 class Response:
     def __init__(self, status_code, text):
@@ -86,7 +106,6 @@ def _urllib_request(method, url, json_data=None, headers=None, timeout=10):
         raise Exception(f'Request failed: {e.reason}')
 
 def _curl_request(method, url, json_data=None, headers=None, timeout=10):
-    import subprocess
     cmd = [_CURL_PATH, '-s', '-w', '%{http_code}', '-o', '-', '--max-time', str(timeout), '-X', method.upper()]
     ca_bundle = os.getenv("AEGIS_CA_BUNDLE")
     if ca_bundle and os.path.isfile(ca_bundle):
@@ -94,13 +113,29 @@ def _curl_request(method, url, json_data=None, headers=None, timeout=10):
     cert, key = _client_cert_files()
     if cert and key:
         cmd.extend(['--cert', cert, '--key', key])
-    for k, v in (headers or {}).items():
-        cmd.extend(['-H', f'{k}: {v}'])
-    if json_data is not None:
-        cmd.extend(['-H', 'Content-Type: application/json', '-d', json.dumps(json_data)])
-    cmd.append(url)
+
+    # Gli header contengono il device secret: mai in argv. curl legge gli
+    # header da un file 0600 e il body da stdin.
+    config_path = None
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+        config = _curl_config(headers, json_data)
+        if config:
+            fd, config_path = tempfile.mkstemp(prefix="aegis-curl-", suffix=".conf")
+            try:
+                os.chmod(config_path, 0o600)
+            except OSError:
+                pass
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(config + "\n")
+            cmd.extend(["--config", config_path])
+        if json_data is not None:
+            cmd.extend(["--data-binary", "@-"])
+        cmd.append(url)
+        result = subprocess.run(
+            cmd,
+            input=json.dumps(json_data) if json_data is not None else None,
+            capture_output=True, text=True, timeout=timeout + 5,
+        )
         output = result.stdout
         if len(output) < 3:
             raise Exception('curl produced no output')
@@ -109,6 +144,12 @@ def _curl_request(method, url, json_data=None, headers=None, timeout=10):
         return Response(status, body)
     except subprocess.TimeoutExpired:
         raise Exception('Request timeout')
+    finally:
+        if config_path:
+            try:
+                os.remove(config_path)
+            except OSError:
+                pass
 
 def request(method, url, json_data=None, headers=None, timeout=10):
     if _USE_CURL is None:
