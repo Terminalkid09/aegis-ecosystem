@@ -109,7 +109,7 @@ def start_agents():
     subprocess.Popen([node_exe], env=env, stdout=node_log, stderr=subprocess.STDOUT,
                      cwd=os.path.dirname(node_exe))
     # Audit: JRE bundled prima del java di sistema (su PATH c'e' spesso un
-    # Java 8 che non apre i jar compilati per Java 21).
+    # Java 8 che non apre i jar compilati per Java 25).
     java = None
     for cand in (os.path.join(root, "aegis-guard", "jre-new", "bin", "java.exe"),
                  os.path.join(root, "aegis-guard", "jre", "bin", "java.exe")):

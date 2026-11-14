@@ -1,5 +1,5 @@
 ﻿# Aegis-Guard Native Installation (Windows)
-# Prerequisites: Java 21+, Maven (in PATH), NSSM (nssm.cc)
+# Prerequisites: Java 25+, Maven (in PATH), NSSM (nssm.cc)
 
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $nssmPath = Join-Path $scriptPath "nssm.exe"
@@ -28,7 +28,7 @@ if (-not (Test-Path $nssmPath)) {
 }
 Write-Host "  [OK] nssm.exe found" -ForegroundColor Green
 
-# Java: il jar è compilato con target 21, quindi serve una JVM 21+.
+# Java: il jar è compilato con target 25, quindi serve una JVM 25+.
 # Va verificata la **versione**, non la sola presenza: un `java` nel PATH può
 # essere la 8 (su questa macchina lo era), il servizio si installa, parte e
 # muore con UnsupportedClassVersionError — e in UI l'host semplicemente non
@@ -46,7 +46,7 @@ function Get-JavaMajor([string]$exe) {
     return 0
 }
 
-$requiredMajor = 21
+$requiredMajor = 25
 $javaCandidates = @()
 foreach ($bundled in @("$scriptPath\jre-new\bin\java.exe", "$scriptPath\jre\bin\java.exe")) {
     if (Test-Path $bundled) { $javaCandidates += $bundled }
@@ -55,9 +55,9 @@ $pathJava = (Get-Command java -ErrorAction SilentlyContinue).Source
 if ($pathJava) { $javaCandidates += $pathJava }
 
 # JDK installati sul sistema. Su Windows il primo `java` del PATH e' spessissimo
-# una JRE 8: senza questa ricerca l'installer non vedeva un JDK 21+ presente in
+# una JRE 8: senza questa ricerca l'installer non vedeva un JDK 25+ presente in
 # Program Files e scaricava ~200MB di JDK portatile pur avendolo in casa (o si
-# fermava con "installa Java 21+" a installazione gia' iniziata).
+# fermava con "installa Java 25+" a installazione gia' iniziata).
 foreach ($pattern in @("$env:ProgramFiles\Eclipse Adoptium\*\bin\java.exe",
                         "$env:ProgramFiles\Java\jdk*\bin\java.exe",
                         "$env:ProgramFiles\Microsoft\jdk*\bin\java.exe",
@@ -76,7 +76,7 @@ if (-not $javaExe) {
     Write-Host "  *  Nessuna Java $requiredMajor+ trovata fra runtime inclusi, PATH e JDK installati:" -ForegroundColor Yellow
     Write-Host "     scarico il JDK portatile (una volta sola, ~200MB)..." -ForegroundColor Yellow
     $jreZip = Join-Path $scriptPath "jre.zip"
-    Invoke-WebRequest -Uri "https://aka.ms/download-jdk/microsoft-jdk-21-windows-x64.zip" -OutFile $jreZip
+    Invoke-WebRequest -Uri "https://aka.ms/download-jdk/microsoft-jdk-25-windows-x64.zip" -OutFile $jreZip
     $jreTemp = Join-Path $scriptPath "jre_temp"
     Expand-Archive -Path $jreZip -DestinationPath $jreTemp
     # Va spostata l'intera distribuzione, non solo `bin`: con il solo `bin` il
@@ -96,7 +96,7 @@ if (-not $javaExe) {
 $javaMajor = Get-JavaMajor $javaExe
 if ($javaMajor -lt $requiredMajor) {
     Write-Error "[X] Serve Java $requiredMajor+ per Aegis-Guard; trovata la versione $javaMajor in $javaExe"
-    Write-Host "    Installa una JRE/JDK 21+ (o copia un runtime in '$scriptPath\jre') e ripeti." -ForegroundColor Yellow
+    Write-Host "    Installa una JRE/JDK 25+ (o copia un runtime in '$scriptPath\jre') e ripeti." -ForegroundColor Yellow
     exit 1
 }
 Write-Host "  [OK] Using Java: $javaExe (major $javaMajor)" -ForegroundColor Green

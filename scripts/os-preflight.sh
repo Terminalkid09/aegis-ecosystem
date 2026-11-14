@@ -17,10 +17,10 @@ esac
 command -v docker >/dev/null 2>&1 && pass "Docker disponibile" || fail "Docker disponibile" "installare Docker 24+"
 docker info 2>/dev/null | grep -q "Server Version" && pass "Docker daemon raggiungibile" || fail "Docker daemon" "avviare dockerd / utente nel gruppo docker"
 
-if command -v python3 >/dev/null 2>&1 && python3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
-  pass "Python 3.10+ disponibile"
+if command -v python3 >/dev/null 2>&1 && python3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 15) else 1)" 2>/dev/null; then
+  pass "Python 3.15+ disponibile"
 else
-  fail "Python 3.10+" "installare python3.10+"
+  fail "Python 3.15+" "installare python3.15+"
 fi
 
 BUSY=""

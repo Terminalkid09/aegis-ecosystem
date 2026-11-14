@@ -17,8 +17,8 @@ echo =======================================================
 :: 1. JRE Setup (Self-Healing) - MUST BE FIRST
 echo [1/4] Preparing runtime...
 if not exist "%JRE_DIR%\bin\java.exe" (
-    echo [INFO] Java not found. Downloading Microsoft JDK 21...
-    powershell -Command "if (Test-Path 'jre_temp') { Remove-Item 'jre_temp' -Recurse -Force }; if (Test-Path 'jre') { Remove-Item 'jre' -Recurse -Force }; Invoke-WebRequest -Uri 'https://aka.ms/download-jdk/microsoft-jdk-21-windows-x64.zip' -OutFile 'jre.zip'; Expand-Archive -Path 'jre.zip' -DestinationPath 'jre_temp'; $topDir = Get-ChildItem 'jre_temp' | Select-Object -First 1; Move-Item $topDir.FullName 'jre'; Remove-Item 'jre.zip'; Remove-Item 'jre_temp' -Recurse"
+    echo [INFO] Java not found. Downloading Microsoft JDK 25...
+    powershell -Command "if (Test-Path 'jre_temp') { Remove-Item 'jre_temp' -Recurse -Force }; if (Test-Path 'jre') { Remove-Item 'jre' -Recurse -Force }; Invoke-WebRequest -Uri 'https://aka.ms/download-jdk/microsoft-jdk-25-windows-x64.zip' -OutFile 'jre.zip'; Expand-Archive -Path 'jre.zip' -DestinationPath 'jre_temp'; $topDir = Get-ChildItem 'jre_temp' | Select-Object -First 1; Move-Item $topDir.FullName 'jre'; Remove-Item 'jre.zip'; Remove-Item 'jre_temp' -Recurse"
     if errorlevel 1 (
         echo [ERROR] Failed to download or extract JRE.
         pause & exit /b 1

@@ -263,7 +263,7 @@ if exist "%ROOT%aegis-guard\install\windows\bin\yara64.exe" (
     echo  %YELLOW%  [i] yara64.exe non trovato: scansioni YARA disabilitate%RESET%
 )
 
-:: Detect runtime Java: JRE minimale (jlink) > JDK 21+ installato > java di PATH.
+:: Detect runtime Java: JRE minimale (jlink) > JDK 25+ installato > java di PATH.
 :: MAI il primo "java" di PATH alla cieca: e' spesso un JRE 8 e Guard muore con
 :: NoClassDefFoundError: jdk/net/Sockets (HttpClient 5 richiede Java 11+).
 set "JAVA_CMD="
@@ -294,7 +294,7 @@ echo.
 echo  %PURPLE%=== AEGIS PILOT: platform + agents + verify (single command) ===%RESET%
 where python >nul 2>&1
 if errorlevel 1 (
-    echo  %RED%[!] Python not found on PATH. Install Python 3.10+ to run pilot.%RESET%
+    echo  %RED%[!] Python not found on PATH. Install Python 3.15+ to run pilot.%RESET%
     exit /b 1
 )
 python "%ROOT%scripts\pilot.py" %~2 %~3 %~4 %~5

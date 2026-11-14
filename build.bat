@@ -29,7 +29,7 @@ if not defined JDK_HOME (
     )
 )
 if not defined JDK_HOME (
-    echo [!] No JDK found: install JDK 21+ or set JAVA_HOME to a JDK.
+    echo [!] No JDK found: install JDK 25+ or set JAVA_HOME to a JDK.
     exit /b 1
 )
 echo [+] JDK found: !JDK_HOME!
@@ -99,7 +99,7 @@ if defined JDK_HOME if exist "!JDK_HOME!\bin\jlink.exe" if exist "!JDK_HOME!\jmo
 )
 
 if not defined JLINK (
-    echo [!] No JDK with jmods found. Install JDK 21+ or set JAVA_HOME.
+    echo [!] No JDK with jmods found. Install JDK 25+ or set JAVA_HOME.
     echo     Skipping JRE minimization. Using system java instead.
     goto :skip_jlink
 )

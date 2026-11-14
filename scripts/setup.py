@@ -79,8 +79,8 @@ def preflight() -> int:
         info = run(["docker", "info"], timeout=60)
         if info.returncode != 0:
             problems.append("Docker installato ma il daemon non risponde: apri Docker Desktop e rilancia")
-    if sys.version_info < (3, 10):
-        problems.append(f"Python 3.10+ richiesto (trovato {sys.version.split()[0]})")
+    if sys.version_info < (3, 15):
+        problems.append(f"Python 3.15+ richiesto (trovato {sys.version.split()[0]})")
     for p in problems:
         log(p, "!")
     return 1 if problems else 0

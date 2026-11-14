@@ -142,7 +142,7 @@ if (Get-Service "AegisGuard" -ErrorAction SilentlyContinue) {
                  -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
     }
     if (-not $java) {
-        Write-Host "  [!] Nessun Java 21+ trovato: Guard non registrato (NodeTrace si')" -ForegroundColor Yellow
+        Write-Host "  [!] Nessun Java 25+ trovato: Guard non registrato (NodeTrace si')" -ForegroundColor Yellow
     } else {
         Set-Content -Path $guardRunner -Encoding ASCII -Value @(
             "@echo off",

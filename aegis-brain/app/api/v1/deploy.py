@@ -185,11 +185,11 @@ function Get-JavaMajor([string]$Exe) {
 
 function Resolve-Java([string]$Dir) {
     # Ordine di preferenza: runtime incluso nell'artefatto (host senza Java
-    # installato), poi java del PATH — ma solo se la versione e' >= 21.
+    # installato), poi java del PATH — ma solo se la versione e' >= 25.
     $candidates = @((Join-Path $Dir "jre\bin\java.exe"),
                     (Get-Command java -ErrorAction SilentlyContinue).Source)
     foreach ($candidate in $candidates) {
-        if ($candidate -and (Test-Path $candidate) -and (Get-JavaMajor $candidate) -ge 21) {
+        if ($candidate -and (Test-Path $candidate) -and (Get-JavaMajor $candidate) -ge 25) {
             return $candidate
         }
     }
@@ -247,7 +247,7 @@ function Install-AegisService($TargetAgent) {
     if ($TargetAgent -eq "aegis-guard") {
         $java = Resolve-Java "C:\Aegis\Guard"
         if (-not $java) {
-            throw "Java 21+ is required for Aegis-Guard: bundle a runtime under jre\ in the artifact, or install it on the target."
+            throw "Java 25+ is required for Aegis-Guard: bundle a runtime under jre\ in the artifact, or install it on the target."
         }
         Write-Host "[aegis] using Java: $java (major $((Get-JavaMajor $java)))"
         $binPath = "`"$java`" -jar `"$($binary.FullName)`""
@@ -328,7 +328,7 @@ install_service() {
         local jar
         jar=$(find "/opt/aegis/${target_agent}" -name 'aegis-guard.jar' -type f | head -n 1)
         [ -n "$jar" ] || { echo "[aegis] Guard JAR not found" >&2; return 1; }
-        command -v java >/dev/null 2>&1 || { echo "[aegis] Java 21+ is required for Guard" >&2; return 1; }
+        command -v java >/dev/null 2>&1 || { echo "[aegis] Java 25+ is required for Guard" >&2; return 1; }
         exec_start="/usr/bin/java -jar ${jar}"
     else
         local exe

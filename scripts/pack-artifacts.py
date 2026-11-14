@@ -17,7 +17,7 @@ installato da remoto e uno installato a mano si comportano allo stesso modo:
                          (telemetria kernel), bin/yara64.exe (scansione FIM/YARA)
   nodetrace-<v>.zip      intero bundle PyInstaller (dist/nodetrace-agent/)
   aegis-guard-<v>.tar.gz solo runtime: un JRE Windows dentro un tar per Linux
-                         non servirebbe a nulla (li' Java 21+ deve esserci host)
+                         non servirebbe a nulla (li' Java 25+ deve esserci host)
 
 Un artefatto incompleto e' peggio di uno assente: se manca il runtime lo script
 fallisce; se manca un pezzo opzionale lo DICHIARA (nessun silenzio).
@@ -87,7 +87,7 @@ def pack_guard(out_dir, version):
     jre_dir = _first_existing(GUARD_JRE_DIRS)
     notes = []
     if not jre_dir:
-        notes.append("nessun JRE incluso: il target deve avere Java 21+ "
+        notes.append("nessun JRE incluso: il target deve avere Java 25+ "
                      "(`build.bat` crea aegis-guard/jre con jlink)")
 
     zpath = os.path.join(out_dir, f"aegis-guard-{version}.zip")

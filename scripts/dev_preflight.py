@@ -27,12 +27,12 @@ def main() -> int:
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
-    check("python>=3.10", sys.version_info >= (3, 10),
-          "installare Python 3.10+ (CI usa 3.12)")
+    check("python>=3.15", sys.version_info >= (3, 15),
+          "installare Python 3.15+ (CI usa 3.15)")
     check("node", shutil.which("node") is not None,
-          "installare Node.js 22+ (frontend build/lint)")
+          "installare Node.js 26+ (frontend build/lint)")
     check("java", shutil.which("java") is not None,
-          "installare JDK 21+ (Temurin) per aegis-guard")
+          "installare JDK 25+ (Temurin) per aegis-guard")
     check("mvn", shutil.which("mvn") is not None,
           "installare Maven 3.9+ (oppure ./mvnw se presente)")
     check("docker", shutil.which("docker") is not None,

@@ -3,7 +3,7 @@
 Esegue la suite di integrazione Aegis con configurazione deterministica.
 
 Prerequisiti (Windows e Linux):
-- Python 3.10+
+- Python 3.15+
 - PostgreSQL in ascolto (compose: aegis-postgres)
 - Redis in ascolto (compose: aegis-redis)
 - File .env alla radice del repo (copiato da .env.example) con

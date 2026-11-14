@@ -1,4 +1,4 @@
-FROM eclipse-temurin:21-jdk-alpine AS build
+FROM eclipse-temurin:25-jdk-alpine AS build
 RUN apk add --no-cache maven
 WORKDIR /app
 COPY pom.xml .
@@ -6,7 +6,7 @@ RUN mvn dependency:go-offline -B
 COPY src ./src
 RUN mvn clean package -Dmaven.test.skip=true -B
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 RUN apk upgrade --no-cache && apk add --no-cache iproute2
 WORKDIR /app
 COPY --from=build /app/target/aegis-guard.jar app.jar
