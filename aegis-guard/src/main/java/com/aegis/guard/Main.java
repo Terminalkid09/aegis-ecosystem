@@ -56,9 +56,14 @@ public class Main {
         }
 
         if (client.fetchCommand(agentId) == null && !f.exists()) {
-            log.info("No valid credentials found. Enrolling (key from env, never logged).");
+            String enrollToken = Config.readEnrollToken();
+            if (enrollToken == null || enrollToken.isBlank()) {
+                log.error("[FATAL] No enrollment token: set AEGIS_ENROLL_TOKEN_FILE or AEGIS_ENROLL_KEY. Exiting.");
+                System.exit(1);
+            }
+            log.info("No valid credentials found. Enrolling (token never logged).");
             try {
-                JsonObject resp = client.enroll(Config.ENROLL_KEY);
+                JsonObject resp = client.enroll(enrollToken);
                 agentId = resp.get("agent_id").getAsString();
                 String secret = resp.get("agent_secret").getAsString();
                 client.setAgentSecret(secret);
@@ -812,42 +817,36 @@ public class Main {
     private static void handleUpdateAgent(AegisClient client, JsonObject cmd) {
         String url = cmd.has("url") && !cmd.get("url").isJsonNull() ? cmd.get("url").getAsString() : "";
         String sha = cmd.has("sha256") && !cmd.get("sha256").isJsonNull() ? cmd.get("sha256").getAsString() : "";
-        String sig = cmd.has("signature") && !cmd.get("signature").isJsonNull() ? cmd.get("signature").getAsString() : "";
         String version = cmd.has("version") && !cmd.get("version").isJsonNull() ? cmd.get("version").getAsString() : "latest";
-        if (url.isEmpty() || sha.isEmpty() || sig.isEmpty()) {
-            throw new RuntimeException("UPDATE_AGENT: missing url/sha256/signature — refusing (fail-closed)");
+        if (url.isEmpty() || sha.isEmpty()) {
+            throw new RuntimeException("UPDATE_AGENT: missing url/sha256 — refusing (fail-closed)");
         }
         // 1a. Allowlist URL (audit SSRF): solo artefatti del brain pinnato.
         if (!com.aegis.guard.utils.UpdateManager.isUpdateUrlAllowed(
                 url, com.aegis.guard.utils.Config.BRAIN_URL)) {
             throw new SecurityException("UPDATE_AGENT: url fuori allowlist — refusing");
         }
-        // 1. HMAC con la enroll key dell'agente (niente firma valida → stop)
-        if (!com.aegis.guard.utils.UpdateManager.verifySignature(sha, sig, com.aegis.guard.utils.Config.ENROLL_KEY)) {
-            throw new SecurityException("UPDATE_AGENT: bad signature — possible tampering, refusing");
-        }
-        // 1b. Manifest Ed25519 (M6 Fase 7): se il comando lo porta e la pubkey
-        // è configurata, l'artefatto deve esserne coperto — altrimenti stop.
-        // Senza pubkey configurata resta l'HMAC (compat, loggato).
+        // 1b. Manifest Ed25519 obbligatorio (AEGIS-SEC-002): niente HMAC OTA.
         String manifest = cmd.has("manifest") && !cmd.get("manifest").isJsonNull()
                 ? cmd.get("manifest").getAsString() : "";
         String manifestSig = cmd.has("manifest_sig") && !cmd.get("manifest_sig").isJsonNull()
                 ? cmd.get("manifest_sig").getAsString() : "";
         String fileName = url.contains("/") ? url.substring(url.lastIndexOf('/') + 1) : url;
-        if (!manifest.isEmpty() && !manifestSig.isEmpty()
-                && !com.aegis.guard.utils.Config.MANIFEST_PUBKEY.isBlank()) {
-            boolean okSig = com.aegis.guard.utils.ManifestVerifier.verifyEd25519(
-                    manifest, manifestSig, com.aegis.guard.utils.Config.MANIFEST_PUBKEY);
-            boolean covered = com.aegis.guard.utils.ManifestVerifier.manifestCovers(
-                    manifest, fileName, sha);
-            if (!okSig || !covered) {
-                throw new SecurityException(
-                        "UPDATE_AGENT: manifest Ed25519 invalido o artefatto non coperto — refusing");
-            }
-            log.info("[MITIGATION] UPDATE_AGENT: manifest Ed25519 verificato per {}", fileName);
-        } else if (!com.aegis.guard.utils.Config.MANIFEST_PUBKEY.isBlank()) {
-            log.warn("[MITIGATION] UPDATE_AGENT: comando senza manifest firmato, solo HMAC");
+        if (com.aegis.guard.utils.Config.MANIFEST_PUBKEY.isBlank()) {
+            throw new SecurityException("UPDATE_AGENT: AEGIS_MANIFEST_PUBKEY missing — refusing");
         }
+        if (manifest.isEmpty() || manifestSig.isEmpty()) {
+            throw new SecurityException("UPDATE_AGENT: missing Ed25519 manifest — refusing");
+        }
+        boolean okSig = com.aegis.guard.utils.ManifestVerifier.verifyEd25519(
+                manifest, manifestSig, com.aegis.guard.utils.Config.MANIFEST_PUBKEY);
+        boolean covered = com.aegis.guard.utils.ManifestVerifier.manifestCovers(
+                manifest, fileName, sha);
+        if (!okSig || !covered) {
+            throw new SecurityException(
+                    "UPDATE_AGENT: manifest Ed25519 invalido o artefatto non coperto — refusing");
+        }
+        log.info("[MITIGATION] UPDATE_AGENT: manifest Ed25519 verificato per {}", fileName);
         // 2. Download in temp + stage (riverifica SHA, sposta, scrive update.state)
         try {
             Path tmp = Files.createTempFile("aegis-update-", ".pkg");

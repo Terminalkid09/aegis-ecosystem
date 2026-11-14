@@ -59,7 +59,7 @@ endpoint (user-mode, NO driver) ──TLS(Caddy, oggi `tls internal` dev)──�
 browser ──cookie httpOnly `aegis_token` + Bearer──▶ brain (CSRF origin-check su mutazioni cookie, security headers, CORS allowlist, rate-limit)
 aegis-link/syslog ──X-Api-Key / UDP 1514──▶ Redis ──▶ brain consumer ──▶ PG
 brain ──▶ OSINT esterni (VT/Shodan/AbuseIPDB, opzionali) / Ollama locale (profilo `ollama`)
-deploy: admin/analyst → token breve → one-liner ps1/sh (trasporto TLS) → enroll → OTA HMAC(AGENT_ENROLL_KEY)
+deploy: admin/analyst → token breve → one-liner ps1/sh (trasporto TLS) → enroll → OTA Ed25519(manifest key)
 ```
 
 Boundary critici: kernel→user pipe (solo telemetria, mai comandi);

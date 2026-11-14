@@ -257,9 +257,11 @@ async def _execute_action(
     elif action_type == "update_agent":
         # target = "aegis-guard" | "nodetrace" (default nodetrace), params.version
         from app.api.v1.deploy import (
-            artifact_name_for, build_update_command, sha256_file, sign_artifact,
+            ManifestUnavailable, artifact_name_for, build_manifest,
+            build_update_command, sha256_file, sign_manifest_bundle,
         )
         from app.core.config import settings as _settings
+        from app.services import pki as _pki
         from pathlib import Path as _Path
         version = str(params.get("version", "latest"))
         atype = "aegis-guard" if "guard" in str(target).lower() else "nodetrace"
@@ -268,8 +270,16 @@ async def _execute_action(
         if not path.is_file():
             return {"status": "failed", "output": f"Artifact {fname} not published"}
         digest = sha256_file(path)
-        cmd = build_update_command(atype, version, _settings.PUBLIC_BASE_URL,
-                                   digest, sign_artifact(digest))
+        try:
+            bundle = sign_manifest_bundle(
+                build_manifest([{"name": fname, "sha256": digest}]))
+        except ManifestUnavailable as exc:
+            return {"status": "failed", "output": str(exc)}
+        cmd = build_update_command(
+            atype, version, _settings.PUBLIC_BASE_URL, digest,
+            _pki.canonical_manifest_bytes(bundle["manifest"]).decode("utf-8"),
+            bundle["ed25519"],
+        )
         cmd["alert_id"] = alert.id
         return await _send_agent_command(alert.agent_id, cmd)
 

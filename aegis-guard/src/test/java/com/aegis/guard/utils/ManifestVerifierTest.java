@@ -47,6 +47,12 @@ class ManifestVerifierTest {
     }
 
     @Test
+    void hmacShapedSignatureIsNotEd25519() {
+        // AEGIS-SEC-002: un HMAC esadecimale non è una firma manifest.
+        assertFalse(ManifestVerifier.verifyEd25519(MANIFEST, "ab".repeat(32), PUB));
+    }
+
+    @Test
     void manifestCoversArtifactExactly() {
         assertTrue(ManifestVerifier.manifestCovers(MANIFEST,
                 "aegis-guard-3.0.1.zip",

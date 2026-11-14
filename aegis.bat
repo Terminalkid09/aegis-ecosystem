@@ -235,6 +235,15 @@ set "AEGIS_BRAIN_URL=%NODETRACE_BASE%"
 set "AEGIS_GATEWAY_URL=%NODETRACE_BASE%/telemetry/report"
 set "AEGIS_SCAN_INTERVAL_MS=10000"
 
+:: OTA: la pubblica Ed25519 viene dal manifest pubblico del brain. Se manca,
+:: l'update fallisce chiuso; non si ripiega su HMAC con la enroll key.
+for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Invoke-RestMethod '%NODETRACE_BASE%/deploy/manifest' -UseBasicParsing -TimeoutSec 10).pubkey_b64"`) do set "AEGIS_MANIFEST_PUBKEY=%%A"
+if not defined AEGIS_MANIFEST_PUBKEY (
+    echo  %RED%[X] Manifest Ed25519 non disponibile dal brain: OTA disabilitata.%RESET%
+    call :maybe_pause
+    goto menu_or_exit
+)
+
 :: ---- NodeTrace Agent ----
 set "PYTHONUNBUFFERED=1"
 echo  %YELLOW%[*] Starting NodeTrace Agent...%RESET%

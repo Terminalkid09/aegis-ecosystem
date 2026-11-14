@@ -154,6 +154,23 @@ class Agent:
             headers["X-Client-Cert"] = self._identity_b64
         return headers
 
+    def _enroll_token(self):
+        """Token del primo enrollment: file one-shot, altrimenti chiave statica.
+
+        L'installer one-liner non scrive il token nell'env persistente: lo
+        mette in un file 0600 e imposta solo AEGIS_ENROLL_TOKEN_FILE.
+        """
+        path = os.getenv("AEGIS_ENROLL_TOKEN_FILE", "").strip()
+        if path:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    token = f.read().strip()
+                if token:
+                    return token
+            except OSError as e:
+                Logger.warn(f"Enrollment token file non leggibile ({e}): fallback env.")
+        return os.getenv("AEGIS_ENROLL_KEY", "").strip()
+
     def _brain_base(self):
         return self.config["heartbeat_url"].rsplit("/", 1)[0].rstrip("/")
 
@@ -213,6 +230,10 @@ class Agent:
 
         system_info = self.telemetry.get_system_info()
 
+        enroll_token = self._enroll_token()
+        if not enroll_token:
+            raise RuntimeError(
+                "No enrollment token: set AEGIS_ENROLL_TOKEN_FILE or AEGIS_ENROLL_KEY")
         payload = {
             "hostname": self.config["device_name"],
             "os": system_info["os"],
@@ -221,7 +242,7 @@ class Agent:
             "cpu_model": system_info["cpu_model"],
             "total_ram": system_info["total_ram"],
             "mac_address": network["mac"],
-            "enroll_key": os.environ["AEGIS_ENROLL_KEY"],
+            "enroll_key": enroll_token,
         }
 
         r = post(self.config["register_url"], json_data=payload)
@@ -384,28 +405,19 @@ class Agent:
             Logger.info(f"Remediation command '{cmd_type}' ignored — NodeTrace is telemetry-only. Use Aegis-Guard for remediation.")
 
     def _run_update(self, token, device_id, command):
-        from services.updater import verify_signature, stage_package
+        from services.updater import stage_package
         import tempfile
         import urllib.request
         import ssl
         cmd_name = "UPDATE_AGENT"
         url = command.get("url", "")
         sha = command.get("sha256", "")
-        sig = command.get("signature", "")
+        manifest = command.get("manifest", "") or ""
+        manifest_sig = command.get("manifest_sig", "") or ""
         version = command.get("version", "latest")
-        if not url or not sha or not sig:
-            Logger.error("UPDATE_AGENT missing url/sha256/signature — refusing (fail-closed).")
-            self._ack_command(token, device_id, cmd_name, "failed", "missing url/sha256/signature")
-            return
-        try:
-            enroll_key = os.environ["AEGIS_ENROLL_KEY"]
-        except KeyError:
-            Logger.error("UPDATE_AGENT: AEGIS_ENROLL_KEY not set — refusing.")
-            self._ack_command(token, device_id, cmd_name, "failed", "no enroll key")
-            return
-        if not verify_signature(sha, sig, enroll_key):
-            Logger.error("UPDATE_AGENT bad signature — possible tampering, refusing.")
-            self._ack_command(token, device_id, cmd_name, "failed", "bad signature")
+        if not url or not sha:
+            Logger.error("UPDATE_AGENT missing url/sha256 — refusing (fail-closed).")
+            self._ack_command(token, device_id, cmd_name, "failed", "missing url/sha256")
             return
         # Audit SSRF: l'URL non e' coperto dalla firma — senza allowlist un
         # brain compromesso/MITM dirottava il download (con Bearer+cert!)
@@ -414,24 +426,28 @@ class Agent:
             Logger.error("UPDATE_AGENT url fuori allowlist — refusing.")
             self._ack_command(token, device_id, cmd_name, "failed", "url not allowed")
             return
-        # Manifest Ed25519 (M6 Fase 7): se il comando lo porta e la pubkey è
-        # configurata, l'artefatto deve esserne coperto — altrimenti stop.
+        # Ed25519 obbligatorio (AEGIS-SEC-002): niente HMAC OTA.
+        pubkey = os.getenv("AEGIS_MANIFEST_PUBKEY", "").strip()
+        if not pubkey:
+            Logger.error("UPDATE_AGENT: AEGIS_MANIFEST_PUBKEY missing — refusing.")
+            self._ack_command(token, device_id, cmd_name, "failed", "no manifest pubkey")
+            return
+        if not manifest or not manifest_sig:
+            Logger.error("UPDATE_AGENT: missing Ed25519 manifest — refusing.")
+            self._ack_command(token, device_id, cmd_name, "failed", "missing Ed25519 manifest")
+            return
         from services.updater import verify_manifest_ed25519, manifest_covers
-        _mpub = os.getenv("AEGIS_MANIFEST_PUBKEY", "").strip()
-        _mani = command.get("manifest", "") or ""
-        _msig = command.get("manifest_sig", "") or ""
-        _fname = url.rsplit("/", 1)[-1] if "/" in url else url
-        if _mpub:
-            _v = verify_manifest_ed25519(_mani, _msig, _mpub) if _mani and _msig else False
-            if _v is None:
-                Logger.error("UPDATE_AGENT: manifest pubkey set ma cryptography assente — refusing.")
-                self._ack_command(token, device_id, cmd_name, "failed", "manifest needs cryptography lib")
-                return
-            if not _v or not manifest_covers(_mani, _fname, sha):
-                Logger.error("UPDATE_AGENT: manifest Ed25519 invalido o artefatto non coperto — refusing.")
-                self._ack_command(token, device_id, cmd_name, "failed", "bad manifest")
-                return
-            Logger.info(f"UPDATE_AGENT: manifest Ed25519 verificato per {_fname}.")
+        fname = url.rsplit("/", 1)[-1] if "/" in url else url
+        verified = verify_manifest_ed25519(manifest, manifest_sig, pubkey)
+        if verified is None:
+            Logger.error("UPDATE_AGENT: manifest pubkey set ma cryptography assente — refusing.")
+            self._ack_command(token, device_id, cmd_name, "failed", "manifest needs cryptography lib")
+            return
+        if not verified or not manifest_covers(manifest, fname, sha):
+            Logger.error("UPDATE_AGENT: manifest Ed25519 invalido o artefatto non coperto — refusing.")
+            self._ack_command(token, device_id, cmd_name, "failed", "bad manifest")
+            return
+        Logger.info(f"UPDATE_AGENT: manifest Ed25519 verificato per {fname}.")
         try:
             headers = dict(self._agent_headers(token, device_id))
             req = urllib.request.Request(url, headers=headers)

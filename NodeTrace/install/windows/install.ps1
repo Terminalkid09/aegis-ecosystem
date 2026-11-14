@@ -73,12 +73,26 @@ $base = $envVars['AEGIS_BRAIN_URL']
 if (-not $base) { $base = "http://127.0.0.1:8000/api/v1" }
 $enrollKey = $envVars['AGENT_ENROLL_KEY']
 if (-not $enrollKey) { $enrollKey = $envVars['AEGIS_ENROLL_KEY'] }
-if (-not $enrollKey) {
-    Write-Error "[X] Nessuna AGENT_ENROLL_KEY nel .env: senza chiave l'agente non si registra."
+$hasToken = Test-Path (Join-Path $InstallDir "token.json")
+if (-not $hasToken -and -not $enrollKey) {
+    Write-Error "[X] Nessuna AGENT_ENROLL_KEY nel .env: serve per il primo enrollment."
     exit 1
 }
 # 127.0.0.1 esplicito: su Windows "localhost" tenta prima ::1 e va in timeout.
 $serviceUrl = $base -replace 'localhost', '127.0.0.1'
+
+# OTA Ed25519: pubblica obbligatoria, presa dal brain. Niente fallback HMAC.
+try {
+    $manifest = Invoke-RestMethod -Uri "$serviceUrl/deploy/manifest" -UseBasicParsing -TimeoutSec 10
+} catch {
+    Write-Error "[X] Impossibile leggere il manifest Ed25519 da $serviceUrl/deploy/manifest: $_"
+    exit 1
+}
+$manifestPubkey = $manifest.pubkey_b64
+if (-not $manifestPubkey) {
+    Write-Error "[X] Manifest Ed25519 non inizializzato: esegui il PKI bootstrap sul brain."
+    exit 1
+}
 
 # === 4/5 INSTALLAZIONE DEL SERVIZIO ===
 Write-Host "`n[4/5] Installazione servizio..." -ForegroundColor Cyan
@@ -112,6 +126,7 @@ if ($LASTEXITCODE -ne 0) {
     "NODETRACE_UPDATE_URL=$serviceUrl/update`n" +
     "NODETRACE_HEARTBEAT_URL=$serviceUrl/heartbeat`n" +
     "AEGIS_ENROLL_KEY=$enrollKey`n" +
+    "AEGIS_MANIFEST_PUBKEY=$manifestPubkey`n" +
     "PYTHONUNBUFFERED=1"
 )
 # Recovery: come Guard, il servizio riparte da solo se muore.

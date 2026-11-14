@@ -71,6 +71,11 @@ docker compose exec aegis-brain python -m app.services.pki --dir /app/pki
 #    stampata come AEGIS_MANIFEST_PUBKEY agli agent (env/GPO/Intune).
 ```
 
+L'installer one-liner inietta la pubblica manifest nell'ambiente dell'agente;
+il token di enrollment viene scritto in un file `0600` e non nell'env
+persistente. L'OTA è solo Ed25519: un comando senza manifest firmato viene
+rifiutato, senza fallback HMAC.
+
 Volume consigliato: montare `/app/pki` su storage persistente separato e
 includerlo nei backup cifrati (senza CA niente nuove firme).
 

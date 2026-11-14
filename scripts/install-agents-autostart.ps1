@@ -98,11 +98,26 @@ if (-not $enrollKey) {
 }
 $base = "http://127.0.0.1:8000/api/v1"
 
+# OTA Ed25519: pubblica obbligatoria, presa dal brain. Senza, l'update
+# fallisce chiuso; non si ripiega su HMAC con la enroll key.
+try {
+    $manifest = Invoke-RestMethod -Uri "$base/deploy/manifest" -UseBasicParsing -TimeoutSec 10
+} catch {
+    Write-Error "[X] Impossibile leggere il manifest Ed25519 da $base/deploy/manifest: $_"
+    exit 1
+}
+$manifestPubkey = $manifest.pubkey_b64
+if (-not $manifestPubkey) {
+    Write-Error "[X] Manifest Ed25519 non inizializzato: esegui il PKI bootstrap sul brain."
+    exit 1
+}
+
 Set-Content -Path $envLauncher -Encoding ASCII -Value @(
     "@echo off",
     "set `"AEGIS_BRAIN_URL=$base`"",
     "set `"AEGIS_GATEWAY_URL=$base/telemetry/report`"",
     "set `"AEGIS_ENROLL_KEY=$enrollKey`"",
+    "set `"AEGIS_MANIFEST_PUBKEY=$manifestPubkey`"",
     "set `"AEGIS_SCAN_INTERVAL_MS=10000`"",
     "set `"NODETRACE_BASE=$base`"",
     "set `"NODETRACE_REGISTER_URL=$base/register`"",

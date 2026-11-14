@@ -41,7 +41,6 @@ Create a `config.json` file in the agent directory:
   "register_url": "http://localhost:8000/api/v1/register",
   "update_url": "http://localhost:8000/api/v1/update",
   "heartbeat_url": "http://localhost:8000/api/v1/heartbeat",
-  "enroll_key": "your-enrollment-secret-key",
   "telemetry_interval_seconds": 30,
   "heartbeat_interval_seconds": 60,
   "retry_max_attempts": 5,
@@ -57,7 +56,6 @@ Create a `config.json` file in the agent directory:
 | `register_url` | Backend registration endpoint | Required |
 | `update_url` | Telemetry submission endpoint | Required |
 | `heartbeat_url` | Heartbeat endpoint | Required |
-| `enroll_key` | Device enrollment secret | Required |
 | `telemetry_interval_seconds` | How often to send telemetry | 30 |
 | `heartbeat_interval_seconds` | How often to send heartbeat | 60 |
 | `retry_max_attempts` | Max retry attempts for failed requests | 5 |
@@ -156,16 +154,23 @@ python -m pytest tests/
 
 ## License
 
-MIT License
+AGPL-3.0-only. See the repository `LICENSE` and `NOTICE`.
    ```
 
 ## Configuration
+
+The enrollment credential is not stored in `config.json`. Use
+`AEGIS_ENROLL_TOKEN_FILE` for the one-liner token (`0600`, never in the
+persistent environment) or `AEGIS_ENROLL_KEY` for headless enrollment. OTA
+requires `AEGIS_MANIFEST_PUBKEY`; a missing or unsigned manifest is refused.
 
 - `device_name`: Unique device identifier
 - `register_url`: Backend registration endpoint
 - `update_url`: Telemetry submission endpoint
 - `heartbeat_url`: Heartbeat endpoint
-- `enroll_key`: Enrollment secret key
+- `AEGIS_ENROLL_TOKEN_FILE`: One-shot token file (one-liner install)
+- `AEGIS_ENROLL_KEY`: Static enrollment key (headless install)
+- `AEGIS_MANIFEST_PUBKEY`: Ed25519 manifest public key (required for OTA)
 - `telemetry_interval_seconds`: Telemetry send frequency
 - `heartbeat_interval_seconds`: Heartbeat frequency
 - `retry_max_attempts`: Max retry attempts for failed requests

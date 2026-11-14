@@ -235,10 +235,10 @@ I finding **AEGIS-SEC-002**, **AEGIS-REL-001** e **KRAKEN-SEC-001/002/003** bloc
 - **Release:** 4.1.0 (bloccante)
 
 #### AEGIS-SEC-002 — Una chiave per due mestieri: enroll e firma OTA
-- **Severità:** High · **Confidence:** Alta · **File:** `aegis-brain/app/api/v1/deploy.py:312` (installer), `:sign_artifact`, `NodeTrace/.../updater.py`, `aegis-guard/.../UpdateManager.java`
-- **Evidenza:** l'installer scrive `AEGIS_ENROLL_KEY=$ENROLL_TOKEN` nell'env del servizio; il Brain firma con `settings.AGENT_ENROLL_KEY` (statica); l'agente verifica con `Config.ENROLL_KEY` (il token). Due chiavi diverse per lo stesso controllo.
+- **Severità:** High · **Confidence:** Alta · **File:** `aegis-brain/app/api/v1/deploy.py` (installer, `build_manifest`/`sign_manifest_bundle`), `NodeTrace/.../updater.py`, `aegis-guard/.../UpdateManager.java`
+- **Evidenza:** l'installer scriveva `AEGIS_ENROLL_KEY=$ENROLL_TOKEN` nell'env del servizio; il Brain firmava con `settings.AGENT_ENROLL_KEY` (statica); l'agente verificava con `Config.ENROLL_KEY` (il token). Due chiavi diverse per lo stesso controllo.
 - **Impatto:** (a) gli agenti installati via one-liner rifiutano ogni update legittimo (OTA rotta in silenzio); (b) chi conosce la enroll key statica può firmare qualunque digest.
-- **Fix:** tre chiavi separate (enroll, firma manifest, device secret); Ed25519 obbligatorio in ogni profilo; HMAC solo con data di rimozione; non scrivere il token di enroll nell'env persistente.
+- **Fix:** tre chiavi separate (enroll, firma manifest, device secret); Ed25519 obbligatorio in ogni profilo; HMAC OTA rimosso in 4.1.0; token di enroll in file 0600, mai nell'env persistente.
 - **Test:** agente installato con token riceve update Ed25519 firmato → applicato; HMAC con chiave diversa → rifiutato.
 - **Release:** 4.1.0 (bloccante)
 
@@ -691,7 +691,7 @@ Ordine obbligato, perché tutto il resto presuppone un servizio che parte.
 | 4 | AEGIS-OPS-005 | bump Vite; audit dev separato dal gate prod | 2 h |
 | 5 | AEGIS-SEC-011 | rimozione ramo curl o `--config` 0600 in NodeTrace | 3 h |
 | 6 | AEGIS-SEC-001 | re-enroll con prova di possesso (machine-id + token dedicato) | 1–1,5 gg |
-| 7 | AEGIS-SEC-002 | separazione chiavi enroll/firma/device; Ed25519 nel one-liner | 1 gg |
+| 7 | AEGIS-SEC-002 | separazione chiavi enroll/firma/device; Ed25519 nel one-liner, HMAC rimosso | 1 gg |
 | 8 | AEGIS-SEC-007 | `reg delete /v`, esiti onesti, Linux `unsupported` | 4 h + test Windows |
 | 9 | AEGIS-SEC-004 | decompressione incrementale con cap | 3 h |
 | 10 | AEGIS-SEC-005/008 | profili `lab/pilot/prod`, Redis per rate limit, FFP on in prod | 4 h |

@@ -137,16 +137,21 @@ if (-not $envVars['AEGIS_API_KEY']) {
     Write-Error "[X] AEGIS_API_KEY not found in .env"
     exit 1
 }
-# La chiave di enrollment è **obbligatoria**: `Config.ENROLL_KEY` la legge con
-# getEnvOrThrow all'avvio, quindi senza di essa il servizio si installa, parte e
-# muore. Prima non veniva passata al servizio (solo AGENT_ENROLL_KEY nel .env,
-# con nome diverso da quello che il Java legge).
-if (-not ($envVars['AGENT_ENROLL_KEY'] -or $envVars['AEGIS_ENROLL_KEY'])) {
-    Write-Error "[X] AGENT_ENROLL_KEY not found in .env — senza chiave di enrollment il servizio non parte."
+# La chiave statica serve per il primo enrollment headless. Dopo la creazione
+# di secret.json l'agente non la richiede più; l'OTA usa la pubblica Ed25519.
+# Prima non veniva passata al servizio (solo AGENT_ENROLL_KEY nel .env, con
+# nome diverso da quello che il Java legge).
+$hasSecret = Test-Path (Join-Path $installDir "secret.json")
+if (-not $hasSecret -and -not ($envVars['AGENT_ENROLL_KEY'] -or $envVars['AEGIS_ENROLL_KEY'])) {
+    Write-Error "[X] AGENT_ENROLL_KEY not found in .env — serve per il primo enrollment."
     exit 1
 }
 Write-Host "  [OK] AEGIS_API_KEY configured" -ForegroundColor Green
-Write-Host "  [OK] enrollment key configured" -ForegroundColor Green
+if ($hasSecret) {
+    Write-Host "  [OK] existing device secret: enrollment key not required" -ForegroundColor Green
+} else {
+    Write-Host "  [OK] enrollment key configured" -ForegroundColor Green
+}
 Write-Host "  [OK] Environment loaded" -ForegroundColor Green
 
 # === BUILD / ARTIFACT CHECK ===
@@ -264,6 +269,20 @@ if ($brainUrl -match "aegis-brain:8000") {
 }
 if ($brainUrl -notmatch "/api/v1/?$") { $brainUrl = $brainUrl.TrimEnd('/') + "/api/v1" }
 
+# OTA Ed25519: la pubblica è obbligatoria e viene presa dal brain. Se la PKI
+# non è inizializzata l'installazione si ferma: niente fallback HMAC.
+try {
+    $manifest = Invoke-RestMethod -Uri "$brainUrl/deploy/manifest" -UseBasicParsing -TimeoutSec 10
+} catch {
+    Write-Error "[X] Impossibile leggere il manifest Ed25519 da $brainUrl/deploy/manifest: $_"
+    exit 1
+}
+$manifestPubkey = $manifest.pubkey_b64
+if (-not $manifestPubkey) {
+    Write-Error "[X] Manifest Ed25519 non inizializzato: esegui il PKI bootstrap sul brain."
+    exit 1
+}
+
 # Rewrite Docker internal URL to localhost for host execution
 if ($gatewayUrl -match "aegis-link:8080") {
     $externalPort = $envVars['LINK_PORT_EXTERNAL']
@@ -304,10 +323,9 @@ if ($envVars['AEGIS_SCAN_INTERVAL_MS']) {
 $enrollKey = $envVars['AGENT_ENROLL_KEY']
 if (-not $enrollKey) { $enrollKey = $envVars['AEGIS_ENROLL_KEY'] }
 
-# Nota: la chiave di enrollment resta nella configurazione del servizio. È
-# inevitabile perché `Config.ENROLL_KEY` è letta all'avvio anche quando
-# `secret.json` esiste già; il token di enrollment ha scadenza breve ed è
-# monouso, quindi il valore esposto non è una credenziale device.
+# La chiave statica serve solo al primo enrollment headless: con secret.json
+# già presente l'agente non la richiede più. L'OTA usa esclusivamente la
+# pubblica Ed25519 del manifest, separata dalla enroll key e dal device secret.
 # AEGIS_ETW_ALLOW_UNSIGNED: il collector e' compilato localmente (MinGW) e non
 # ha una firma Authenticode. Senza questo opt-in Guard rifiuta l'helper
 # ("untrusted-binary") e la capacita' kernel resta spenta per chiunque non
@@ -315,7 +333,7 @@ if (-not $enrollKey) { $enrollKey = $envVars['AEGIS_ENROLL_KEY'] }
 # scrivibile solo da amministratori — il rischio di hijack e' quello di un
 # binario firmato con la stessa ACL.
 & $nssmPath set AegisGuard AppEnvironmentExtra `
-    "AEGIS_GATEWAY_URL=$gatewayUrl`nAEGIS_BRAIN_URL=$brainUrl`nAEGIS_GUARD_API_KEY=$apiKey`nAEGIS_ENROLL_KEY=$enrollKey`nAEGIS_AGENT_ID=$agentId`nAEGIS_SCAN_INTERVAL_MS=$scanInterval`nAEGIS_ETW_ENABLED=$etwEnabled`nAEGIS_ETW_PATH=$etwPath`nAEGIS_ETW_ALLOW_UNSIGNED=true"
+    "AEGIS_GATEWAY_URL=$gatewayUrl`nAEGIS_BRAIN_URL=$brainUrl`nAEGIS_GUARD_API_KEY=$apiKey`nAEGIS_ENROLL_KEY=$enrollKey`nAEGIS_MANIFEST_PUBKEY=$manifestPubkey`nAEGIS_AGENT_ID=$agentId`nAEGIS_SCAN_INTERVAL_MS=$scanInterval`nAEGIS_ETW_ENABLED=$etwEnabled`nAEGIS_ETW_PATH=$etwPath`nAEGIS_ETW_ALLOW_UNSIGNED=true"
 
 # Workdir esplicito = cartella di installazione (con il default il servizio
 # partiva da C:\Windows\System32 e ogni path relativo puntava lì).

@@ -189,7 +189,7 @@ Le azioni verso l'endpoint passano per `_send_agent_command` — comandi **nomin
 ### 4.3 Flusso deployment [V]
 
 `app/api/v1/deploy.py`:
-- `:445-467` — `artifact_name_for`, `sha256_file`, `sign_artifact` (HMAC-SHA256), `verify_artifact_signature`.
+- `:445-467` — `artifact_name_for`, `sha256_file`; la firma OTA è il manifest Ed25519.
 - `:508-530` — `sign_manifest_bundle`, manifest firmato.
 - `:556-561` — download artefatto con `Path(name).name` come anti-traversal (solo basename).
 - `:50-57` — chiave HMAC di approvazione derivata da `JWT_SECRET`, con fallback `"aegis-approval-dev-only"`.
@@ -587,7 +587,7 @@ Difese verificate (`:224-229`, `:326`, `:854-872`):
 
 **Nessun PCAP.** Nessun riferimento a `scapy`, `dpkt`, `pyshark` in `requirements.txt`.
 
-**Nessuna chain of custody.** I risultati non sono firmati. `sign_artifact` esiste per gli artefatti di deploy, non per i risultati di analisi.
+**Nessuna chain of custody.** I risultati non sono firmati. La firma Ed25519 copre gli artefatti di deploy, non i risultati di analisi.
 
 ### Proposta [R]
 

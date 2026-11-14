@@ -14,12 +14,14 @@ import javax.crypto.spec.SecretKeySpec;
  *
  * <p>Protocollo (condiviso col brain, {@code app/api/v1/deploy.py}):
  * <ol>
- *   <li>brain invia UPDATE_AGENT {url, sha256, signature} dove
- *       signature = HMAC_SHA256(AGENT_ENROLL_KEY, sha256).</li>
- *   <li>l'agente scarica in {@code update.pending/}, verifica HMAC con la
- *       propria enroll key, poi verifica SHA-256 del file.</li>
- *   <li>solo se entrambe passano: mette in stage + scrive {@code update.state}.</li>
+ *   <li>brain invia UPDATE_AGENT {url, sha256, manifest, manifest_sig}; la
+ *       firma è Ed25519 con la chiave manifest, mai la enroll key.</li>
+ *   <li>l'agente verifica firma + copertura, scarica in {@code update.pending/}
+ *       e riverifica SHA-256 del file.</li>
+ *   <li>solo se tutte le verifiche passano: stage + {@code update.state}.</li>
  * </ol>
+ * L'HMAC OTA è stato rimosso in 4.1.0 (AEGIS-SEC-002); i metodi HMAC restano
+ * solo come compatibilità di test fino alla rimozione pianificata in 4.2.0.
  * L'apply avviene al restart del servizio (il jar in esecuzione è lockato
  * su Windows — sostituirlo live corromperebbe l'agente). Fail-closed:
  * qualunque verifica fallita = niente stage, ack failed al SOC.
@@ -31,7 +33,8 @@ public final class UpdateManager {
     public static final String PENDING_DIR = "update.pending";
     public static final String STATE_FILE = "update.state";
 
-    /** HMAC-SHA256 esadecimale di {@code sha256} con la enroll key. */
+    /** @deprecated OTA HMAC rimosso in 4.1.0; usare il manifest Ed25519. */
+    @Deprecated(forRemoval = true)
     public static String hmacSign(String sha256, String enrollKey) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(enrollKey.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
@@ -39,7 +42,8 @@ public final class UpdateManager {
         return HexFormat.of().formatHex(out);
     }
 
-    /** Confronto a tempo costante (anti-timing). */
+    /** @deprecated OTA HMAC rimosso in 4.1.0; usare il manifest Ed25519. */
+    @Deprecated(forRemoval = true)
     public static boolean verifySignature(String sha256, String signature, String enrollKey) {
         if (sha256 == null || signature == null || enrollKey == null || enrollKey.isBlank()) return false;
         try {

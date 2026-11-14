@@ -1,12 +1,14 @@
 """Staged OTA update per NodeTrace — stesse regole del Guard (fail-closed).
 
 Protocollo (condiviso col brain, app/api/v1/deploy.py):
-  UPDATE_AGENT {url, sha256, signature} con signature = HMAC_SHA256(enroll_key, sha256).
-  1. verifica HMAC con la propria enroll key → stop se invalida
+  UPDATE_AGENT {url, sha256, manifest, manifest_sig} con firma Ed25519.
+  1. verifica il manifest con AEGIS_MANIFEST_PUBKEY e la copertura dell'artefatto
   2. download in temp → verifica SHA-256 → stage in update.pending/ + update.state
   3. ack ok/failed a /telemetry/commands/ack — l'apply è al restart
      (l'exe PyInstaller in esecuzione è lockato su Windows).
 
+L'HMAC OTA è stato rimosso in 4.1.0 (AEGIS-SEC-002): le funzioni HMAC qui
+sotto restano solo per i test di migrazione e vanno rimosse in 4.2.0.
 Funzioni pure qui (testate in tests/test_update.py), I/O negli Agent methods.
 """
 import hashlib
@@ -17,6 +19,7 @@ PENDING_DIR = "update.pending"
 STATE_FILE = "update.state"
 
 
+# Legacy OTA HMAC: non usare per autorizzare update (rimozione 4.2.0).
 def hmac_sign(sha256: str, enroll_key: str) -> str:
     return hmac.new(enroll_key.encode("utf-8"), sha256.encode("utf-8"), hashlib.sha256).hexdigest()
 

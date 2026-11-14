@@ -317,7 +317,7 @@ irm <brain>/api/v1/deploy/install.ps1?agent=both -Headers @{'X-Enroll-Token'='<t
 curl -fsSL -H 'X-Enroll-Token: <token>' '<brain>/api/v1/deploy/install.sh?agent=both' | sudo bash
 ```
 
-The installer downloads the artifact for that agent, extracts it (Guard into `C:\Aegis\Guard`, NodeTrace into `C:\Aegis\NodeTrace`), sets the brain URL / enrollment key and **registers the service** (`New-Service` on Windows, systemd on Linux) — the same service model as a local install. It refuses to pretend: if remote-dashboard connectivity was not selected in the token, it says that no service was registered instead of reporting success.
+The installer downloads the artifact for that agent, extracts it (Guard into `C:\Aegis\Guard`, NodeTrace into `C:\Aegis\NodeTrace`), sets the brain URL, the Ed25519 manifest public key and a `0600` enrollment-token file (the token is never written into the persistent environment), and **registers the service** (`New-Service` on Windows, systemd on Linux) — the same service model as a local install. It refuses to pretend: if remote-dashboard connectivity was not selected in the token, it says that no service was registered instead of reporting success.
 
 One preparative step is yours — **publish the artifacts the brain serves** (they are build outputs, never committed):
 
@@ -334,6 +334,7 @@ It packs exactly what a local install copies: `aegis-guard.jar`, a bundled `jre/
 # NodeTrace
 cd NodeTrace\agents\python
 set AEGIS_ENROLL_KEY=<key>
+set AEGIS_MANIFEST_PUBKEY=<base64 from /deploy/manifest>
 set NODETRACE_REGISTER_URL=http://localhost:8000/api/v1/register
 python agent.py
 ```
@@ -344,13 +345,14 @@ cd aegis-guard
 set AEGIS_BRAIN_URL=http://localhost:8000/api/v1
 set AEGIS_GATEWAY_URL=http://localhost:8000/api/v1/telemetry/report
 set AEGIS_ENROLL_KEY=<key>
+set AEGIS_MANIFEST_PUBKEY=<base64 from /deploy/manifest>
 jre-new\bin\java.exe -jar target\aegis-guard.jar
 ```
 
 Two details that fail with unreadable errors:
 
 - **A JVM 25+ is required**, and the `java` on the `PATH` is not automatically suitable: if it is an 8, the service installs, starts and dies with `UnsupportedClassVersionError`. The installer verifies the **version** and uses the resolved path, not the `java` string.
-- **`AEGIS_ENROLL_KEY` is mandatory** even when `secret.json` already exists: `Config.ENROLL_KEY` is read at startup with `getEnvOrThrow`, so without it the process exits immediately.
+- **`AEGIS_ENROLL_KEY` is only needed for the first enrollment** when no `secret.json`/`token.json` exists. The one-liner installer writes the single-use token to a `0600` file and sets `AEGIS_ENROLL_TOKEN_FILE`; the token is not persisted in the environment. `AEGIS_MANIFEST_PUBKEY` is mandatory for OTA and is injected by the installer.
 
 ### Standalone agent builds
 

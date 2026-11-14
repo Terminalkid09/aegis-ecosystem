@@ -46,6 +46,10 @@ the tag audit and the release policy.
 - Bumped PyJWT to `2.15.1` for the tracked advisories (AEGIS-LOGIC-009).
 - NodeTrace no longer passes device secrets in `curl` arguments; headers use a
   `0600` config file and the body goes through stdin (AEGIS-SEC-011).
+- OTA updates now require an Ed25519-signed manifest; the HMAC signed with the
+  enrollment key was removed (AEGIS-SEC-002). The one-liner installer writes
+  the single-use enrollment token to a `0600` file instead of the persistent
+  environment and injects the manifest public key.
 - Other findings are documented in the handoff plan; this section lists only
   changes present on `dev`. They ship only after merge.
 
