@@ -18,6 +18,8 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Main {
 
@@ -281,17 +283,61 @@ public class Main {
     }
 
     private static String exec(String... cmd) {
+        ExecResult result = execResult(cmd);
+        return result.exitCode() == -1 ? null : result.output();
+    }
+
+    private record ExecResult(int exitCode, String output) {}
+
+    private static ExecResult execResult(String... cmd) {
         try {
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
             Process p = pb.start();
             String out = new String(p.getInputStream().readAllBytes()).trim();
-            p.waitFor(15, TimeUnit.SECONDS);
-            return out;
+            if (!p.waitFor(15, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                return new ExecResult(-1, out);
+            }
+            return new ExecResult(p.exitValue(), out);
         } catch (Exception e) {
             log.warn("[MITIGATION] exec failed: {} {}", String.join(" ", cmd), e.getMessage());
-            return null;
+            return new ExecResult(-1, e.getMessage() == null ? "" : e.getMessage());
         }
+    }
+
+    record RegistryValue(String key, String name, String data) {}
+
+    private static final Pattern REG_VALUE_PATTERN = Pattern.compile(
+            "^\\s{4}(.+?)\\s{4}REG_[A-Z0-9_]+\\s{4}(.*)$");
+
+    /**
+     * Estrae i valori da `reg query /s` conservando la chiave reale. Senza
+     * questo, una chiave con più valori veniva cancellata per intero con /va.
+     */
+    static List<RegistryValue> parseRegistryValues(String output) {
+        List<RegistryValue> values = new ArrayList<>();
+        if (output == null) return values;
+        String currentKey = null;
+        for (String raw : output.split("\\r?\\n")) {
+            String line = raw.stripTrailing();
+            if (line.startsWith("HKEY_")) {
+                currentKey = line.trim();
+                continue;
+            }
+            if (currentKey == null) continue;
+            Matcher matcher = REG_VALUE_PATTERN.matcher(line);
+            if (matcher.matches()) {
+                values.add(new RegistryValue(currentKey, matcher.group(1).trim(), matcher.group(2)));
+            }
+        }
+        return values;
+    }
+
+    static String[] registryDeleteCommand(String key, String valueName) {
+        // /va cancella il valore di default dell'intera chiave; /v tocca solo
+        // il valore che ha matchato il processo.
+        return new String[]{"reg", "delete", key, "/v", valueName, "/f"};
     }
 
     private static long getPid(JsonObject cmd) {
@@ -486,11 +532,16 @@ public class Main {
     //  REMOVE_PERSISTENCE
     // ----------------------------------------------------------------
 
-    private static void handleRemovePersistence(JsonObject cmd) {
+    static void handleRemovePersistence(JsonObject cmd) {
         String processName = getProcessName(cmd);
         if (processName.isEmpty() || "unknown".equals(processName)) {
             throw new IllegalArgumentException("REMOVE_PERSISTENCE: no process_name provided");
         }
+        if (!isWindows()) {
+            throw new UnsupportedOperationException(
+                    "REMOVE_PERSISTENCE is not supported on this platform");
+        }
+        String needle = processName.toLowerCase(Locale.ROOT);
 
         List<String> removed = new ArrayList<>();
 
@@ -506,9 +557,18 @@ public class Main {
             };
             for (String key : regKeys) {
                 String out = exec("reg", "query", key, "/s");
-                if (out != null && out.toLowerCase().contains(processName.toLowerCase())) {
-                    exec("reg", "delete", key, "/f", "/va");
-                    removed.add("registry:" + key);
+                if (out == null) continue;
+                for (RegistryValue value : parseRegistryValues(out)) {
+                    if (value.name().isBlank() || "(Default)".equalsIgnoreCase(value.name())) continue;
+                    String haystack = (value.name() + " " + value.data()).toLowerCase(Locale.ROOT);
+                    if (!haystack.contains(needle)) continue;
+                    ExecResult deleted = execResult(registryDeleteCommand(value.key(), value.name()));
+                    if (deleted.exitCode() == 0) {
+                        removed.add("registry:" + value.key() + "\\" + value.name());
+                    } else {
+                        log.warn("[MITIGATION] REMOVE_PERSISTENCE: reg delete failed for {}: {}",
+                                value.name(), deleted.output());
+                    }
                 }
             }
 
@@ -519,8 +579,13 @@ public class Main {
                 for (String line : tasks.split("\\r?\\n")) {
                     if (line.toLowerCase().contains(pn)) {
                         String taskName = line.contains(",") ? line.split(",")[0].replace("\"", "").trim() : line.trim();
-                        exec("schtasks", "/delete", "/f", "/tn", taskName);
-                        removed.add("scheduled_task:" + taskName);
+                        ExecResult deleted = execResult("schtasks", "/delete", "/f", "/tn", taskName);
+                        if (deleted.exitCode() == 0) {
+                            removed.add("scheduled_task:" + taskName);
+                        } else {
+                            log.warn("[MITIGATION] REMOVE_PERSISTENCE: schtasks delete failed for {}: {}",
+                                    taskName, deleted.output());
+                        }
                     }
                 }
             }
@@ -534,8 +599,13 @@ public class Main {
                         String svcName = parts.length > 0 ? parts[parts.length - 1] : "";
                         if (!svcName.isEmpty()) {
                             exec("sc", "stop", svcName);
-                            exec("sc", "delete", svcName);
-                            removed.add("service:" + svcName);
+                            ExecResult deleted = execResult("sc", "delete", svcName);
+                            if (deleted.exitCode() == 0) {
+                                removed.add("service:" + svcName);
+                            } else {
+                                log.warn("[MITIGATION] REMOVE_PERSISTENCE: sc delete failed for {}: {}",
+                                        svcName, deleted.output());
+                            }
                         }
                     }
                 }
@@ -549,8 +619,9 @@ public class Main {
                 if (startup.isDirectory()) {
                     for (File sf : startup.listFiles()) {
                         if (sf.getName().toLowerCase().contains(processName.toLowerCase())) {
-                            sf.delete();
-                            removed.add("startup:" + sf.getAbsolutePath());
+                            if (sf.delete()) {
+                                removed.add("startup:" + sf.getAbsolutePath());
+                            }
                         }
                     }
                 }
@@ -560,50 +631,19 @@ public class Main {
                 if (startup2.isDirectory()) {
                     for (File sf : startup2.listFiles()) {
                         if (sf.getName().toLowerCase().contains(processName.toLowerCase())) {
-                            sf.delete();
-                            removed.add("startup:" + sf.getAbsolutePath());
-                        }
-                    }
-                }
-            }
-        } else {
-            // Unix: crontab
-            String cron = exec("crontab", "-l");
-            if (cron != null) {
-                for (String line : cron.split("\\r?\\n")) {
-                    if (line.toLowerCase().contains(processName.toLowerCase())) {
-                        removed.add("cron:" + line.trim());
-                    }
-                }
-            }
-            // systemd units
-            for (String dir : new String[]{"/etc/systemd/system", "/lib/systemd/system"}) {
-                File d = new File(dir);
-                if (d.isDirectory()) {
-                    for (File uf : d.listFiles()) {
-                        if (uf.getName().toLowerCase().contains(processName.toLowerCase())) {
-                            removed.add("systemd:" + uf.getName());
-                        }
-                    }
-                }
-            }
-            // Shell init files
-            String home = System.getProperty("user.home");
-            for (String sf : new String[]{".bashrc", ".zshrc", ".profile", ".bash_profile"}) {
-                File f = new File(home, sf);
-                if (f.isFile()) {
-                    try {
-                        String content = new String(Files.readAllBytes(f.toPath()));
-                        for (String line : content.split("\\r?\\n")) {
-                            if (line.toLowerCase().contains(processName.toLowerCase())) {
-                                removed.add("shell_init:" + sf + ":" + line.trim());
+                            if (sf.delete()) {
+                                removed.add("startup:" + sf.getAbsolutePath());
                             }
                         }
-                    } catch (IOException ignored) {}
+                    }
                 }
             }
         }
 
+        if (removed.isEmpty()) {
+            log.info("[MITIGATION] REMOVE_PERSISTENCE: nothing removed for {}", processName);
+            throw new IllegalStateException("REMOVE_PERSISTENCE: no matching persistence removed");
+        }
         log.info("[MITIGATION] REMOVE_PERSISTENCE: {} entries removed for {}", removed.size(), processName);
     }
 

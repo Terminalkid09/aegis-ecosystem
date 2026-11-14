@@ -53,6 +53,9 @@ the tag audit and the release policy.
 - Re-enrollment of an existing hostname now requires a token issued for that
   host; the static enrollment key only creates new agents. Agents send a
   machine-id, of which the Brain stores only the hash (AEGIS-SEC-001).
+- `REMOVE_PERSISTENCE` deletes only the matching registry value instead of the
+  whole Run key; Linux reports `unsupported` instead of a false `ok`
+  (AEGIS-SEC-007).
 - Other findings are documented in the handoff plan; this section lists only
   changes present on `dev`. They ship only after merge.
 
