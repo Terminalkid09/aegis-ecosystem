@@ -1,7 +1,7 @@
 # Pilot runbook — Aegis on-premise (≤100 agent, Fase 9)
 
 Verificato su: **Windows 11** (Guard nativo + ETW degradato), **Ubuntu 24.04** (WSL2, eBPF full, BTF ok), **Debian 12** container (eBPF build+test). **Non verificati** (dichiarati): Windows Server 2022/2025, RHEL 9, eBPF su kernel 5.14 senza BTF — richiedono lab dedicato prima di dichiarare compatibilità.
-Requisiti: Docker + Compose v2, Python 3.10+, `POSTGRES_PORT=5444` / `REDIS_PORT_EXTERNAL=6388` liberi, `BACKUP_PASSPHRASE` robusta (≥32 char), `AEGIS_TENANT` non impostato per prod.
+Requisiti: Docker + Compose v2, Python 3.15+, `POSTGRES_PORT=5444` / `REDIS_PORT_EXTERNAL=6388` liberi, `BACKUP_PASSPHRASE` robusta (≥32 char), `AEGIS_TENANT` non impostato per prod.
 
 ## 1. Installazione pulita
 
@@ -11,7 +11,7 @@ Copy-Item .env.example .env  # valorizza TUTTI i replace-with-*
 .\install.ps1 lab
 docker compose ps  # brain healthy, caddy healthy
 Invoke-WebRequest http://localhost:8000/health/live -UseBasicParsing
-# Guard nativo: aegis-guard\install\windows\install.ps1  (richiede Java 21 + NSSM, verifica ACL + hash)
+# Guard nativo: aegis-guard\install\windows\install.ps1  (richiede Java 25 + NSSM, verifica ACL + hash)
 ```
 
 ### Ubuntu 24.04 / Debian 12 (lab)
@@ -35,7 +35,7 @@ comando installa due servizi, non due processi legati alla sessione utente.
 Su Windows il comando richiede PowerShell elevato e crea servizi automatici
 con restart-on-crash. Su Linux richiede root e crea unità systemd con
 `systemctl enable --now`; entrambi i percorsi falliscono esplicitamente se
-manca il runtime (`Java 21+` per Guard o l'eseguibile NodeTrace).
+manca il runtime (`Java 25+` per Guard o l'eseguibile NodeTrace).
 
 La checkbox dashboard remota configura l'URL Brain. La dashboard locale non è
 ancora un artefatto distribuibile: il backend rifiuta questa scelta invece di

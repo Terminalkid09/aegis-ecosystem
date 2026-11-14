@@ -13,7 +13,7 @@ A cross-platform Python agent for the NodeTrace monitoring system. Collects comp
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.15+
 - psutil >= 5.9.0
 - requests >= 2.28.0
 

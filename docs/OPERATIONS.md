@@ -13,7 +13,7 @@ docker compose ps                    # tutti healthy
 curl -sk https://aegis.local/api/v1/health  # {"status":"ok"}
 ```
 
-Prerequisiti: Docker + Compose v2, Python 3.10+ per `scripts/run_integration_tests.py`,
+Prerequisiti: Docker + Compose v2, Python 3.15+ per `scripts/run_integration_tests.py`,
 `POSTGRES_PORT`/`REDIS_PORT_EXTERNAL` raggiungibili su 127.0.0.1. Vedi
 `scripts/run_integration_tests.py --help` e `aegis-brain/tests/conftest.py`
 (`TEST_DATABASE_URL`/`REQUIRE_INTEGRATION=1` per CI fail-closed).
@@ -54,7 +54,7 @@ Dentro l'artefatto di Guard finiscono `aegis-guard.jar`, il `jre/` incluso
 `bin/yara64.exe`. Manca il runtime → lo script fallisce; manca un pezzo
 opzionale (collector ETW, YARA) → lo dichiara e Guard degrada dicendolo
 (`quality=degraded:etw-...`). Sul target serve **admin** (registrazione
-servizio + sessione di trace ETW) e **Java 21+**, incluso nell'artefatto o
+servizio + sessione di trace ETW) e **Java 25+**, incluso nell'artefatto o
 installato lì: la versione viene verificata, non solo la presenza (`java` 8
 avviva un servizio che muore con `UnsupportedClassVersionError`).
 
