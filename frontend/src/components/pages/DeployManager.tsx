@@ -25,6 +25,7 @@ export default function DeployManager() {
   // Token Form
   const [tokenLabel, setTokenLabel] = useState('')
   const [tokenAgent, setTokenAgent] = useState('aegis-guard')
+  const [tokenTargetHost, setTokenTargetHost] = useState('')
   const [dashboardRemote, setDashboardRemote] = useState(true)
   const [lastToken, setLastToken] = useState<any>(null)
   const [copied, setCopied] = useState('')
@@ -53,11 +54,13 @@ export default function DeployManager() {
     mutationFn: () => deployAPI.createToken({
       label: tokenLabel || undefined,
       agent_type: tokenAgent,
+      target_hostname: tokenTargetHost.trim() || undefined,
       dashboard_remote: dashboardRemote,
     }),
     onSuccess: (res) => {
       setLastToken(res.data)
       setTokenLabel('')
+      setTokenTargetHost('')
       setMsg('Single-use token created (expires in 15m). Do not commit this.')
       qc.invalidateQueries({ queryKey: ['deploy-tokens'] })
     },
@@ -148,6 +151,10 @@ export default function DeployManager() {
               <option value="both">Both agents</option>
             </select>
           </div>
+          <div className="space-y-1">
+            <input value={tokenTargetHost} onChange={e => setTokenTargetHost(e.target.value)} placeholder="Target hostname (re-enrollment only)" className="input w-full" />
+            <p className="text-[10px] text-[hsl(var(--muted-foreground))]">Leave empty for a first install. Set it to the existing hostname when replacing an already-enrolled device.</p>
+          </div>
           <div className="space-y-2 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] p-3 text-xs">
             <label className="flex items-center gap-2 text-white">
               <input type="checkbox" checked={dashboardRemote} onChange={e => setDashboardRemote(e.target.checked)} />
@@ -188,7 +195,7 @@ export default function DeployManager() {
                   )}
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-[hsl(var(--muted-foreground))]">
-                  <span className="uppercase">{t.agent_type}</span>
+                  <span className="uppercase">{t.agent_type}{t.target_hostname ? ` · ${t.target_hostname}` : ''}</span>
                   <span className={cn('px-1.5 py-0.5 rounded font-bold uppercase', t.revoked ? 'bg-red-500/10 text-red-400' : t.used_at ? 'bg-blue-500/10 text-blue-400' : 'bg-emerald-500/10 text-emerald-400')}>
                     {t.revoked ? 'Revoked' : t.used_at ? 'Used' : 'Active'}
                   </span>
