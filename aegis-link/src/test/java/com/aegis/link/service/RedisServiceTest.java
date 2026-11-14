@@ -25,7 +25,7 @@ class RedisServiceTest {
     private ListOperations<String, Object> listOperations;
 
     @Mock
-    private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private tools.jackson.databind.ObjectMapper objectMapper;
 
     @InjectMocks
     private RedisService redisService;
