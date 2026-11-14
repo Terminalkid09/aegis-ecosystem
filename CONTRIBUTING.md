@@ -1,16 +1,9 @@
 # Contributing
 
-## License and sign-off
+## License
 
 By contributing, you agree to license your contribution under
-**AGPL-3.0-only** and to the Developer Certificate of Origin (DCO) 1.1.
-Sign every commit with:
-
-```bash
-git commit -s
-```
-
-There is no CLA.
+**AGPL-3.0-only**. There is no CLA.
 
 ## Commit rules
 

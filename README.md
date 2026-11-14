@@ -573,7 +573,7 @@ GitHub Actions runs on every push: lint (flake8 + ESLint), secret scanning, even
 Aegis Ecosystem is licensed under **AGPL-3.0-only**. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
 The name and logo are governed by [`TRADEMARK.md`](TRADEMARK.md) and are not licensed under the AGPL.
 
-Security reports: [`SECURITY.md`](SECURITY.md). Contributions: [`CONTRIBUTING.md`](CONTRIBUTING.md), DCO sign-off, no CLA.
+Security reports: [`SECURITY.md`](SECURITY.md). Contributions: [`CONTRIBUTING.md`](CONTRIBUTING.md), no CLA.
 
 ---
 

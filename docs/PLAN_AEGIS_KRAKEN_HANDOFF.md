@@ -639,7 +639,7 @@ Questo cancello non è codice: è ciò che separa un repository da un prodotto. 
 | # | ID | Azione | Effort | Verifica |
 |---|---|---|---|---|
 | 1 | AEGIS-REL-001 | Licenza **AGPL-3.0-only** (D1): `LICENSE`, `NOTICE`, `TRADEMARK.md`, `THIRD_PARTY_NOTICES.md`, header SPDX nei file nuovi | 2–4 h | `LICENSE` presente; check CI; SPDX coerente |
-| 2 | — | `SECURITY.md` con disclosure policy, scope, tempi di risposta; `CONTRIBUTING.md` con DCO/CLA se open | 4 h | file presenti; link dal README |
+| 2 | — | `SECURITY.md` con disclosure policy, scope, tempi di risposta; `CONTRIBUTING.md` con licenza, regole di commit e pull request | 4 h | file presenti; link dal README |
 | 3 | AEGIS-REL-002 | Release pipeline completa: immagini Brain/Link/Frontend, NodeTrace, Guard, compose bundle, SBOM per componente, checksum, firma cosign, `CHANGELOG.md`, `UPGRADING.md` | 2–3 gg | release `rc` installabile dagli artefatti su una macchina pulita |
 | 4 | — | Privacy/GDPR: registro trattamenti, DPA template, retention dichiarata, data residency; per Kraken, dati degli attaccanti separati | 1–2 gg (legale) | documenti firmabili; nessun dato personale nei log |
 | 5 | — | Nome e marchio: ricerca «Aegis» (molti prodotti omonimi), verifica trademark, dominio, package name | 0,5 gg | parere; naming alternativo se necessario |
@@ -1655,7 +1655,7 @@ Regola finale: **nessuna feature, nessun refactor estetico, nessuna nuova dipend
 - Tipi ammessi: `feat`, `fix`, `docs`, `test`, `chore`, `refactor`, `perf`, `ci`, `build`. Un commit = un tipo.
 - Niente nomi di vendor/prodotti usati come riferimento interno, niente co-autore, niente trailer o footer che citino AI.
 - Il messaggio dice **perché**, non solo cosa. Se il commit chiude un finding, cita l'ID (`KRAKEN-SEC-001`), non il nome del vendor.
-- Firmato con DCO (`git commit -s`); nessun CLA. Il DCO dichiara la provenienza del contributo; non sostituisce un parere legale.
+- Nessun CLA; il contributo è rilasciato sotto AGPL-3.0-only.
 
 ### B.2 Push e PR
 
