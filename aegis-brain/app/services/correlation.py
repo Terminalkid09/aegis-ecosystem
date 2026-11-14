@@ -26,7 +26,8 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import redis.asyncio as redis_lib
-import yaml
+from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -138,13 +139,14 @@ def load_correlation_rules(directory: Optional[str] = None) -> List[CorrelationR
     base = directory or DEFAULT_RULES_DIR
     if not os.path.isdir(base):
         return rules
+    yaml = YAML(typ="safe")
     for name in sorted(os.listdir(base)):
         if not name.lower().endswith((".yml", ".yaml")):
             continue
         try:
             with open(os.path.join(base, name), encoding="utf-8") as fh:
-                documents = list(yaml.safe_load_all(fh))
-        except (OSError, yaml.YAMLError) as exc:
+                documents = list(yaml.load_all(fh))
+        except (OSError, YAMLError) as exc:
             logger.warning(f"Regola di correlazione non leggibile ({name}): {exc}")
             continue
         for doc in documents:

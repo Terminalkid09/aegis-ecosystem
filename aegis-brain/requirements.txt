@@ -1,46 +1,48 @@
-fastapi==0.141.1
-python-multipart==0.0.32
-uvicorn[standard]==0.32.1
-sqlalchemy==2.0.36
-alembic==1.13.1
-asyncpg==0.29.0
-psycopg2-binary==2.9.10
-redis==5.2.0
-pydantic==2.9.2
-pydantic-settings==2.6.1
-python-dotenv==1.2.3
-pytest==9.1.1
-pytest-asyncio==1.4.0
-aiosqlite==0.20.0
-httpx==0.27.2
+fastapi==0.162.7
+python-multipart==0.0.33
+uvicorn==0.54.0
+sqlalchemy==2.1.8
+alembic==1.20.1
+asyncpg==0.32.0
+psycopg2-binary==2.9.13
+redis==8.1.0
+pydantic==2.14.3
+pydantic-settings==2.16.3
+python-dotenv==1.2.4
+pytest==9.2.0
+pytest-asyncio==1.5.0
+aiosqlite==0.22.1
+httpx==0.28.1
 # Security / Auth (post-audit: python-jose rimosso — API rotta + CVE senza fix;
 # i token legacy HS256 standard sono verificati da PyJWT senza fallback)
-PyJWT==2.14.0
-pwdlib[argon2]==0.2.1
+PyJWT==2.15.1
+pwdlib[argon2]==0.4.0
 passlib[argon2]==1.7.4
-argon2-cffi==23.1.0
+argon2-cffi==25.1.0
 # Cryptography (for AES-GCM encryption)
-cryptography==50.0.1
-# MongoDB migration helper
-pymongo>=4.9.0,<4.10.0
-motor>=3.6.0
-numpy==1.26.4
+cryptography==50.0.2
+numpy==2.5.4
 # Rate limiting
-slowapi==0.1.9
+slowapi==0.1.10
 # Structured logging
-python-json-logger==2.0.7
+python-json-logger==4.2.0
 # Circuit breaker
-pybreaker==0.8.0
+pybreaker==1.4.1
 # Disassembler PE per Aegis Total (motore fail-soft: se manca, lo dichiara).
-capstone>=5.0.1,<6.0.0
+capstone>=5.0.9,<6.0.0
 # Linting and testing
-ruff==0.6.8
-bandit==1.7.5
-pbr==6.1.0
-pytest-cov==4.1.0
-responses==0.24.1
-pytest-mock==3.13.0
-locust==2.32.5
+ruff==0.17.5
+# YAML runtime: ruamel.yaml e' pure-Python e non richiede MSVC su Windows.
+# PyYAML non ha una wheel CPython 3.15 per Windows (usato solo da bandit).
+ruamel.yaml==0.19.1
+# Bandit dipende da PyYAML: resta un tool di lint, installato a parte in CI.
+bandit==1.9.4; python_version < "3.15"
+pbr==7.1.3
+pytest-cov==7.1.0
+pytest-mock==3.17.0
+locust==2.47.0
 
-
-yara-python==4.5.4
+# yara-python 4.5.4 non ha ancora una wheel CPython 3.15 su PyPI.
+# Il motore YARA è già fail-soft (YARA_AVAILABLE=False + motivo esplicito),
+# quindi su 3.15 la funzione resta dichiarata come non disponibile.
+yara-python==4.5.4; python_version < "3.15"
