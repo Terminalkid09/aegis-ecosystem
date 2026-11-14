@@ -1,6 +1,6 @@
 <h1 align="center">Aegis Ecosystem</h1>
 <p align="center">
-  <strong>Open-Source XDR / SIEM Platform</strong><br/>
+  <strong>Open-Source SOC-in-a-Box</strong><br/>
   Endpoint detection &amp; response, multi-source SIEM ingestion, Sigma rules, SOAR playbooks and OSINT enrichment — in one local-first stack.
 </p>
 
@@ -17,9 +17,9 @@
 
 <p align="center">
   <a href="https://github.com/Terminalkid09/aegis-ecosystem/actions/workflows/ci.yml"><img src="https://github.com/Terminalkid09/aegis-ecosystem/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12" />
-  <img src="https://img.shields.io/badge/java-21-orange?style=flat-square&logo=openjdk&logoColor=white" alt="Java 21" />
-  <img src="https://img.shields.io/badge/spring%20boot-3-6DB33F?style=flat-square&logo=spring&logoColor=white" alt="Spring Boot" />
+  <img src="https://img.shields.io/badge/python-3.15-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.15" />
+  <img src="https://img.shields.io/badge/java-25-orange?style=flat-square&logo=openjdk&logoColor=white" alt="Java 25" />
+  <img src="https://img.shields.io/badge/spring%20boot-4-6DB33F?style=flat-square&logo=spring&logoColor=white" alt="Spring Boot" />
   <img src="https://img.shields.io/badge/react-19-61dafb?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/postgres-16-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL 16" />
   <img src="https://img.shields.io/badge/redis-7-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis 7" />
@@ -151,7 +151,7 @@
 
 ### One command (recommended)
 
-Serve **Docker Desktop running** and **Python 3.10+**. Nothing else to start: the `.env` (random secrets), agent builds if missing, stack startup, admin bootstrap and smoke test are all guided by the same command.
+Serve **Docker Desktop running** and **Python 3.15+**. Nothing else to start: the `.env` (random secrets), agent builds if missing, stack startup, admin bootstrap and smoke test are all guided by the same command.
 
 ```bash
 git clone https://github.com/Terminalkid09/aegis-ecosystem.git
@@ -174,8 +174,8 @@ python scripts/setup.py update --rebuild-agents   # also recompile host agents
 
 | Needed | When |
 |---|---|
-| Docker Desktop (running) + Python 3.10+ | always (`setup.py` preflight stops and says so if missing) |
-| JDK 21+ and Maven | only if agent artifacts don't exist and must be built (Windows: `build.bat` is invoked for you) |
+| Docker Desktop (running) + Python 3.15+ | always (`setup.py` preflight stops and says so if missing) |
+| JDK 25+ and Maven | only if agent artifacts don't exist and must be built (Windows: `build.bat` is invoked for you) |
 | `nssm.exe` | **downloaded by `setup.py`** with pinned SHA-256 — used to install agents as Windows services |
 | `yara64.exe` | **downloaded by `setup.py`** with pinned SHA-256 — used for on-endpoint YARA scans |
 
@@ -275,7 +275,7 @@ Aegis is built as a set of small services that speak one event model.
 | --- | --- | --- |
 | `aegis-brain` | FastAPI, SQLAlchemy, PostgreSQL, Redis | API, auth, telemetry processing, rules, alerts, VaultX, AI/OSINT, SOAR playbooks, syslog ingestion, audit logging |
 | `aegis-link` | Spring Boot | Agent/syslog ingestion gateway; pushes events to Redis |
-| `aegis-guard` | Java 21 | Endpoint security agent and mitigation command consumer |
+| `aegis-guard` | Java 25 | Endpoint security agent and mitigation command consumer |
 | `NodeTrace` | Python | Host telemetry agent for CPU/RAM/process/users/network flows |
 | `frontend` | React 19, TypeScript, Vite | Dashboard for alerts, agents, rules, VaultX, OSINT, AI, playbooks, syslog viewer, audit log |
 
@@ -326,7 +326,7 @@ python scripts/pack-artifacts.py            # -> aegis-brain/artifacts/*-latest.
 python scripts/pack-artifacts.py --version v4.0.0
 ```
 
-It packs exactly what a local install copies: `aegis-guard.jar`, a bundled `jre/` when `build.bat` produced one, `aegis-etw.exe` (kernel telemetry) and `bin/yara64.exe` for Guard; the full PyInstaller bundle for NodeTrace. Missing runtime = hard failure; missing optional piece = declared in the output (`python -m ...`-style honesty, no silent gaps). What the target needs: **Administrator** (service registration + ETW trace session), and a **Java 21+** runtime — either bundled in the artifact or installed there (`Get-JavaMajor` verifies the version, because a Java 8 on `PATH` installs a service that starts and dies with `UnsupportedClassVersionError`).
+It packs exactly what a local install copies: `aegis-guard.jar`, a bundled `jre/` when `build.bat` produced one, `aegis-etw.exe` (kernel telemetry) and `bin/yara64.exe` for Guard; the full PyInstaller bundle for NodeTrace. Missing runtime = hard failure; missing optional piece = declared in the output (`python -m ...`-style honesty, no silent gaps). What the target needs: **Administrator** (service registration + ETW trace session), and a **Java 25+** runtime — either bundled in the artifact or installed there (`Get-JavaMajor` verifies the version, because a Java 8 on `PATH` installs a service that starts and dies with `UnsupportedClassVersionError`).
 
 ### Development mode (agents)
 
@@ -349,7 +349,7 @@ jre-new\bin\java.exe -jar target\aegis-guard.jar
 
 Two details that fail with unreadable errors:
 
-- **A JVM 21+ is required**, and the `java` on the `PATH` is not automatically suitable: if it is an 8, the service installs, starts and dies with `UnsupportedClassVersionError`. The installer verifies the **version** and uses the resolved path, not the `java` string.
+- **A JVM 25+ is required**, and the `java` on the `PATH` is not automatically suitable: if it is an 8, the service installs, starts and dies with `UnsupportedClassVersionError`. The installer verifies the **version** and uses the resolved path, not the `java` string.
 - **`AEGIS_ENROLL_KEY` is mandatory** even when `secret.json` already exists: `Config.ENROLL_KEY` is read at startup with `getEnvOrThrow`, so without it the process exits immediately.
 
 ### Standalone agent builds
@@ -361,7 +361,7 @@ Pre-compiled agents ship without Python/JDK runtime dependencies:
 | NodeTrace | PyInstaller | `NodeTrace/agents/python/dist/nodetrace-agent/nodetrace-agent.exe` | 15 MB (bundled) |
 | Aegis-Guard | Maven + jlink | `aegis-guard/target/aegis-guard.jar` + `jre-new/` | 47 MB (minimal JRE) |
 
-Build all agents with a single command: `build.bat`. If `JAVA_HOME` still points at a JRE 8, `mvn test` fails with a confusing `class file version 65.0 ... only recognizes up to 52.0` (stale classes) even though compile reports success — point it at a JDK 21+ first.
+Build all agents with a single command: `build.bat`. If `JAVA_HOME` still points at a JRE 8, `mvn test` fails with a confusing `class file version 65.0 ... only recognizes up to 52.0` (stale classes) even though compile reports success — point it at a JDK 25+ first.
 
 ---
 
@@ -565,6 +565,15 @@ aegis-ecosystem/
 ### CI/CD
 
 GitHub Actions runs on every push: lint (flake8 + ESLint), secret scanning, event-contract checks, Windows installer checks, OS-compat matrix (ubuntu + windows), brain + guard + frontend tests, pip-audit, Trivy image scanning (strict on images we build, informational on upstream images), and SBOM generation. Release jobs run on tags.
+
+---
+
+## License
+
+Aegis Ecosystem is licensed under **AGPL-3.0-only**. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+The name and logo are governed by [`TRADEMARK.md`](TRADEMARK.md) and are not licensed under the AGPL.
+
+Security reports: [`SECURITY.md`](SECURITY.md). Contributions: [`CONTRIBUTING.md`](CONTRIBUTING.md), DCO sign-off, no CLA.
 
 ---
 
