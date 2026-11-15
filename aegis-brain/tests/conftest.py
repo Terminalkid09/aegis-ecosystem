@@ -252,6 +252,19 @@ async def setup_database():
 
 
 @pytest.fixture
+def require_db():
+    """Skip DB-only tests unless Postgres is reachable.
+
+    The integration suite normally depends on the db_session fixture, but a
+    few tests open their own AsyncSessionLocal (listeners, retention) and
+    otherwise fail with ConnectionRefused instead of skipping. CI still runs
+    them with REQUIRE_INTEGRATION=1 and fails if the database is missing.
+    """
+    if not _db_available:
+        pytest.skip("Database not available")
+
+
+@pytest.fixture
 async def db_session():
     if not _db_available:
         pytest.skip("Database not available")
