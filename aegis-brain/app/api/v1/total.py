@@ -328,6 +328,17 @@ def _safe_member_name(name: str) -> str:
     return "/".join(parts)[:400] or "(unnamed)"
 
 
+def _read_zip_member(zf: zipfile.ZipFile, name: str, limit: int) -> bytes:
+    """Legge al massimo `limit` byte decompressi di una voce ZIP.
+
+    `ZipInfo.file_size` e' dichiarato nell'header e non e' affidabile: un
+    archivio puo' mentire. La lettura incrementale impone il cap anche quando
+    l'header dice il falso.
+    """
+    with zf.open(name) as fh:
+        return fh.read(max(0, limit))
+
+
 # ─── PE ───────────────────────────────────────────────────────────────────────
 
 def _pe_sections(raw: bytes, sec_off: int, num_sections: int) -> Tuple[List[Dict[str, Any]], float, int]:
@@ -708,7 +719,7 @@ def _analyze_ooxml(raw: bytes, zf: zipfile.ZipFile) -> Dict[str, Any]:
         if len(text_sample) > 2 * 1024 * 1024:
             break
         try:
-            text_sample += zf.read(n)[:200000].decode("utf-8", errors="ignore") + "\n"
+            text_sample += _read_zip_member(zf, n, 200000).decode("utf-8", errors="ignore") + "\n"
         except Exception:
             continue
     result["findings"].extend(_office_findings_from_text(text_sample, "OOXML"))
@@ -724,7 +735,7 @@ def _analyze_ooxml(raw: bytes, zf: zipfile.ZipFile) -> Dict[str, Any]:
     for n in names[:200]:
         try:
             if n.lower().endswith((".bin", ".exe", ".dll", ".scr")):
-                head = zf.read(n)[:4]
+                head = _read_zip_member(zf, n, 4)
                 if head[:2] == b"MZ":
                     result["findings"].append({
                         "type": "ooxml_embedded_pe", "severity": "critical",
@@ -866,7 +877,8 @@ def _analyze_zip(raw: bytes, *, max_files: int, max_bytes: int,
         score += 20
 
     extracted: List[Dict[str, Any]] = []
-    budget = max_bytes
+    budget = min(max(0, max_bytes), TOTAL_UNCOMPRESSED_MAX)
+    bomb_suspected = declared > TOTAL_UNCOMPRESSED_MAX
     for info in infos[:max_files]:
         name = info.filename
         if name.startswith("/") or ".." in name or info.is_dir():
@@ -877,9 +889,21 @@ def _analyze_zip(raw: bytes, *, max_files: int, max_bytes: int,
                               "findings": [{"type": "entry_too_large", "severity": "medium",
                                             "detail": f"Voce da {info.file_size // (1024 * 1024)} MB non estratta (cap per-file)."}]})
             continue
+        if budget <= 0:
+            truncated = True
+            findings.append({"type": "budget_exhausted", "severity": "low",
+                             "detail": "Analysis budget exhausted: remaining files not analyzed."})
+            break
+        limit = min(PER_ENTRY_MAX_BYTES, budget)
         try:
-            content = zf.read(name)
+            content = _read_zip_member(zf, name, limit + 1)
         except Exception:
+            continue
+        if len(content) > limit:
+            bomb_suspected = True
+            findings.append({"type": "entry_too_large", "severity": "medium",
+                             "detail": f"{_safe_member_name(name)}: decompression exceeds the "
+                                       f"{limit // (1024 * 1024)} MB per-entry/budget cap."})
             continue
         budget -= len(content)
         entry = _analyze_bytes(
@@ -901,29 +925,48 @@ def _analyze_zip(raw: bytes, *, max_files: int, max_bytes: int,
         "kind": "archive", "format": "ZIP" + (" (APK)" if is_apk else " (JAR)" if is_jar else ""),
         "score": min(score, 100), "findings": findings,
         "analyzed_members": len(extracted), "total_members": len(infos), "truncated": truncated,
-        "extracted": extracted,
+        "bomb_suspected": bomb_suspected, "extracted": extracted,
     }
 
 
 def _analyze_tar_like(raw: bytes, fmt: str, name: str = "archive") -> Optional[Dict[str, Any]]:
-    """tar/gzip/bzip2/xz: listing + analisi per-file (bounded)."""
+    """tar/gzip/bzip2/xz: streaming, con cap per-file e cap totale.
+
+    `gzip.decompress(raw)` decomprompeva l'intero payload prima di applicare
+    il cap: una bomba 1:1000 esauriva la RAM del worker. Qui il flusso viene
+    letto incrementale e non viene mai materializzato oltre il budget.
+    """
+    if fmt not in ("tar", "gzip", "bzip2", "xz"):
+        return None
     try:
-        if fmt == "tar":
-            stream: Any = io.BytesIO(raw)
-        elif fmt == "gzip":
-            stream = io.BytesIO(gzip.decompress(raw))
-        elif fmt == "bzip2":
-            stream = io.BytesIO(bz2.decompress(raw))
-        elif fmt == "xz":
-            stream = io.BytesIO(lzma.decompress(raw))
-        else:
-            return None
-        if not tarfile.is_tarfile(stream):  # type: ignore[arg-type]
-            # Stream compresso di un singolo file (.gz di un campione): si
-            # analizza il contenuto decompresso, non solo l'involucro.
-            stream.seek(0)  # type: ignore[union-attr]
-            expanded = stream.read(PER_ENTRY_MAX_BYTES + 1)  # type: ignore[union-attr]
+        findings: List[Dict[str, Any]] = []
+        bomb_suspected = False
+        mode = {"tar": "r:", "gzip": "r|gz", "bzip2": "r|bz2", "xz": "r|xz"}[fmt]
+        try:
+            tf = tarfile.open(fileobj=io.BytesIO(raw), mode=mode)
+        except tarfile.TarError:
+            tf = None
+
+        if tf is None:
+            # Stream compresso di un singolo file (.gz di un campione): il
+            # decompressore legge solo il cap, non tutto l'output.
+            if fmt == "tar":
+                return {"kind": "archive", "format": "TAR", "score": 5,
+                        "findings": [{"type": "decompression_error", "severity": "medium",
+                                      "detail": "tar non leggibile."}],
+                        "extracted": [], "truncated": False, "bomb_suspected": False}
+            if fmt == "gzip":
+                fh = gzip.GzipFile(fileobj=io.BytesIO(raw))
+            elif fmt == "bzip2":
+                fh = bz2.BZ2File(io.BytesIO(raw))
+            else:
+                fh = lzma.LZMAFile(io.BytesIO(raw))
+            with fh:
+                expanded = fh.read(PER_ENTRY_MAX_BYTES + 1)
             if len(expanded) > PER_ENTRY_MAX_BYTES:
+                bomb_suspected = True
+                findings.append({"type": "entry_too_large", "severity": "medium",
+                                 "detail": f"{fmt.upper()} stream exceeds the per-entry cap."})
                 expanded = expanded[:PER_ENTRY_MAX_BYTES]
             base_name = re.sub(r"\.(gz|bz2|xz|tgz|txz)$", "", name, flags=re.I) or "decompressed.bin"
             detail = _analyze_bytes(expanded, base_name, allow_nested=False, nested_depth=1)
@@ -933,38 +976,56 @@ def _analyze_tar_like(raw: bytes, fmt: str, name: str = "archive") -> Optional[D
             })
             detail["format"] = f"{fmt.upper()}>" + str(detail.get("format", "BINARY"))
             detail["kind"] = "binary"
+            detail["bomb_suspected"] = bomb_suspected
             return detail
-        stream.seek(0)  # type: ignore[union-attr]
+
         extracted: List[Dict[str, Any]] = []
-        findings: List[Dict[str, Any]] = []
-        with tarfile.open(fileobj=stream) as tf:  # type: ignore[arg-type]
-            members = tf.getmembers()
-            for m in members[:200]:
+        seen = 0
+        truncated = False
+        budget = TOTAL_UNCOMPRESSED_MAX
+        with tf:
+            # In mode `r|gz`/`r|bz2`/`r|xz` il TarFile e' uno stream: non si
+            # puo' chiamare getmembers() e poi extractfile() (il flusso e' gia'
+            # stato consumato). Si itera il TarFile e si legge il membro corrente.
+            for m in tf:
+                seen += 1
+                if seen > 200:
+                    truncated = True
+                    break
                 if not m.isfile():
                     continue
+                if budget <= 0:
+                    truncated = True
+                    findings.append({"type": "budget_exhausted", "severity": "low",
+                                     "detail": "Analysis budget exhausted: remaining files not analyzed."})
+                    break
+                limit = min(PER_ENTRY_MAX_BYTES, budget)
                 try:
                     fh = tf.extractfile(m)
                     if fh is None:
                         continue
-                    content = fh.read(PER_ENTRY_MAX_BYTES + 1)
+                    content = fh.read(limit + 1)
                 except Exception:
                     continue
-                if len(content) > PER_ENTRY_MAX_BYTES:
+                if len(content) > limit:
+                    bomb_suspected = True
                     findings.append({"type": "entry_too_large", "severity": "medium",
-                                     "detail": f"{_safe_member_name(m.name)} oltre il cap per-file."})
+                                     "detail": f"{_safe_member_name(m.name)} oltre il cap per-file/budget."})
                     continue
+                budget -= len(content)
                 entry = _analyze_bytes(content, m.name, allow_nested=False, nested_depth=1)
                 entry["path"] = _safe_member_name(m.name)
                 entry["size"] = len(content)
                 entry["sha256"] = hashlib.sha256(content).hexdigest()
                 extracted.append(entry)
         return {"kind": "archive", "format": fmt.upper(), "score": 0, "findings": findings,
-                "analyzed_members": len(extracted), "total_members": len(members),
-                "truncated": len(members) > 200, "extracted": extracted}
+                "analyzed_members": len(extracted), "total_members": seen,
+                "truncated": truncated or budget <= 0,
+                "bomb_suspected": bomb_suspected, "extracted": extracted}
     except Exception as ex:
         return {"kind": "archive", "format": fmt.upper(), "score": 5,
                 "findings": [{"type": "decompression_error", "severity": "medium", "detail": str(ex)[:200]}],
-                "extracted": [], "truncated": False}
+                "extracted": [], "truncated": False, "bomb_suspected": False}
 
 
 def _analyze_archive_other(raw: bytes, fmt: str) -> Dict[str, Any]:
@@ -1217,7 +1278,7 @@ def _analyze_bytes(raw: bytes, name: str, *, allow_nested: bool, nested_depth: i
         if nested_depth >= MAX_NESTED_DEPTH:
             return _analyze_binary(raw, "ZIP")
         detail = _analyze_zip(raw, max_files=MAX_ANALYZED_MEMBERS,
-                              max_bytes=MAX_ANALYZED_MEMBERS * 1024,
+                              max_bytes=TOTAL_UNCOMPRESSED_MAX,
                               allow_nested=allow_nested)
         detail["kind"] = "binary"
         return detail
@@ -1318,6 +1379,27 @@ def _is_archive_single_stream(fmt: str) -> bool:
     return fmt in ("zip", "gzip", "bzip2", "xz", "tar", "7z", "rar", "cab", "iso")
 
 
+def _reject_zip_bomb(raw: bytes) -> None:
+    """Rifiuta un ZIP la cui espansione dichiarata supera il budget totale.
+
+    Il limite per-entry non basta: migliaia di voci piccole possono sommare
+    centinaia di GB. Il controllo e' sul central directory, prima di leggere
+    un solo byte decompresso. Un header che mente viene comunque fermato dal
+    cap incrementale in `_analyze_zip`.
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            declared = sum(max(0, i.file_size) for i in zf.infolist() if not i.is_dir())
+    except Exception:
+        return
+    if declared > TOTAL_UNCOMPRESSED_MAX:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Archive expansion {declared // (1024 * 1024)} MB exceeds the "
+                   f"{TOTAL_UNCOMPRESSED_MAX // (1024 * 1024)} MB analysis budget",
+        )
+
+
 @router.post("/upload")
 async def upload_analyze(
     request: Request,
@@ -1351,6 +1433,8 @@ async def upload_analyze(
         )
     if is_archive and len(raw) > max_zip:
         raise HTTPException(status_code=413, detail=f"Archive too large: max {settings.TOTAL_MAX_ZIP_MB}MB")
+    if is_zip_upload:
+        _reject_zip_bomb(raw)
 
     sha256 = hashlib.sha256(raw).hexdigest()
 
@@ -1383,6 +1467,8 @@ async def upload_analyze(
         # oltre il cap il report lo dichiara invece di rifiutare l'upload.
         max_files = max(1, min(int(settings.TOTAL_MAX_FILES_PER_ZIP), MAX_ANALYZED_MEMBERS))
         zdetail = _analyze_zip(raw, max_files=max_files, max_bytes=max_zip, allow_nested=True)
+        if zdetail.get("bomb_suspected"):
+            raise HTTPException(status_code=422, detail="Archive expansion exceeds the analysis budget")
         truncated = bool(zdetail.get("truncated"))
         total_members = int(zdetail.get("total_members") or 0)
 
@@ -1426,6 +1512,8 @@ async def upload_analyze(
 
     else:
         detail = _analyze_bytes(raw, filename, allow_nested=True)
+        if detail.get("bomb_suspected"):
+            raise HTTPException(status_code=422, detail="Compressed expansion exceeds the analysis budget")
         detail.setdefault("path", filename)
         detail.setdefault("size", len(raw))
         detail.setdefault("sha256", sha256)
