@@ -1,59 +1,10 @@
 import asyncio
 import uuid
-import httpx
 from loguru import logger
 from app.core.config import settings
-from honeypot.sensors.ssh_sensor import _post_ingest, _api_headers
-
-_http_client: httpx.AsyncClient = None
-
-
-async def _get_http_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None:
-        _http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
-    return _http_client
-
-
-async def _sandbox_create(session_id: str) -> dict:
-    try:
-        client = await _get_http_client()
-        resp = await client.post(
-            "http://kraken_app:8000/api/v1/containers/create",
-            params={"session_id": session_id},
-            headers=_api_headers(),
-        )
-        if resp.status_code == 200:
-            return resp.json()
-    except Exception as e:
-        logger.error(f"Sandbox create failed: {e}")
-    return None
-
-
-async def _sandbox_exec(session_id: str, cmd: str) -> str:
-    try:
-        client = await _get_http_client()
-        resp = await client.post(
-            "http://kraken_app:8000/api/v1/containers/exec",
-            params={"session_id": session_id, "cmd": cmd},
-            headers=_api_headers(),
-        )
-        if resp.status_code == 200:
-            return resp.json().get("output", "")
-    except Exception as e:
-        logger.error(f"Sandbox exec failed: {e}")
-    return ""
-
-
-async def _sandbox_destroy(session_id: str):
-    try:
-        client = await _get_http_client()
-        await client.delete(
-            f"http://kraken_app:8000/api/v1/containers/{session_id}",
-            headers=_api_headers(),
-        )
-    except Exception as e:
-        logger.error(f"Sandbox destroy failed: {e}")
+from honeypot.sensors.ssh_sensor import (
+    _post_ingest, _sandbox_create, _sandbox_exec, _sandbox_destroy,
+)
 
 
 class TelnetSensor:
@@ -98,7 +49,8 @@ class TelnetSensor:
                 cmd = line.decode(errors="ignore").strip().replace('\xff', '')
                 if not cmd:
                     continue
-                commands.append(cmd)
+                if len(commands) < 200:
+                    commands.append(cmd)
 
                 if cmd in ("exit", "logout", "quit"):
                     break

@@ -2,11 +2,9 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from jose import jwt
 from app.db.session import get_db
 from app.models.models import User
-from app.core.config import settings
-from app.core.security import decode_access_token
+from app.core.security import decode_access_payload
 from app.db.redis import is_token_blacklisted
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
@@ -28,28 +26,26 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Check token blacklist by jti
-    try:
-        payload = jwt.decode(
-            token_str, settings.SECRET_KEY,
-            algorithms=[settings.JWT_ALGORITHM],
-            options={"verify_exp": False},
+    # Decode once: the jti used for revocation comes from the verified payload.
+    payload = decode_access_payload(token_str)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-        jti = payload.get("jti", token_str[:32])
-    except Exception:
-        jti = token_str[:32]
+    jti = payload.get("jti")
+    username = payload.get("sub")
+    if not jti or not username:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if await is_token_blacklisted(jti):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token revoked.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    username = decode_access_token(token_str)
-    if not username:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     result = await db.execute(select(User).where(User.username == username))

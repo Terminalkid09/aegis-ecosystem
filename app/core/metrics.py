@@ -1,5 +1,6 @@
 from prometheus_client import Counter, Histogram, Gauge, CollectorRegistry, generate_latest, CONTENT_TYPE_LATEST
 from fastapi import Response
+import re
 import time
 
 registry = CollectorRegistry()
@@ -49,7 +50,6 @@ attacks_total = Counter(
 malware_captured_total = Counter(
     "kraken_malware_captured_total",
     "Total malware samples captured",
-    ["sha256_prefix"],
     registry=registry
 )
 
@@ -93,14 +93,18 @@ def set_active_sandboxes(count: int):
     active_sandboxes.set(count)
 
 def record_attack(sensor_type: str, country: str, is_known_threat: bool):
+    normalized = (country or "").strip().upper()
+    if not re.fullmatch(r"[A-Z]{2,3}", normalized):
+        normalized = "unknown"
     attacks_total.labels(
         sensor_type=sensor_type,
-        country=country or "unknown",
+        country=normalized,
         threat_level="known" if is_known_threat else "unknown"
     ).inc()
 
-def record_malware_captured(sha256: str):
-    malware_captured_total.labels(sha256_prefix=sha256[:8]).inc()
+def record_malware_captured(sha256: str = ""):
+    # No per-sample label: unbounded cardinality is a DoS vector.
+    malware_captured_total.inc()
 
 def set_db_connections(count: int):
     db_connections_active.set(count)

@@ -3,6 +3,7 @@ RUN adduser -D -h /home/sandbox sandbox && \
     apk add --no-cache bash coreutils procps curl socat
 USER sandbox
 WORKDIR /home/sandbox
-COPY --chown=sandbox:sandbox sandbox-init.sh /home/sandbox/init.sh
-RUN chmod +x /home/sandbox/init.sh
-CMD ["/home/sandbox/init.sh"]
+# Keep init outside /home/sandbox: that path is a tmpfs at runtime.
+COPY --chown=sandbox:sandbox sandbox-init.sh /usr/local/bin/sandbox-init.sh
+RUN chmod +x /usr/local/bin/sandbox-init.sh
+CMD ["/usr/local/bin/sandbox-init.sh"]

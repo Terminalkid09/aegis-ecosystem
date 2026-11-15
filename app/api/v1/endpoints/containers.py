@@ -1,11 +1,11 @@
+import hmac
 import re
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
-from jose import jwt as _jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.docker_manager import docker_manager
 from app.api.v1.endpoints.deps import get_current_user
-from app.core.security import decode_access_token
+from app.core.security import decode_access_payload
 from app.core.config import settings
 from app.db.redis import is_token_blacklisted
 from app.db.session import get_db
@@ -22,8 +22,10 @@ async def _get_admin_or_internal(
 ) -> str:
     """Allow either valid admin JWT (cookie/Bearer) OR valid internal API key."""
     api_key = request.headers.get("X-Internal-API-Key", "")
-    if api_key:
-        if api_key == settings.INTERNAL_API_KEY:
+    if api_key and settings.INTERNAL_API_KEY:
+        if hmac.compare_digest(
+            api_key.encode("utf-8"), settings.INTERNAL_API_KEY.encode("utf-8")
+        ):
             return api_key
 
     token = request.cookies.get("kraken_token")
@@ -32,20 +34,19 @@ async def _get_admin_or_internal(
         if auth.startswith("Bearer "):
             token = auth[7:]
     if token:
-        try:
-            import jwt as _jwt
-            payload = _jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM], options={"verify_exp": False})
-            jti = payload.get("jti", token[:32])
-        except Exception:
-            jti = token[:32]
-        if await is_token_blacklisted(jti):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked.")
-        username = decode_access_token(token)
-        if username:
-            result = await db.execute(select(User).where(User.username == username))
-            user = result.scalar_one_or_none()
-            if user and user.is_active and user.is_admin:
-                return username
+        payload = decode_access_payload(token)
+        if payload:
+            jti = payload.get("jti")
+            if not jti:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token.")
+            if await is_token_blacklisted(jti):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked.")
+            username = payload.get("sub")
+            if username:
+                result = await db.execute(select(User).where(User.username == username))
+                user = result.scalar_one_or_none()
+                if user and user.is_active and user.is_admin:
+                    return username
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,

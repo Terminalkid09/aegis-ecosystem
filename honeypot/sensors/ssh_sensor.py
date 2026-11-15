@@ -3,10 +3,12 @@ import asyncssh
 import uuid
 import httpx
 import os
+from pathlib import Path
 from loguru import logger
 from app.core.config import settings
 
 _http_client: httpx.AsyncClient = None
+_API_BASE = settings.SANDBOX_API_URL.rsplit("/containers", 1)[0]
 
 
 async def _get_http_client() -> httpx.AsyncClient:
@@ -24,7 +26,7 @@ async def _post_ingest(payload: dict):
     try:
         client = await _get_http_client()
         await client.post(
-            "http://kraken_app:8000/api/v1/events/ingest",
+            f"{_API_BASE}/events/ingest",
             json=payload,
             headers=_api_headers(),
         )
@@ -36,7 +38,7 @@ async def _sandbox_create(session_id: str) -> dict:
     try:
         client = await _get_http_client()
         resp = await client.post(
-            "http://kraken_app:8000/api/v1/containers/create",
+            f"{_API_BASE}/containers/create",
             params={"session_id": session_id},
             headers=_api_headers(),
         )
@@ -51,7 +53,7 @@ async def _sandbox_exec(session_id: str, cmd: str) -> str:
     try:
         client = await _get_http_client()
         resp = await client.post(
-            "http://kraken_app:8000/api/v1/containers/exec",
+            f"{_API_BASE}/containers/exec",
             params={"session_id": session_id, "cmd": cmd},
             headers=_api_headers(),
         )
@@ -66,7 +68,7 @@ async def _sandbox_destroy(session_id: str):
     try:
         client = await _get_http_client()
         await client.delete(
-            f"http://kraken_app:8000/api/v1/containers/{session_id}",
+            f"{_API_BASE}/containers/{session_id}",
             headers=_api_headers(),
         )
     except Exception as e:
@@ -135,7 +137,8 @@ async def handle_client(process):
             if not cmd:
                 continue
 
-            server.commands.append(cmd)
+            if len(server.commands) < 200:
+                server.commands.append(cmd)
 
             if cmd in ("exit", "logout", "quit"):
                 break
@@ -168,7 +171,8 @@ class SSHSensor:
         self.port = port or settings.SSH_SENSOR_PORT
 
     async def start(self):
-        key_path = "/app/data/ssh_host_ed25519_key"
+        Path(settings.DATA_DIR).mkdir(parents=True, exist_ok=True)
+        key_path = str(Path(settings.DATA_DIR) / "ssh_host_ed25519_key")
         if not os.path.exists(key_path):
             key = asyncssh.generate_private_key("ssh-ed25519")
             key.write_private_key(key_path)

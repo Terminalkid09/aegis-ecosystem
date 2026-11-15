@@ -15,6 +15,7 @@ from app.api.v1.router import api_router, tags_metadata
 from app.db.session import init_db
 from app.db.redis import init_redis, close_redis
 from app.services.plugin_manager import plugin_manager
+from app.services.retention import prune_malware
 from app.core.event_bus import event_bus
 
 
@@ -37,6 +38,11 @@ async def lifespan(app: FastAPI):
     logger.info("Kraken starting up...")
     settings.validate_secrets()
     settings.ensure_dirs()
+    prune_malware(
+        settings.MALWARE_DIR,
+        settings.MALWARE_RETENTION_DAYS,
+        settings.MALWARE_MAX_TOTAL_BYTES,
+    )
     await init_db()
     await init_redis()
     await plugin_manager.initialize()

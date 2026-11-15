@@ -1,4 +1,4 @@
-FROM python:3.10.11-slim
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
@@ -17,10 +17,9 @@ COPY . .
 
 RUN mkdir -p /app/data /app/app/static /app/data/malware /app/data/logs
 
-# Run as non-root user with docker socket access
+# Run as non-root user; the app never needs the Docker socket.
 RUN adduser --disabled-password --gecos "" --home /app kraken && \
-    chown -R kraken:kraken /app/data /app/app/static && \
-    usermod -aG root kraken
+    chown -R kraken:kraken /app/data /app/app/static
 USER kraken
 
 EXPOSE 8000

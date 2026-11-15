@@ -1,8 +1,11 @@
+import hashlib
+import hmac
 import uuid
 import bcrypt as _bcrypt
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError
 from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from app.core.config import settings
@@ -46,7 +49,7 @@ def _decode_jwt(token: str, expected_type: Optional[str] = None) -> Optional[dic
         if expected_type and payload.get("type") != expected_type:
             return None
         return payload
-    except JWTError as e:
+    except PyJWTError as e:
         logger.debug(f"JWT decode failed: {e}")
         return None
 
@@ -79,23 +82,46 @@ def create_refresh_token(subject: str) -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+def decode_access_payload(token: str) -> Optional[dict]:
+    """Return the verified access-token payload, or None."""
+    return _decode_jwt(token, expected_type="access")
+
+
+def decode_refresh_payload(token: str) -> Optional[dict]:
+    """Return the verified refresh-token payload, or None."""
+    return _decode_jwt(token, expected_type="refresh")
+
+
 def decode_access_token(token: str) -> Optional[str]:
-    payload = _decode_jwt(token, expected_type="access")
-    if payload is None:
-        payload = _decode_jwt(token, expected_type=None)
-        if payload and payload.get("type") not in ("access", None):
-            return None
+    payload = decode_access_payload(token)
     return payload.get("sub") if payload else None
 
 
 def decode_refresh_token(token: str) -> Optional[str]:
-    payload = _decode_jwt(token, expected_type="refresh")
+    payload = decode_refresh_payload(token)
     return payload.get("sub") if payload else None
+
+
+def hash_credential(value: str) -> str:
+    """Pseudonymise captured credentials with a keyed hash (no plaintext at rest)."""
+    digest = hmac.new(
+        settings.SECRET_KEY.encode("utf-8"),
+        value.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"hmac-sha256:{digest}"
 
 
 def verify_internal_api_key(api_key: str = Security(api_key_header)) -> str:
     """Dependency — validates the X-Internal-API-Key header on sensor ingest endpoint."""
-    if not api_key or api_key != settings.INTERNAL_API_KEY:
+    if not api_key or not settings.INTERNAL_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or missing internal API key.",
+        )
+    if not hmac.compare_digest(
+        api_key.encode("utf-8"), settings.INTERNAL_API_KEY.encode("utf-8")
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid or missing internal API key.",

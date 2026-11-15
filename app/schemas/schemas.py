@@ -26,7 +26,9 @@ class RefreshRequest(BaseModel):
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9_\-]+$")
     password: str = Field(..., min_length=8, max_length=128)
-    is_admin: bool = False
+    # `is_admin` non esiste piu' nel contratto: il primo admin nasce solo
+    # dallo script locale, mai da una richiesta HTTP pubblica.
+    model_config = {"extra": "forbid"}
 
 
 class UserOut(BaseModel):
@@ -123,6 +125,8 @@ class SensorEventIn(BaseModel):
     username: Optional[str] = Field(None, max_length=128)
     password: Optional[str] = Field(None, max_length=256)
     commands: Optional[List[str]] = Field(default_factory=list)
+    # Cap applied in the validator (200 commands) instead of rejecting a
+    # slightly oversized sensor batch with a 422.
 
     @field_validator("sensor_type")
     @classmethod
@@ -145,4 +149,4 @@ class SensorEventIn(BaseModel):
     def truncate_commands(cls, v: Optional[List[str]]) -> List[str]:
         if v is None:
             return []
-        return [cmd[:512] for cmd in v[:100]]
+        return [cmd[:512] for cmd in v[:200]]

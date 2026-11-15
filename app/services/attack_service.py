@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct, desc
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -8,10 +9,17 @@ from app.models.models import AttackEvent, AttackCommand, CredentialAttempt, Mal
 from app.schemas.schemas import SensorEventIn
 from app.services.geoip import geoip_service
 from app.services.telegram import telegram_service
+from app.core.security import hash_credential
 from loguru import logger
 
 
 async def ingest_sensor_event(db: AsyncSession, payload: SensorEventIn) -> AttackEvent:
+    # Sensor retries must be idempotent: session_id is the natural key.
+    existing = await get_event_by_session(db, payload.session_id)
+    if existing is not None:
+        logger.info(f"Duplicate sensor event ignored: {payload.session_id}")
+        return existing
+
     geo = geoip_service.lookup(payload.attacker_ip)
 
     event = AttackEvent(
@@ -34,13 +42,21 @@ async def ingest_sensor_event(db: AsyncSession, payload: SensorEventIn) -> Attac
         db.add(CredentialAttempt(
             event_id=event.id,
             username=payload.username,
-            password=payload.password,
+            password=hash_credential(payload.password) if payload.password else None,
         ))
 
     for cmd in payload.commands or []:
         db.add(AttackCommand(event_id=event.id, command=cmd))
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Two retries can race between the SELECT and the INSERT.
+        await db.rollback()
+        duplicate = await get_event_by_session(db, payload.session_id)
+        if duplicate is None:
+            raise
+        return duplicate
     await db.refresh(event, ["credentials", "commands", "malware_samples"])
 
     from app.core.event_bus import event_bus

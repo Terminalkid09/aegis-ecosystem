@@ -16,9 +16,14 @@ env/
 data/
 !data/.gitkeep
 
+# Local secrets (backup passphrase, TLS keys)
+secrets/*
+!secrets/README.md
+
 # SSL certificates (generated at runtime by nginx entrypoint)
 nginx/ssl/
 !nginx/ssl/.gitkeep
+nginx/ssl/*.pem
 
 # Test & coverage
 htmlcov/

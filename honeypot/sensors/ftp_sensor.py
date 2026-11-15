@@ -25,7 +25,10 @@ class FTPSensor:
         async def pasv_handler(d_reader, d_writer):
             malware_dir = settings.MALWARE_DIR
             os.makedirs(malware_dir, exist_ok=True)
-            content = await d_reader.read()
+            content = await d_reader.read(settings.MALWARE_MAX_FILE_BYTES + 1)
+            if len(content) > settings.MALWARE_MAX_FILE_BYTES:
+                logger.warning("FTP upload exceeds MALWARE_MAX_FILE_BYTES; discarded")
+                content = b""
             if content:
                 sha256 = hashlib.sha256(content).hexdigest()
                 filename = "ftp_upload.bin"
@@ -52,7 +55,8 @@ class FTPSensor:
                 cmd = line.decode(errors="ignore").strip()
                 if not cmd:
                     continue
-                commands.append(cmd[:256])
+                if len(commands) < 200:
+                    commands.append(cmd[:256])
                 upper = cmd.upper()
 
                 if upper.startswith("USER "):

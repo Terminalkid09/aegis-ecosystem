@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     SECRET_KEY: str = ""
     INTERNAL_API_KEY: str = ""
+    ALLOW_REGISTRATION: bool = False
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://kraken:kraken_pass@localhost:5432/krakendb"
@@ -31,8 +32,15 @@ class Settings(BaseSettings):
     # Docker sandbox
     SANDBOX_IMAGE: str = "kraken_sandbox"
     SANDBOX_MAX_LIFETIME: int = 300
+    # Legacy: accepted for existing .env files; sandboxes now use network_mode=none.
     SANDBOX_NETWORK: str = "kraken_sandbox_net"
     SANDBOX_MAX_CONCURRENT: int = 20
+    SANDBOX_BROKER_URL: str = "http://kraken_sandbox_broker:8100"
+    SANDBOX_BROKER_TOKEN: str = ""
+    MALWARE_MAX_FILE_BYTES: int = 64 * 1024 * 1024
+    MALWARE_MAX_SESSION_BYTES: int = 256 * 1024 * 1024
+    MALWARE_RETENTION_DAYS: int = 30
+    MALWARE_MAX_TOTAL_BYTES: int = 5 * 1024 * 1024 * 1024
 
     # Paths — configurabili
     DATA_DIR: str = "/app/data"
@@ -74,22 +82,25 @@ class Settings(BaseSettings):
         case_sensitive = True
 
     def validate_secrets(self):
-        """Auto-generate secrets if not configured, refuse weak keys in production."""
+        """Auto-generate secrets only in DEBUG; refuse placeholders and weak keys."""
+        markers = ("changeme", "change-me", "replace-with", "please_change", "example", "dummy")
+        for name, value in (("SECRET_KEY", self.SECRET_KEY), ("INTERNAL_API_KEY", self.INTERNAL_API_KEY)):
+            if value and any(marker in value.lower() for marker in markers):
+                print(f"❌ {name} contains a known placeholder; generate a random value.")
+                sys.exit(1)
         if not self.SECRET_KEY or len(self.SECRET_KEY) < 32:
             if self.DEBUG:
                 self.SECRET_KEY = secrets.token_hex(32)
-                logger.warning(f"Auto-generated SECRET_KEY for DEBUG mode: {self.SECRET_KEY}")
+                logger.warning("Auto-generated SECRET_KEY for DEBUG mode (value not logged).")
             else:
-                gen = secrets.token_hex(32)
-                print(f"❌ SECRET_KEY not configured. Set in .env or use this generated key:\n   SECRET_KEY={gen}")
+                print("❌ SECRET_KEY not configured. Set a random value of at least 32 characters.")
                 sys.exit(1)
         if not self.INTERNAL_API_KEY or len(self.INTERNAL_API_KEY) < 32:
             if self.DEBUG:
                 self.INTERNAL_API_KEY = secrets.token_hex(32)
-                logger.warning(f"Auto-generated INTERNAL_API_KEY for DEBUG mode")
+                logger.warning("Auto-generated INTERNAL_API_KEY for DEBUG mode.")
             else:
-                gen = secrets.token_hex(32)
-                print(f"❌ INTERNAL_API_KEY not configured. Set in .env or use this generated key:\n   INTERNAL_API_KEY={gen}")
+                print("❌ INTERNAL_API_KEY not configured. Set a random value of at least 32 characters.")
                 sys.exit(1)
 
     def get_cors_origins(self) -> list[str]:

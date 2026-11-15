@@ -12,6 +12,8 @@ services:
       - ./nginx/ssl:/etc/nginx/ssl
       - ./nginx/entrypoint.sh:/entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      - PROFILE=${PROFILE:-prod}
     depends_on:
       kraken_app:
         condition: service_healthy
@@ -42,6 +44,32 @@ services:
     cpu_quota: 25000
     init: true
 
+  kraken_sandbox_broker:
+    build:
+      context: .
+      dockerfile: Dockerfile.broker
+    container_name: kraken_sandbox_broker
+    restart: unless-stopped
+    environment:
+      - SANDBOX_BROKER_TOKEN=${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
+      - SANDBOX_IMAGE=kraken_sandbox
+      - MALWARE_DIR=/app/data/malware
+      - MALWARE_MAX_FILE_BYTES=${MALWARE_MAX_FILE_BYTES:-67108864}
+      - MALWARE_MAX_SESSION_BYTES=${MALWARE_MAX_SESSION_BYTES:-268435456}
+      - MALWARE_RETENTION_DAYS=${MALWARE_RETENTION_DAYS:-30}
+      - MALWARE_MAX_TOTAL_BYTES=${MALWARE_MAX_TOTAL_BYTES:-5368709120}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   kraken_app:
     build:
       context: .
@@ -51,18 +79,22 @@ services:
     expose:
       - "8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://kraken:${POSTGRES_PASSWORD:-kraken_pass}@kraken_db:5432/krakendb
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-kraken_redis_pass}@kraken_redis:6379/0
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-kraken_redis_pass}
-      - SECRET_KEY=${SECRET_KEY:-changeme_super_secret_key_please_change}
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-changeme_internal_api_key_please_change}
+      - DATABASE_URL=postgresql+asyncpg://kraken:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@kraken_db:5432/krakendb
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@kraken_redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set}
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-false}
+      - SANDBOX_BROKER_URL=http://kraken_sandbox_broker:8100
+      - SANDBOX_BROKER_TOKEN=${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
+      - MALWARE_RETENTION_DAYS=${MALWARE_RETENTION_DAYS:-30}
+      - MALWARE_MAX_TOTAL_BYTES=${MALWARE_MAX_TOTAL_BYTES:-5368709120}
       - DEBUG=false
       - GEOIP_DB_PATH=/app/data/GeoLite2-City.mmdb
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:80}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./data:/app/data
       - ./data/malware:/app/data/malware
       - ./data/logs:/app/data/logs
@@ -70,6 +102,8 @@ services:
       kraken_db:
         condition: service_healthy
       kraken_redis:
+        condition: service_healthy
+      kraken_sandbox_broker:
         condition: service_healthy
     networks:
       - kraken_internal
@@ -93,7 +127,7 @@ services:
       - "2121:2121"
       - "2323:2323"
     environment:
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-changeme_internal_api_key_please_change}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set}
       - SSH_SENSOR_PORT=2222
       - HTTP_SENSOR_PORT=8080
       - FTP_SENSOR_PORT=2121
@@ -116,7 +150,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: kraken
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kraken_pass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: krakendb
     volumes:
       - kraken_pgdata:/var/lib/postgresql/data
@@ -136,11 +170,11 @@ services:
       redis-server
       --maxmemory 128mb
       --maxmemory-policy allkeys-lru
-      --requirepass ${REDIS_PASSWORD:-kraken_redis_pass}
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-kraken_redis_pass}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-kraken_redis_pass}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -198,7 +232,7 @@ services:
       - "3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_INSTALL_PLUGINS=grafana-piechart-panel
     volumes:
@@ -220,15 +254,20 @@ services:
     container_name: kraken_backup
     restart: unless-stopped
     environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-kraken_redis_pass}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-kraken_pass}
-      - BACKUP_RETENTION_DAYS=30
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
+      - BACKUP_PASSPHRASE_FILE=/run/secrets/backup_passphrase
       - POSTGRES_HOST=kraken_db
+      - DB_HOST=kraken_db
       - POSTGRES_USER=kraken
       - POSTGRES_DB=krakendb
+      - DB_NAME=krakendb
       - REDIS_HOST=kraken_redis
     volumes:
       - ./data:/app/data:ro
+      - ./secrets/backup_passphrase:/run/secrets/backup_passphrase:ro
       - backup_data:/backups
     networks:
       - kraken_internal
@@ -245,6 +284,7 @@ networks:
     driver: bridge
   kraken_sandbox_net:
     driver: bridge
+    internal: true
     ipam:
       config:
         - subnet: 10.20.0.0/24

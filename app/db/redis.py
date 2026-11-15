@@ -6,6 +6,7 @@ from loguru import logger
 redis_client: Optional[aioredis.Redis] = None
 
 TOKEN_BLACKLIST_PREFIX = "kraken:bl:"  # TTL = max token lifetime
+REFRESH_USED_PREFIX = "kraken:rt:"  # single-use refresh token rotation
 
 
 async def get_redis() -> Optional[aioredis.Redis]:
@@ -52,3 +53,20 @@ async def is_token_blacklisted(jti: str) -> bool:
         return True
     key = f"{TOKEN_BLACKLIST_PREFIX}{jti}"
     return await r.exists(key) == 1
+
+
+async def consume_refresh_jti(jti: str, ttl_seconds: int) -> bool:
+    """Atomically consume a refresh token jti; False also means Redis is down."""
+    r = await get_redis()
+    if r is None:
+        logger.warning("Redis unavailable — refusing refresh (fail-closed)")
+        return False
+    key = f"{REFRESH_USED_PREFIX}{jti}"
+    try:
+        if await r.exists(f"{TOKEN_BLACKLIST_PREFIX}{jti}"):
+            return False
+        result = await r.set(key, "1", ex=max(ttl_seconds, 1), nx=True)
+        return bool(result)
+    except Exception as e:
+        logger.error(f"Refresh-token rotation failed: {e}")
+        return False
