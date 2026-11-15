@@ -118,11 +118,21 @@ class HealthChecker:
         }
         try:
             client = redis.from_url(get_redis_url(), socket_connect_timeout=2, socket_timeout=2)
-            pending = await client.llen("aegis:events:pending")
+            # La coda reale e' `aegis:events`; `processing` e `dlq` sono le altre
+            # due liste del consumer. `aegis:events:pending` non esisteva.
+            pending = await client.llen("aegis:events")
+            processing = await client.llen("aegis:events:processing")
+            dlq = await client.llen("aegis:events:dlq")
             await client.aclose()
             details["queue_depth"] = pending
+            details["processing"] = processing
+            details["dlq"] = dlq
+            details["in_flight"] = pending + processing
         except Exception:
             details["queue_depth"] = None
+            details["processing"] = None
+            details["dlq"] = None
+            details["in_flight"] = None
         status = HealthStatus.HEALTHY
         if (details["seq_gaps"] or 0) > 0:
             status = HealthStatus.DEGRADED
