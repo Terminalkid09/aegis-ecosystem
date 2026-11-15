@@ -5,7 +5,7 @@ import { playbookAPI } from '@/services/api'
 import { PermissionGate } from '@/components/common/PermissionGate'
 import { cn } from '@/lib/utils'
 
-const ACTION_TYPES = ['webhook', 'block_ip', 'kill_process', 'isolate_host', 'script']
+const ACTION_TYPES = ['webhook', 'block_ip', 'kill_process', 'isolate_host']
 
 export default function PlaybookManager() {
   const qc = useQueryClient()

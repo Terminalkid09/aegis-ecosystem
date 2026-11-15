@@ -50,8 +50,6 @@ ACTION_RISK = {
     "update_agent": {"risk": "medium", "approver": "analyst", "reversible": True,
                      "preconditions": "signed artifact published",
                      "rollback": "UPDATE_AGENT to the previous version"},
-    "script": {"risk": "critical", "approver": "admin", "reversible": False,
-               "preconditions": "admin only, reviewed command, audited"},
     "eradicate": {"risk": "critical", "approver": "analyst", "reversible": False,
                   "preconditions": "chain COLLECT→QUARANTINE→KILL→REMOVE→VERIFY"},
 }
@@ -201,6 +199,13 @@ async def _execute_action(
     target = action.target
     params = action.params or {}
 
+    # AEGIS-SEC-003 / D7: l'azione `script` e' stata rimossa. Il controllo
+    # resta per le righe storiche scritte a mano nel DB, ma non esiste piu'
+    # alcun percorso verso subprocess o shell sul server Brain.
+    if (action_type or "").lower() == "script":
+        return {"status": "blocked",
+                "output": "script actions were removed in 4.1; use a named action"}
+
     if action_type == "webhook":
         import httpx
         try:
@@ -283,29 +288,6 @@ async def _execute_action(
         )
         cmd["alert_id"] = alert.id
         return await _send_agent_command(alert.agent_id, cmd)
-
-    elif action_type == "script":
-        # DANGER: arbitrary shell on the BRAIN server. Gated at API layer
-        # (admin-only + feature flag, see playbooks.py) AND here at execution
-        # (defense in depth: righe scritte prima del flag o a mano nel DB).
-        from app.core.config import settings as _settings
-        if not _settings.PLAYBOOK_SCRIPT_ENABLED:
-            logger.warning("Playbook 'script' blocked: PLAYBOOK_SCRIPT_ENABLED=false")
-            return {"status": "blocked", "output": "script actions disabled"}
-        import subprocess
-        try:
-            result = subprocess.run(
-                target.split(),
-                capture_output=True,
-                text=True,
-                timeout=min(int(params.get("timeout", 30)), 120),
-            )
-            return {
-                "status": "completed" if result.returncode == 0 else "failed",
-                "output": (result.stdout or result.stderr)[:4000],
-            }
-        except Exception as e:
-            return {"status": "failed", "output": str(e)[:500]}
 
     elif action_type == "quarantine_binary":
         if alert.pid:

@@ -112,9 +112,6 @@ class Settings(BaseSettings):
 
     # Detection canary (M4 Fase 5): rule_id separati da virgola in log-only.
     RULE_CANARY_IDS: str = ""
-    # Audit F-02: azioni playbook "script" = shell sul server Brain.
-    # Default OFF: abilitarle solo in enterprise con approvazione documentata.
-    PLAYBOOK_SCRIPT_ENABLED: bool = False
 
     # Correlation windows (M5 Fase 6): finestre configurabili, mai hardcodate.
     CORR_BRUTEFORCE_THRESHOLD: int = 5
