@@ -140,6 +140,10 @@ class Settings(BaseSettings):
     PKI_DEVICE_TTL_DAYS: int = 825
     # Mutual auth agent (post-audit): off | optional | required.
     MTLS_MODE: str = "off"
+    # Profilo di deployment esplicito: lab (compat), pilot (mTLS optional),
+    # prod (mTLS required + strict). Evita di dedurre la postura da flag
+    # sparsi e rende riconoscibile un deploy "prod" ancora senza mTLS.
+    AEGIS_PROFILE: str = "lab"
     # Guard production (gap-closing P2.7): con true il brain RIFIUTA di partire
     # se MTLS_MODE != required. Default false (dev/lab liberi).
     ENTERPRISE_STRICT: bool = False
@@ -233,6 +237,18 @@ class Settings(BaseSettings):
         # Audit F-03: profili enterprise senza mTLS required non partono.
         if self.ENTERPRISE_STRICT and (self.MTLS_MODE or "").lower() != "required":
             raise ValueError("ENTERPRISE_STRICT requires MTLS_MODE=required")
+        profile = (self.AEGIS_PROFILE or "lab").strip().lower()
+        if profile not in ("lab", "pilot", "prod"):
+            raise ValueError("AEGIS_PROFILE must be one of: lab, pilot, prod")
+        if profile == "prod":
+            if (self.MTLS_MODE or "").lower() != "required":
+                raise ValueError("AEGIS_PROFILE=prod requires MTLS_MODE=required")
+            if not self.ENTERPRISE_STRICT:
+                raise ValueError("AEGIS_PROFILE=prod requires ENTERPRISE_STRICT=true")
+            if not (self.RATE_LIMIT_STORAGE_URI or "").strip():
+                raise ValueError(
+                    "AEGIS_PROFILE=prod requires RATE_LIMIT_STORAGE_URI (shared Redis)"
+                )
         return self
 
 settings = Settings()
