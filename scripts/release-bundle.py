@@ -2,7 +2,7 @@
 """Build a release bundle from reproducible repository artifacts.
 
 This is the local dry-run counterpart of the GitHub `release` job. It does not
-create a tag and it does not invent a signature: the workflow signs the
+create a tag and it does not invent a signature: the tag workflow must sign the
 resulting SHA256SUMS with cosign, while this script verifies every file and
 writes the manifest a client can check after download.
 
@@ -137,7 +137,7 @@ def main() -> int:
         "components": ["aegis-brain", "aegis-guard", "aegis-link", "frontend",
                        "NodeTrace", "services/kraken"],
         "files": files,
-        "signature": "cosign signs SHA256SUMS.txt in the GitHub release job",
+        "signature": "not produced by this dry-run; the tag release must sign SHA256SUMS.txt with cosign",
     }
     (out / "RELEASE_MANIFEST.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
