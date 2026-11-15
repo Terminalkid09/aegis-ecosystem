@@ -321,8 +321,14 @@ class TestParsersAndSources:
 class TestSearch:
     async def _seed(self, client, headers) -> str:
         source = _source("search")
+        # The corpus is intentionally fixed, but search is bounded by `hours`
+        # (max 720). Shift its date to today so the test measures search, not
+        # the calendar; the payload and event count stay unchanged.
+        corpus = _corpus("windows_security.jsonl")
+        now = datetime.now(timezone.utc)
+        corpus = corpus.replace("2026-09-15T12:", f"{now:%Y-%m-%d}T{now:%H}:")
         response = await client.post(f"/api/v1/ingest/{source}?parser=windows_event",
-                                     json=_corpus("windows_security.jsonl"),
+                                     json=corpus,
                                      headers=headers)
         assert response.status_code == 200, response.text
         return source
