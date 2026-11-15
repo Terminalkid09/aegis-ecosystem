@@ -34,6 +34,14 @@ class TestAuth:
             response = await client.post("/api/v1/auth/register", json=payload)
             assert response.status_code == 422, payload
 
+    async def test_auth_config_reports_self_service_state(self, client: AsyncClient, monkeypatch):
+        from app.core.config import settings
+        for enabled in (False, True):
+            monkeypatch.setattr(settings, "ALLOW_OPEN_REGISTRATION", enabled)
+            response = await client.get("/api/v1/auth/config")
+            assert response.status_code == 200
+            assert response.json() == {"open_registration": enabled}
+
     async def test_register_closed_when_disabled(self, client: AsyncClient, monkeypatch):
         # Audit: ALLOW_OPEN_REGISTRATION=false -> solo admin.
         from app.core.config import settings

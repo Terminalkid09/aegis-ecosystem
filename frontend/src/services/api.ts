@@ -46,6 +46,9 @@ apiClient.interceptors.response.use(
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 export const authAPI = {
+  // Public policy for the login screen: with self-service off, do not show a
+  // Register tab that can only end in 403.
+  config: () => apiClient.get('/auth/config'),
   // remember: "Mantieni l'accesso su questo dispositivo" — il server emette un
   // cookie remember separato (30 gg, revocabile da Settings → Dispositivi).
   login: (email: string, password: string, remember = false) =>

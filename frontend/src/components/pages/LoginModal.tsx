@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Shield, Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react'
 import { authAPI } from '@/services/api'
 import { useAppStore } from '@/store/appStore'
@@ -19,6 +19,17 @@ export default function LoginModal() {
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // null = policy not loaded yet. Keep Register hidden until the server says
+  // it is open; fail closed if the config request itself fails.
+  const [registrationEnabled, setRegistrationEnabled] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    authAPI.config()
+      .then(res => { if (!cancelled) setRegistrationEnabled(res.data?.open_registration === true) })
+      .catch(() => { if (!cancelled) setRegistrationEnabled(false) })
+    return () => { cancelled = true }
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -74,20 +85,39 @@ export default function LoginModal() {
         <div className="glass p-8 space-y-5">
           {/* Mode tabs */}
           <div className="flex gap-1 p-1 rounded-lg bg-[hsl(var(--secondary))]">
-            {(['login', 'register'] as const).map(m => (
+            <button
+              type="button"
+              data-testid="auth-tab-login"
+              onClick={() => { setMode('login'); setError(null) }}
+              className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${
+                mode === 'login'
+                  ? 'bg-[hsl(var(--card))] text-white shadow'
+                  : 'text-[hsl(var(--muted-foreground))] hover:text-white'
+              }`}
+            >
+              Sign In
+            </button>
+            {registrationEnabled === true && (
               <button
-                key={m}
-                onClick={() => { setMode(m); setError(null) }}
+                type="button"
+                data-testid="auth-tab-register"
+                onClick={() => { setMode('register'); setError(null) }}
                 className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${
-                  mode === m
+                  mode === 'register'
                     ? 'bg-[hsl(var(--card))] text-white shadow'
                     : 'text-[hsl(var(--muted-foreground))] hover:text-white'
                 }`}
               >
-                {m === 'login' ? 'Sign In' : 'Register'}
+                Register
               </button>
-            ))}
+            )}
           </div>
+
+          {registrationEnabled === false && (
+            <p data-testid="registration-disabled" className="text-center text-xs text-[hsl(var(--muted-foreground))]">
+              Self-service registration is disabled. Ask an administrator to create your account.
+            </p>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === 'register' && (

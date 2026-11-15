@@ -48,6 +48,17 @@ REMEMBER_DAYS = 30
 MAX_DEVICES_PER_USER = 10
 
 
+@router.get("/config")
+async def auth_config():
+    """Public login-page policy.
+
+    The SPA must not offer a Register tab when self-service registration is
+    disabled: the old UI always showed it and the only feedback was a 403
+    after submitting. Expose the boolean only, never any secret.
+    """
+    return {"open_registration": bool(settings.ALLOW_OPEN_REGISTRATION)}
+
+
 def _set_auth_cookie(response: Response, token: str):
     """Set JWT as httpOnly, Secure (in production), SameSite=Strict cookie.
 
