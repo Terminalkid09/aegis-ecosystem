@@ -62,6 +62,14 @@ the tag audit and the release policy.
 - Other findings are documented in the handoff plan; this section lists only
   changes present on `dev`. They ship only after merge.
 
+### Known limitations
+
+- The 11 Playwright e2e tests pass manually against the live stack, but they
+  are not a v4.1 CI gate; the CI runner is planned for 4.2. The two live
+  detection batteries are also manual in 4.1.
+- The local release dry-run verifies checksums and the manifest. It does not
+  produce a cosign signature, and the GitHub release job has not been run.
+
 ## [4.0.0] - 2026-09-21
 
 ### Added

@@ -212,11 +212,14 @@ Equivalent installers: `./install.sh lab|pilot [--observability]` and `.\install
 ### Quality gates
 
 ```bash
-# Brain tests (740+ pytest, deterministic, DB-backed)
+# Brain tests (819 passed, 3 YARA skips, DB-backed)
 python scripts/run_integration_tests.py --import-mode=importlib
 
-# Guard tests (134 JUnit)
+# Guard tests (140 JUnit)
 cd aegis-guard && mvn -B test
+
+# Link tests (17 JUnit)
+cd aegis-link && mvn -B test
 
 # NodeTrace unit tests
 cd NodeTrace/agents/python && python -m unittest tests.test_ebpf tests.test_update tests.test_linux_probe
@@ -229,7 +232,7 @@ python scripts/live_battery.py
 python scripts/hard_battery.py
 ```
 
-Four independent verification layers: 740+ pytest, 134 JUnit, 11 Playwright e2e, 2 live detection batteries — all green in CI.
+Verification layers: 819 pytest, 140 Guard JUnit, 17 Link JUnit, 11 Playwright e2e and 2 live detection batteries. CI gates pytest, Guard/Link, NodeTrace, frontend lint/build, pip-audit, Trivy and SBOM; Playwright and the live batteries are manual in 4.1. The Playwright CI runner is planned for 4.2.
 
 ---
 
@@ -519,7 +522,7 @@ python scripts/api_smoke.py [--base http://127.0.0.1:8000]
 # Pilot soak: N synthetic agents for T seconds (dev DB only)
 python scripts/pilot_soak.py --agents 10 --duration 300
 
-# Browser E2E (needs: npm i, playwright chromium, live stack)
+# Browser E2E pilot (manual until the 4.2 CI job; needs live stack)
 cd frontend && npm run e2e
 
 # Full audit: machine JSON + human report
@@ -549,7 +552,7 @@ aegis-ecosystem/
 │   ├── app/services/        # telemetry, sigma, correlation, notifier, total
 │   ├── app/rules/           # static rules + Sigma engine
 │   ├── alembic/versions/    # DB migrations
-│   └── tests/               # 740+ pytest (CI-verified)
+│   └── tests/               # 819 pytest (CI-verified; 3 YARA skips)
 ├── aegis-link/              # Spring Boot ingestion gateway
 ├── aegis-guard/             # Java endpoint agent (processes, FIM, remediation)
 │   └── install/windows/     # NSSM service installer/uninstaller
@@ -568,7 +571,7 @@ aegis-ecosystem/
 
 ### CI/CD
 
-GitHub Actions runs on every push: lint (flake8 + ESLint), secret scanning, event-contract checks, Windows installer checks, OS-compat matrix (ubuntu + windows), brain + guard + frontend tests, pip-audit, Trivy image scanning (strict on images we build, informational on upstream images), and SBOM generation. Release jobs run on tags.
+GitHub Actions runs on every push: lint (flake8 + oxlint), secret scanning, event-contract checks, Windows installer checks, OS-compat matrix (ubuntu + windows), brain + guard + link tests, frontend lint/build, pip-audit, Trivy image scanning (strict on images we build, informational on upstream images), and SBOM generation. Playwright and the live detection batteries are manual in 4.1; the Playwright CI job is planned for 4.2. Release jobs run on tags.
 
 ---
 
