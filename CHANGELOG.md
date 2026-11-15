@@ -26,6 +26,9 @@ the tag audit and the release policy.
 - `docs/RELEASES.md`: audit of the published tags and the release checklist.
 - `docs/youtrack_tickets.csv` and `scripts/youtrack_import.py`: import path for
   the findings and roadmap work packages.
+- `scripts/test-restore.sh` and the nightly `Backup Restore Check` workflow:
+  an encrypted backup/restore round-trip creates disposable databases and
+  verifies a probe row instead of trusting the restore path by inspection.
 
 ### Changed
 

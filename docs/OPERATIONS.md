@@ -117,6 +117,17 @@ I_CONFIRM_RESTORE=yes ./scripts/restore-db.sh /backups/aegis_db_<ts>.sql.gz.enc 
 # target diverso per prove: ... restore-db.sh <file> aegis_restore_test
 ```
 
+Round-trip automatico (crea DB usa-e-getta, non tocca il DB reale):
+
+```bash
+DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=postgres PGPASSWORD=... \
+  BACKUP_PASSPHRASE=... bash scripts/test-restore.sh
+```
+
+Il job GitHub `Backup Restore Check` esegue lo stesso percorso ogni notte con
+backup cifrato; `restore-db.sh` usa `ON_ERROR_STOP=1`, quindi un dump corrotto
+non può terminare con exit 0.
+
 Ripristino PKI: ricopiare `/app/pki` dal backup prima di firmare.
 
 ## 4. Upgrade e rollback

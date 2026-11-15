@@ -1,0 +1,45 @@
+name: Backup Restore Check
+
+on:
+  schedule:
+    # Nightly at 02:17 UTC; avoid the top-of-hour runner spike.
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore_roundtrip:
+    name: Encrypted backup / restore round-trip
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install PostgreSQL client and GnuPG
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client gpg
+
+      - name: Backup and restore a probe database
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_USER: postgres
+          PGPASSWORD: password
+          BACKUP_PASSPHRASE: ci_restore_passphrase
+        run: bash scripts/test-restore.sh
