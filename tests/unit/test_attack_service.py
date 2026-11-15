@@ -124,6 +124,27 @@ async def test_ingest_stores_credentials(db):
     assert "admin123" not in event.credentials[0].password
 
 @pytest.mark.asyncio
+async def test_ingest_never_sends_password_to_telegram(db):
+    p = SensorEventIn(
+        sensor_type="ssh", attacker_ip="10.0.0.9",
+        attacker_port=2222, sensor_port=22, session_id="test-secret",
+        username="root", password="super-secret-value",
+    )
+    sent = []
+
+    async def capture(event_data):
+        sent.append(event_data)
+
+    with patch("app.services.attack_service.telegram_service.send_alert",
+               new=AsyncMock(side_effect=capture)):
+        await ingest_sensor_event(db, p)
+
+    assert sent
+    assert "password" not in sent[0]
+    assert "super-secret-value" not in str(sent[0])
+
+
+@pytest.mark.asyncio
 async def test_ingest_stores_commands(db):
     p = SensorEventIn(
         sensor_type="http", attacker_ip="10.0.0.3",

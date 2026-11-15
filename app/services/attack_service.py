@@ -80,8 +80,11 @@ async def ingest_sensor_event(db: AsyncSession, payload: SensorEventIn) -> Attac
     await event_bus.emit_async("attack.ingested", attack_event=event_dict)
 
     try:
+        # La password in chiaro non deve mai uscire dal percorso di ingest.
+        # Telegram riceve solo i campi che servono all'alert: il dump completo
+        # includeva anche `password`, anche se il formatter non la stampava.
         await telegram_service.send_alert({
-            **payload.model_dump(),
+            **payload.model_dump(exclude={"password"}),
             "country": geo.get("country"),
             "city": geo.get("city"),
         })
