@@ -136,10 +136,16 @@ class OSINTReport(Base):
 class APIKey(Base):
     __tablename__ = "api_keys"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    hashed_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    # Le chiavi di servizio (shipper/firewall) non appartengono a un utente.
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    hashed_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True, index=True)
     scopes: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    # Sorgente consentita: None = tutte (solo chiave globale/admin).
+    source: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class CustomRule(Base):

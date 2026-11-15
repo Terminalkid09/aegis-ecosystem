@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import log_audit
 from app.core.config import settings
 from app.core.deps import get_current_user, require_perm
+from app.core.rate_limit import limiter
+from app.services.api_keys import resolve_api_key, source_allowed
 from app.database.connection import get_db
 from app.ingest import default_registry
 from app.ingest.registry import parser_catalog
@@ -30,32 +32,38 @@ router = APIRouter(tags=["SIEM Ingest"])
 
 
 async def ingest_auth(
+    request: Request,
     x_api_key: Optional[str] = Header(None, alias="X-Api-Key"),
     authorization: Optional[str] = Header(None, alias="Authorization"),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Accetta API key globale oppure JWT valido. Nessuna ingestione anonima.
+    """Accetta API key globale/per-sorgente oppure JWT valido.
 
-    Un JWT presente ma non valido è un 401, non un accesso anonimo: lasciar
-    passare un token invalido renderebbe l'endpoint di fatto aperto.
+    Una chiave DB viene risolta per hash e puo' essere revocata senza toccare
+    le altre integrazioni. Il rate limit usa l'identita' della chiave, non
+    l'IP del proxy.
     """
     if x_api_key:
-        # `verify_api_key` è sincrona e non va attesa: attenderla solleva
-        # TypeError e rende l'ingestione via API key un 500 sistematico
-        # (bug trovato rieseguendo la demo contro un brain reale).
-        from app.core.deps import verify_api_key
-        verify_api_key(x_api_key)
-        return {"kind": "api_key", "username": "api-key"}
+        auth = await resolve_api_key(db, x_api_key)
+        if auth is None:
+            raise HTTPException(status_code=403, detail="Forbidden: Invalid or revoked X-Api-Key")
+        request.state.rate_limit_key = f"api-key:{auth.get('id') or 'global'}"
+        return auth
     if authorization:
         try:
             user = await _resolve_user(authorization, db)
         except HTTPException:
             raise HTTPException(status_code=401, detail="Invalid token")
+        request.state.rate_limit_key = f"user:{user.id}"
         return {"kind": "bearer", "username": user.username, "role": user.role}
     raise HTTPException(
         status_code=401,
         detail="Ingestion requires X-Api-Key or a Bearer token",
     )
+
+
+def _ingest_rate_key(request: Request) -> str:
+    return getattr(request.state, "rate_limit_key", "anonymous")
 
 
 async def _resolve_user(authorization: str, db: AsyncSession):
@@ -174,6 +182,7 @@ async def detection_coverage(user=Depends(get_current_user)):
 
 
 @router.post("/{source}")
+@limiter.limit("600/minute", key_func=_ingest_rate_key)
 async def ingest_event(
     source: str,
     request: Request,
@@ -190,6 +199,11 @@ async def ingest_event(
     """
     if not settings.SIEM_ENABLED:
         raise HTTPException(status_code=503, detail="SIEM ingestion is disabled")
+    if auth.get("kind") == "api_key" and not source_allowed(auth, source):
+        raise HTTPException(
+            status_code=403,
+            detail=f"API key {auth.get('name')!r} is not allowed to write source {source!r}",
+        )
     if source == "auto" and parser is None:
         parser = "auto"
     result = await ingest_payload(db, source, payload, parser=parser)
