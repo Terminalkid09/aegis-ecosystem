@@ -11,8 +11,10 @@ import requests, time, uuid, sys
 from datetime import datetime, timezone
 
 B = "http://127.0.0.1:8000"
-EMAIL = os.getenv("AEGIS_EMAIL") or os.getenv("E2E_EMAIL") or ""
-PASSWORD = os.getenv("AEGIS_PASSWORD") or os.getenv("E2E_PASSWORD") or ""
+EMAIL = (os.getenv("AEGIS_EMAIL") or os.getenv("AEGIS_ADMIN_EMAIL")
+         or os.getenv("E2E_EMAIL") or "")
+PASSWORD = (os.getenv("AEGIS_PASSWORD") or os.getenv("AEGIS_ADMIN_PASSWORD")
+            or os.getenv("E2E_PASSWORD") or "")
 assert EMAIL and PASSWORD, "set AEGIS_EMAIL / AEGIS_PASSWORD (dashboard credentials)"
 
 B = "http://127.0.0.1:8000"
