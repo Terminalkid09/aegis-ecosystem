@@ -12,8 +12,8 @@ Prerequisiti (Windows e Linux):
 - `pip install -r aegis-brain/requirements.txt`
 
 Comportamento:
-- Legge .env (se presente) e costruisce TEST_DATABASE_URL / REDIS_URL
-  verso 127.0.0.1 + porte mappate dal compose (port forwarding).
+- Legge .env (se presente) e costruisce TEST_DATABASE_URL / DATABASE_URL /
+  REDIS_URL verso 127.0.0.1 + porte mappate dal compose (port forwarding).
 - NON usa mai il DB di produzione: se DATABASE_URL non contiene "test",
   lo riscrive verso aegis_test (logica di conftest.py).
 - Se i servizi non sono raggiungibili, i test di integrazione vengono
@@ -82,9 +82,16 @@ def main() -> int:
         r_port = "6379"
 
     # Costruisce URL verso 127.0.0.1 (funziona sia da host Windows che Linux).
-    os.environ["TEST_DATABASE_URL"] = (
+    test_database_url = (
         f"postgresql+asyncpg://{pg_user}:{pg_pass}@127.0.0.1:{pg_port}/aegis_test"
     )
+    os.environ["TEST_DATABASE_URL"] = test_database_url
+    # Settings reads DATABASE_URL, while some tests (syslog/retention) build a
+    # module-level engine before the client fixture can override it. Without
+    # this, they silently used the placeholder .env URL and failed with
+    # "password authentication failed for user \"user\"" while the API tests
+    # passed. Always point the suite at the test database.
+    os.environ["DATABASE_URL"] = test_database_url
     if r_pass:
         os.environ["REDIS_URL"] = f"redis://:{r_pass}@127.0.0.1:{r_port}"
     else:
