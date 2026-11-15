@@ -757,6 +757,20 @@ def _require_soc(user):
         raise HTTPException(status_code=403, detail="Contain actions require responder/analyst/admin role")
 
 
+def _containment_state(agent, queued: bool, releasing: bool = False) -> dict:
+    """Stato containment da restituire subito dopo l'enqueue.
+
+    Il DB cambia solo all'ack dell'agente. Se il comando e' stato accodato,
+    l'API deve dire che l'isolamento/release e' PENDING, non restituire lo
+    stato vecchio contraddicendo l'operazione appena richiesta.
+    """
+    if not queued:
+        return {"isolated": bool(agent.isolated), "pending": None}
+    if releasing:
+        return {"isolated": False, "pending": "DEISOLATE_HOST"}
+    return {"isolated": True, "pending": "ISOLATE_HOST"}
+
+
 @router.post("/agents/{agent_id}/isolate")
 async def isolate_agent(
     agent_id: str, payload: IsolateRequest, request: Request,
@@ -783,8 +797,11 @@ async def isolate_agent(
         user_id=_user.id, username=_user.username,
         ip_address=request.client.host if request else None)
     await db.commit()
+    # Lo stato persistito cambia solo all'ack dell'agente; qui si espone lo
+    # stato RICHIESTO e il comando pendente, senza contraddire il comando
+    # appena accodato con un `isolated=false` letto prima dell'esecuzione.
     return {"status": "queued" if queued else "queue_unavailable",
-            "agent_id": str(agent.agent_id), "isolated": agent.isolated}
+            "agent_id": str(agent.agent_id), **_containment_state(agent, queued)}
 
 
 @router.post("/agents/{agent_id}/release")
@@ -813,7 +830,8 @@ async def release_agent(
         ip_address=request.client.host if request else None)
     await db.commit()
     return {"status": "queued" if queued else "queue_unavailable",
-            "agent_id": str(agent.agent_id), "isolated": agent.isolated}
+            "agent_id": str(agent.agent_id),
+            **_containment_state(agent, queued, releasing=True)}
 
 
 class SiteAssign(BaseModel):
