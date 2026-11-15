@@ -13,6 +13,8 @@ from app.services import yara_engine
 
 # ------------------------------------------------------------------ yara engine
 
+@pytest.mark.skipif(not yara_engine.YARA_AVAILABLE,
+                    reason="yara-python is unavailable on this Python/platform")
 def test_yara_engine_isolates_broken_rule():
     ok, errs = yara_engine.compile_rules([
         ("good", 'rule good_r { strings: $s = "abc" condition: $s }'),
@@ -22,6 +24,8 @@ def test_yara_engine_isolates_broken_rule():
     assert len(errs) == 1 and errs[0]["rule"] == "bad"
 
 
+@pytest.mark.skipif(not yara_engine.YARA_AVAILABLE,
+                    reason="yara-python is unavailable on this Python/platform")
 def test_yara_scan_match_and_score():
     ok, _ = yara_engine.compile_rules([("t", 'rule t_r { strings: $s = "evil" condition: $s }')])
     res = yara_engine.scan_bytes(b"pure evil bytes", ok)
@@ -31,6 +35,8 @@ def test_yara_scan_match_and_score():
     assert score >= 40 and findings[0]["severity"] == "high"
 
 
+@pytest.mark.skipif(not yara_engine.YARA_AVAILABLE,
+                    reason="yara-python is unavailable on this Python/platform")
 def test_yara_no_match_clean():
     ok, _ = yara_engine.compile_rules([("t", 'rule t_r2 { strings: $s = "zzzz" condition: $s }')])
     res = yara_engine.scan_bytes(b"harmless", ok)
