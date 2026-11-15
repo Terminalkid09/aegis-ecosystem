@@ -575,19 +575,22 @@ async def scan_network_via_agent(
     agent_obj = result.scalars().first()
     if not agent_obj:
         raise HTTPException(status_code=404, detail="Agent not found")
-    import json
     import redis.asyncio as redis_lib
     from app.core.redis_utils import get_redis_url
+    from app.services.command_queue import enqueue_command
     rc = redis_lib.from_url(get_redis_url(), decode_responses=True)
-    queue_name = f"aegis:commands:{agent_id}"
     command = {
         "command": "NETWORK_SCAN",
         "cidr": payload.cidr,
         "ports": payload.ports,
         "probe_timeout": payload.probe_timeout,
     }
-    await rc.rpush(queue_name, json.dumps(command))
-    await rc.aclose()
+    try:
+        queued = await enqueue_command(rc, agent_id, command)
+    finally:
+        await rc.aclose()
+    if not queued.get("queued"):
+        raise HTTPException(status_code=503, detail="Agent command queue is full")
     return {
         "status": "command_queued",
         "agent_id": agent_id,

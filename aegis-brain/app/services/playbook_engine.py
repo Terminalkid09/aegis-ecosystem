@@ -7,6 +7,7 @@ from app.database.models import Playbook, PlaybookAction, PlaybookExecution, Ale
 from app.core.logging import get_logger
 import redis.asyncio as redis
 from app.core.config import settings
+from app.services.command_queue import enqueue_command
 
 logger = get_logger(__name__)
 rc = redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -380,13 +381,13 @@ async def _execute_action(
 
 
 async def _send_agent_command(agent_id, command: Dict[str, Any]):
-    import json
-    queue_name = f"aegis:commands:{str(agent_id)}"
     try:
-        # FIFO: RPUSH + LPOP (was LPUSH = LIFO, order reversed vs telemetry).
-        await rc.rpush(queue_name, json.dumps(command))
-        await rc.ltrim(queue_name, 0, 99)
+        result = await enqueue_command(rc, str(agent_id), command)
     except Exception as e:
         logger.warning(f"Command queue unavailable for {agent_id}: {e}")
         return {"status": "failed", "output": f"Queue unavailable: {command.get('command')}"}
+    if not result.get("queued"):
+        logger.warning("Command queue full for %s: %s", agent_id, command.get("command"))
+        return {"status": "failed",
+                "output": f"Queue full ({result.get('depth')}/{result.get('limit')}): {command.get('command')}"}
     return {"status": "completed", "output": f"Command queued: {command.get('command')}"}

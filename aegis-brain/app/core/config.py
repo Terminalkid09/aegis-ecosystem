@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     # una sola volta per (playbook, alert) entro questa finestra. Evita che un
     # alert non risolto ri-attivi contenimento (kill/isolate) ogni minuto.
     PLAYBOOK_IDEMPOTENCY_TTL_S: int = 86400
+    # Coda comandi per agente: oltre il cap il comando viene RIFIUTATO, non
+    # silenziosamente scartato dal LTRIM. 100 comandi coprono un burst di
+    # contenimento mentre l'agente e' momentaneamente offline.
+    COMMAND_QUEUE_MAX: int = 100
 
     # Rate limiting (audit S1). Lo storage in memoria vale solo per il singolo
     # processo uvicorn: in pilot/HA va puntato a Redis (es. redis://...).
