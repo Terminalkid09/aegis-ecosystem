@@ -8,9 +8,14 @@ Due modi di autenticarsi, entrambi espliciti:
 L'ingestione è idempotente per `event_id`: un relay che reinvia la stessa riga
 non produce alert duplicati (vedi `siem_store.claim_event`).
 """
+import hashlib
+import hmac
+import json
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
+from sqlalchemy import select
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +31,8 @@ from app.rules.sigma import get_engine as get_sigma_engine
 from app.services import siem_store
 from app.services.correlation import get_correlation_engine
 from app.services.siem_pipeline import ingest_payload
+from app.database.models import Incident, IncidentAlert
+from app.ingest.base import parse_timestamp
 
 
 router = APIRouter(tags=["SIEM Ingest"])
@@ -179,6 +186,136 @@ async def detection_coverage(user=Depends(get_current_user)):
         "sigma": get_sigma_engine().coverage(),
         "correlation": get_correlation_engine().coverage(),
     }
+
+
+def _kraken_allowed(auth: Dict[str, Any]) -> bool:
+    """Kraken needs its own source and an explicit write scope.
+
+    The global API key is the bootstrap/backward-compatible path; every
+    per-service key must be restricted to `source=kraken` and to the
+    `kraken:write` scope. A generic ingest key is not enough.
+    """
+    if auth.get("kind") != "api_key":
+        return False
+    if auth.get("global"):
+        return True
+    if not source_allowed(auth, "kraken"):
+        return False
+    scopes = auth.get("scopes") or {}
+    if isinstance(scopes, dict):
+        scopes = scopes.get("scopes") or []
+    return "*" in scopes or "kraken:write" in scopes
+
+
+async def _ensure_kraken_incident(db: AsyncSession, events: List[Dict[str, Any]],
+                                  alert_ids: List[int]) -> Optional[int]:
+    """Attach the new alerts to one open incident, creating the timeline row.
+
+    The alert is the detection; the incident is what the SOC timeline reads.
+    Grouping by session (or event id when the sensor omits it) avoids creating
+    a new incident for every command in the same attack.
+    """
+    if not alert_ids:
+        return None
+    first = events[0]
+    raw = first.get("raw") if isinstance(first.get("raw"), dict) else {}
+    network = first.get("network") if isinstance(first.get("network"), dict) else {}
+    session = raw.get("session_id") or first.get("event_id")
+    source_ip = network.get("src_ip") or "unknown"
+    title = f"[KRAKEN] {session} from {source_ip}"[:255]
+
+    existing = await db.execute(
+        select(Incident).where(
+            Incident.title == title,
+            Incident.status.in_(("open", "investigating")),
+        )
+    )
+    incident = existing.scalars().first()
+    if incident is None:
+        ranks = {"INFO": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+        severity = max(
+            (str(e.get("severity") or "MEDIUM").upper() for e in events),
+            key=lambda s: ranks.get(s, 0),
+        )
+        incident = Incident(
+            title=title,
+            severity=severity if severity in ranks and severity != "INFO" else "MEDIUM",
+            status="open",
+            agent_id="kraken",
+        )
+        db.add(incident)
+        await db.flush()
+
+    for alert_id in sorted(set(alert_ids)):
+        linked = await db.execute(
+            select(IncidentAlert).where(
+                IncidentAlert.incident_id == incident.id,
+                IncidentAlert.alert_id == alert_id,
+            )
+        )
+        if linked.scalars().first() is None:
+            db.add(IncidentAlert(incident_id=incident.id, alert_id=alert_id))
+    await db.commit()
+    return incident.id
+
+
+@router.post("/kraken")
+@limiter.limit("300/minute", key_func=_ingest_rate_key)
+async def ingest_kraken_event(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    auth=Depends(ingest_auth),
+):
+    """Ingest the signed Kraken contract and turn it into an Aegis timeline.
+
+    This route is deliberately before `/{source}`: otherwise the generic
+    dynamic route would swallow `/kraken` and bypass the HMAC check.
+    """
+    if not settings.KRAKEN_INGEST_ENABLED:
+        raise HTTPException(status_code=503, detail="Kraken ingestion is disabled")
+    secret = (settings.KRAKEN_INGEST_SECRET or "").strip()
+    if len(secret) < 32:
+        raise HTTPException(status_code=503, detail="Kraken ingestion secret is not configured")
+    if not _kraken_allowed(auth):
+        raise HTTPException(status_code=403, detail="Kraken requires source=kraken and scope kraken:write")
+
+    raw_body = await request.body()
+    if len(raw_body) > settings.KRAKEN_INGEST_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Kraken payload too large")
+    signature = (request.headers.get("X-Kraken-Signature") or "").strip()
+    if signature.lower().startswith("sha256="):
+        signature = signature[7:]
+    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    if not signature or not hmac.compare_digest(signature, expected):
+        raise HTTPException(status_code=401, detail="Invalid Kraken HMAC signature")
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Kraken payload must be JSON")
+    rows = payload.get("events") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or not rows:
+        raise HTTPException(status_code=422, detail="Kraken payload must contain events")
+    if len(rows) > settings.KRAKEN_INGEST_MAX_EVENTS:
+        raise HTTPException(status_code=422, detail="too many Kraken events")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    for row in rows:
+        if not isinstance(row, dict):
+            raise HTTPException(status_code=422, detail="each Kraken event must be an object")
+        occurred = parse_timestamp(row.get("occurred_at") or row.get("time"))
+        if occurred < cutoff:
+            raise HTTPException(status_code=422, detail="Kraken event older than 7 days")
+
+    result = await ingest_payload(db, "kraken", payload, parser="kraken")
+    if not result.get("accepted"):
+        raise HTTPException(status_code=422, detail={
+            "message": "no Kraken event could be parsed",
+            "errors": result.get("errors"),
+        })
+
+    incident_id = await _ensure_kraken_incident(db, rows, result.get("alert_ids") or [])
+    return {"status": "ok", **result, "incident_id": incident_id}
 
 
 @router.post("/{source}")

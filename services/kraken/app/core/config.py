@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     SIEM_LOG_FILE: str = "/app/data/logs/siem.jsonl"
     GEOIP_DB_PATH: str = "/app/data/GeoLite2-City.mmdb"
 
+    # Aegis control plane (Kraken → Brain)
+    AEGIS_INGEST_ENABLED: bool = False
+    AEGIS_INGEST_URL: str = ""
+    AEGIS_INGEST_KEY: str = ""
+    AEGIS_INGEST_SECRET: str = ""
+    AEGIS_INGEST_TIMEOUT_S: float = 5.0
+
     # Telegram
     TELEGRAM_BOT_TOKEN: Optional[str] = None
     TELEGRAM_CHAT_ID: Optional[str] = None
@@ -101,6 +108,13 @@ class Settings(BaseSettings):
                 logger.warning("Auto-generated INTERNAL_API_KEY for DEBUG mode.")
             else:
                 print("❌ INTERNAL_API_KEY not configured. Set a random value of at least 32 characters.")
+                sys.exit(1)
+        if self.AEGIS_INGEST_ENABLED:
+            if not self.AEGIS_INGEST_URL or not self.AEGIS_INGEST_KEY:
+                print("❌ AEGIS_INGEST_URL and AEGIS_INGEST_KEY are required when AEGIS_INGEST_ENABLED=true.")
+                sys.exit(1)
+            if len(self.AEGIS_INGEST_SECRET) < 32:
+                print("❌ AEGIS_INGEST_SECRET must be at least 32 characters.")
                 sys.exit(1)
 
     def get_cors_origins(self) -> list[str]:

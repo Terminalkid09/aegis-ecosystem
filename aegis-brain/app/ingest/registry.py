@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from app.ingest.base import Parser, ParserError, UnifiedEvent
 from app.ingest.parsers.firewall import FirewallParser
 from app.ingest.parsers.json_generic import JsonGenericParser
+from app.ingest.parsers.kraken import KrakenParser
 from app.ingest.parsers.suricata import SuricataParser
 from app.ingest.parsers.syslog import SyslogParser
 from app.ingest.parsers.web_proxy import WebProxyParser
@@ -166,6 +167,7 @@ def _build_default_registry() -> ParserRegistry:
     registry.register(SyslogParser(), aliases=("rfc5424", "rfc3164"))
     registry.register(FirewallParser("firewall"))
     registry.register(WebProxyParser("web"))
+    registry.register(KrakenParser(), aliases=("deception",))
     registry.register(JsonGenericParser(), aliases=("ndjson", "generic"), generic=True)
     return registry
 

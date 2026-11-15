@@ -127,6 +127,44 @@ def _alert_from_correlation(match: CorrelationMatch, agent_id: uuid.UUID) -> Ale
     )
 
 
+def _alert_from_kraken(event: UnifiedEvent, agent_id: uuid.UUID) -> Alert:
+    """Alert guaranteed for a deception event.
+
+    Sigma may not have a rule for a new sensor yet. A Kraken attack must still
+    be visible in the Aegis alert list and timeline: the source event is the
+    detection here, not an optional rule match. No credential material is put
+    in the description or evidence.
+    """
+    raw = event.extra.get("kraken") or {}
+    src_ip = event.src_ip or event.ip or "unknown"
+    sensor = raw.get("sensor") or event.source_type
+    command = event.command_line or ""
+    return Alert(
+        agent_id=agent_id,
+        severity=event.severity if event.severity in {"LOW", "MEDIUM", "HIGH", "CRITICAL"} else "MEDIUM",
+        pid=event.pid,
+        process_name=(event.process_name or f"kraken:{sensor}")[:255],
+        event_type="DECEPTION",
+        description=(f"[KRAKEN {sensor}] Deception activity from {src_ip} "
+                     f"({event.category or 'attack'}) — {command[:200]}")[:2000],
+        evidence={
+            "source": "kraken",
+            "event_id": event.event_id,
+            "session_id": raw.get("session_id"),
+            "sensor": sensor,
+            "context": raw.get("context"),
+            "run_id": raw.get("run_id"),
+            "scenario_id": raw.get("scenario_id"),
+            "src_ip": event.src_ip,
+            "dst_port": event.dst_port,
+            "username": event.user,
+            "command_line": event.command_line,
+            "iocs": raw.get("iocs") or [],
+            "sample_sha256": raw.get("sample_sha256"),
+        },
+    )
+
+
 async def _detect_and_alert(db: AsyncSession, source_name: str, source_type: str,
                             events: Sequence[UnifiedEvent]) -> Dict[str, Any]:
     """Sigma + correlazione sugli eventi appena salvati. Best-effort."""
@@ -143,7 +181,8 @@ async def _detect_and_alert(db: AsyncSession, source_name: str, source_type: str
         logger.warning(f"Correlazione non valutata per {source_name}: {exc}")
         correlation_matches = []
 
-    if not sigma_matches and not correlation_matches:
+    kraken_events = [e for e in events if e.source_type == "kraken"]
+    if not sigma_matches and not correlation_matches and not kraken_events:
         return {"sigma": 0, "correlation": 0, "alerts": 0}
 
     agent = await get_or_create_source_agent(db, source_name, source_type)
@@ -152,6 +191,10 @@ async def _detect_and_alert(db: AsyncSession, source_name: str, source_type: str
         new_alerts.append(_alert_from_sigma(event, match, agent.agent_id))
     for match in correlation_matches:
         new_alerts.append(_alert_from_correlation(match, agent.agent_id))
+    matched_ids = {e.event_id for e, _ in sigma_matches}
+    for event in kraken_events:
+        if event.event_id not in matched_ids:
+            new_alerts.append(_alert_from_kraken(event, agent.agent_id))
     for alert in new_alerts:
         db.add(alert)
     await db.flush()
@@ -242,6 +285,7 @@ async def process_events(db: AsyncSession, source_name: str, source_type: str,
         "accepted": len(events),
         "duplicates": duplicates,
         "stored": stored,
+        "alert_ids": detection.get("alert_ids", []),
         **{k: v for k, v in detection.items() if k != "alert_ids"},
     }
 

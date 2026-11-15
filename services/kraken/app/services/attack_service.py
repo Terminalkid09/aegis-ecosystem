@@ -79,6 +79,14 @@ async def ingest_sensor_event(db: AsyncSession, payload: SensorEventIn) -> Attac
     }
     await event_bus.emit_async("attack.ingested", attack_event=event_dict)
 
+    # Gate D: the signed event is what makes the attack visible in Aegis.
+    # Fail-soft: Aegis being down must not lose the local honeypot record.
+    try:
+        from app.services.aegis_ingest import publish_attack_event
+        await publish_attack_event(event, payload)
+    except Exception as e:
+        logger.warning(f"Aegis event emission failed: {e}")
+
     try:
         # La password in chiaro non deve mai uscire dal percorso di ingest.
         # Telegram riceve solo i campi che servono all'alert: il dump completo

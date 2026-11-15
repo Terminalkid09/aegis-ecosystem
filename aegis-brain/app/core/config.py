@@ -180,6 +180,14 @@ class Settings(BaseSettings):
     # Bound sull'ingestione: oltre, il payload viene troncato dichiarandolo.
     SIEM_MAX_EVENTS_PER_REQUEST: int = 5000
     SIEM_SEARCH_MAX_LIMIT: int = 500
+
+    # Kraken deception ingest (Gate D). Off by default: enabling it requires
+    # both a dedicated API key and the HMAC secret, so a missing secret can
+    # never turn into an unauthenticated write path.
+    KRAKEN_INGEST_ENABLED: bool = False
+    KRAKEN_INGEST_SECRET: Optional[str] = None
+    KRAKEN_INGEST_MAX_BYTES: int = 1_048_576
+    KRAKEN_INGEST_MAX_EVENTS: int = 500
     # Listener syslog (UDP+TCP). Default OFF: si abilita esplicitamente, così
     # nessuna porta in ascolto compare per caso in un deploy.
     SYSLOG_ENABLED: bool = False
@@ -231,6 +239,13 @@ class Settings(BaseSettings):
         # Audit F-01: vale anche col flag enterprise esplicito in lab.
         if self.ENTERPRISE_STRICT and self.ALLOW_OPEN_REGISTRATION:
             raise ValueError("ALLOW_OPEN_REGISTRATION must be false when ENTERPRISE_STRICT is true")
+        if self.KRAKEN_INGEST_ENABLED:
+            secret = (self.KRAKEN_INGEST_SECRET or "").strip()
+            if len(secret) < 32:
+                raise ValueError(
+                    "KRAKEN_INGEST_SECRET must be at least 32 characters when "
+                    "KRAKEN_INGEST_ENABLED is true"
+                )
         # Audit F-03: profili enterprise senza mTLS required non partono.
         if self.ENTERPRISE_STRICT and (self.MTLS_MODE or "").lower() != "required":
             raise ValueError("ENTERPRISE_STRICT requires MTLS_MODE=required")

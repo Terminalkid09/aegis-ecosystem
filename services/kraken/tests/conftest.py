@@ -10,6 +10,12 @@ import shutil
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# The monorepo has no service-local .env (and never should): use fixed,
+# non-production test secrets so importing the app cannot fail on an empty key.
+os.environ.setdefault("DEBUG", "true")
+os.environ.setdefault("SECRET_KEY", "test-kraken-secret-key-32-characters-minimum")
+os.environ.setdefault("INTERNAL_API_KEY", "test-kraken-internal-key-32-characters-minimum")
+
 # KRAKEN-LOGIC-005: never write test artefacts into the image's /app.
 _TEST_DATA_ROOT = tempfile.mkdtemp(prefix="kraken-test-data-")
 os.environ["DATA_DIR"] = _TEST_DATA_ROOT
