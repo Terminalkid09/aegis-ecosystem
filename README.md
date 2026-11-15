@@ -212,7 +212,7 @@ Equivalent installers: `./install.sh lab|pilot [--observability]` and `.\install
 ### Quality gates
 
 ```bash
-# Brain tests (819 passed, 3 YARA skips, DB-backed)
+# Brain tests (820 passed, 3 YARA skips, DB-backed)
 python scripts/run_integration_tests.py --import-mode=importlib
 
 # Guard tests (140 JUnit)
@@ -232,7 +232,7 @@ python scripts/live_battery.py
 python scripts/hard_battery.py
 ```
 
-Verification layers: 819 pytest, 140 Guard JUnit, 17 Link JUnit, 11 Playwright e2e and 2 live detection batteries. CI gates pytest, Guard/Link, NodeTrace, frontend lint/build, pip-audit, Trivy and SBOM; Playwright and the live batteries are manual in 4.1. The Playwright CI runner is planned for 4.2.
+Verification layers: 820 pytest, 140 Guard JUnit, 17 Link JUnit, 12 Playwright e2e and 2 live detection batteries. CI gates pytest, Guard/Link, NodeTrace, frontend lint/build, pip-audit, Trivy and SBOM; Playwright and the live batteries are manual in 4.1. The Playwright CI runner is planned for 4.2.
 
 ---
 
@@ -552,7 +552,7 @@ aegis-ecosystem/
 │   ├── app/services/        # telemetry, sigma, correlation, notifier, total
 │   ├── app/rules/           # static rules + Sigma engine
 │   ├── alembic/versions/    # DB migrations
-│   └── tests/               # 819 pytest (CI-verified; 3 YARA skips)
+│   └── tests/               # 820 pytest (CI-verified; 3 YARA skips)
 ├── aegis-link/              # Spring Boot ingestion gateway
 ├── aegis-guard/             # Java endpoint agent (processes, FIM, remediation)
 │   └── install/windows/     # NSSM service installer/uninstaller
