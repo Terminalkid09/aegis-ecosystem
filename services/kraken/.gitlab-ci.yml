@@ -1,0 +1,187 @@
+stages:
+  - lint
+  - test
+  - build
+  - security
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PYTHON_VERSION: "3.10.11"
+  POSTGRES_DB: krakendb_test
+  POSTGRES_USER: kraken
+  POSTGRES_PASSWORD: kraken_test_pass
+  POSTGRES_HOST_AUTH_METHOD: trust
+
+# ── Cache pip across jobs ──────────────────────────────────────────────────────
+.python_cache: &python_cache
+  cache:
+    key: "$CI_COMMIT_REF_SLUG-pip"
+    paths:
+      - .cache/pip
+      - .venv/
+
+# ── Base Python job template ──────────────────────────────────────────────────
+.base_python: &base_python
+  image: python:3.10.11-slim
+  before_script:
+    - pip install --upgrade pip
+    - pip install -r requirements.txt aiosqlite
+  <<: *python_cache
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE: lint
+# ─────────────────────────────────────────────────────────────────────────────
+
+ruff:lint:
+  stage: lint
+  image: python:3.10.11-slim
+  before_script:
+    - pip install ruff
+  script:
+    - ruff check app/ honeypot/ tests/ --output-format=gitlab
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE: test
+# ─────────────────────────────────────────────────────────────────────────────
+
+unit:tests:
+  stage: test
+  <<: *base_python
+  script:
+    - pytest tests/unit/ -v
+      --cov=app
+      --cov-report=term-missing
+      --cov-report=xml:coverage-unit.xml
+      --junitxml=report-unit.xml
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    when: always
+    reports:
+      junit: report-unit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage-unit.xml
+    expire_in: 7 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+integration:tests:
+  stage: test
+  <<: *base_python
+  services:
+    - name: postgres:15-alpine
+      alias: postgres
+  variables:
+    DATABASE_URL: "postgresql+asyncpg://kraken:kraken_test_pass@postgres:5432/krakendb_test"
+    REDIS_URL: "redis://redis:6379/0"
+    SECRET_KEY: "ci_test_secret_key_32_chars_minimum"
+    INTERNAL_API_KEY: "ci_test_internal_key_32_chars_min"
+    DEBUG: "true"
+  script:
+    - pytest tests/integration/ -v
+      --cov=app
+      --cov-report=term-missing
+      --cov-report=xml:coverage-integration.xml
+      --junitxml=report-integration.xml
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    when: always
+    reports:
+      junit: report-integration.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage-integration.xml
+    expire_in: 7 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+security:tests:
+  stage: test
+  <<: *base_python
+  script:
+    - pytest tests/unit/test_schemas.py tests/unit/test_security.py -v
+      --junitxml=report-security.xml
+  artifacts:
+    when: always
+    reports:
+      junit: report-security.xml
+    expire_in: 7 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE: build
+# ─────────────────────────────────────────────────────────────────────────────
+
+docker:build:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    IMAGE_TAG: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    IMAGE_LATEST: "$CI_REGISTRY_IMAGE:latest"
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - docker build -t "$IMAGE_TAG" -t "$IMAGE_LATEST" .
+    - docker push "$IMAGE_TAG"
+    - docker push "$IMAGE_LATEST"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE: security scanning
+# ─────────────────────────────────────────────────────────────────────────────
+
+bandit:sast:
+  stage: security
+  image: python:3.10.11-slim
+  before_script:
+    - pip install bandit[toml]
+  script:
+    - bandit -r app/ honeypot/ -f json -o bandit-report.json || true
+    - bandit -r app/ honeypot/ -ll  # fail only on HIGH severity
+  artifacts:
+    when: always
+    paths:
+      - bandit-report.json
+    expire_in: 30 days
+  allow_failure: false
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+pip:audit:
+  stage: security
+  image: python:3.10.11-slim
+  before_script:
+    - pip install pip-audit
+  script:
+    - pip-audit -r requirements.txt --format=json -o pip-audit-report.json || true
+    - pip-audit -r requirements.txt  # human readable output
+  artifacts:
+    when: always
+    paths:
+      - pip-audit-report.json
+    expire_in: 30 days
+  allow_failure: true  # non-blocking: new CVEs shouldn't break builds
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'

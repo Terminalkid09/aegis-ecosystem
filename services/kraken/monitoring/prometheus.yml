@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'kraken'
+    environment: 'production'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - 'alerting_rules.yml'
+
+scrape_configs:
+  - job_name: 'kraken-app'
+    static_configs:
+      - targets: ['kraken_app:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'kraken-db'
+    static_configs:
+      - targets: ['kraken_db:5432']
+    # Use postgres_exporter if available
+
+  - job_name: 'kraken-redis'
+    static_configs:
+      - targets: ['kraken_redis:6379']
+    # Use redis_exporter if available
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']

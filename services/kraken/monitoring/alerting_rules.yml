@@ -1,0 +1,84 @@
+groups:
+  - name: kraken.rules
+    interval: 30s
+    rules:
+      - alert: KrakenHighRequestLatency
+        expr: histogram_quantile(0.95, rate(kraken_http_request_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High request latency (95th percentile > 1s)"
+          description: "Kraken API 95th percentile latency is {{ $value }}s"
+
+      - alert: KrakenHighErrorRate
+        expr: rate(kraken_http_requests_total{status=~"5.."}[5m]) / rate(kraken_http_requests_total[5m]) > 0.05
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High 5xx error rate (>5%)"
+          description: "Kraken API error rate is {{ $value | humanizePercentage }}"
+
+      - alert: KrakenSandboxExhaustion
+        expr: kraken_active_sandboxes > 15
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sandbox pool near exhaustion"
+          description: "{{ $value }} active sandboxes out of 20 max"
+
+      - alert: KrakenSandboxCreationFailures
+        expr: rate(kraken_sandbox_created_total{status="failure"}[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Sandbox creation failures"
+          description: "Sandbox creation failure rate is {{ $value }}/sec"
+
+      - alert: KrakenDatabaseDown
+        expr: kraken_db_connections_active == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connections dropped to zero"
+          description: "No active database connections"
+
+      - alert: KrakenRedisDisconnected
+        expr: kraken_redis_connected == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis disconnected"
+          description: "Redis connection lost"
+
+      - alert: KrakenHighAuthFailures
+        expr: rate(kraken_auth_failures_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High authentication failure rate"
+          description: "{{ $value }} auth failures/sec - possible brute force"
+
+      - alert: KrakenAttackSpike
+        expr: rate(kraken_attacks_total[5m]) > 100
+        for: 3m
+        labels:
+          severity: info
+        annotations:
+          summary: "Attack traffic spike detected"
+          description: "{{ $value }} attacks/sec - unusual activity"
+
+      - alert: KrakenMalwareCaptureSpike
+        expr: rate(kraken_malware_captured_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Malware capture spike"
+          description: "{{ $value }} malware samples/sec captured"
