@@ -14,6 +14,17 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: License and distribution gate
+        run: |
+          test -s LICENSE
+          grep -q "GNU AFFERO GENERAL PUBLIC LICENSE" LICENSE
+          test -s NOTICE
+          test -s TRADEMARK.md
+          test -s SECURITY.md
+          test -s CONTRIBUTING.md
+          test -s THIRD_PARTY_NOTICES.md
+          echo "license, notice and distribution documents present"
+
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
