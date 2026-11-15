@@ -1,12 +1,14 @@
 from httpx import AsyncClient
 
+from app.core.config import settings
+
 
 class TestAuthFlow:
-    async def test_register_success(self, client: AsyncClient):
+    async def test_register_success(self, client: AsyncClient, monkeypatch):
+        monkeypatch.setattr(settings, "ALLOW_REGISTRATION", True)
         response = await client.post("/api/v1/auth/register", json={
             "username": "newuser",
             "password": "securepass123",
-            "is_admin": False
         })
         assert response.status_code == 201
         data = response.json()
@@ -14,14 +16,31 @@ class TestAuthFlow:
         assert data["is_admin"] is False
         assert "id" in data
 
-    async def test_register_duplicate_username(self, client: AsyncClient, test_user):
+    async def test_register_duplicate_username(self, client: AsyncClient, test_user, monkeypatch):
+        monkeypatch.setattr(settings, "ALLOW_REGISTRATION", True)
         response = await client.post("/api/v1/auth/register", json={
             "username": test_user.username,
             "password": "anotherpass123",
-            "is_admin": False
         })
         assert response.status_code == 400
         assert "already taken" in response.json()["detail"]
+
+    async def test_register_disabled_by_default(self, client: AsyncClient, monkeypatch):
+        monkeypatch.setattr(settings, "ALLOW_REGISTRATION", False)
+        response = await client.post("/api/v1/auth/register", json={
+            "username": "closeduser",
+            "password": "securepass123",
+        })
+        assert response.status_code == 403
+
+    async def test_register_rejects_is_admin(self, client: AsyncClient, monkeypatch):
+        monkeypatch.setattr(settings, "ALLOW_REGISTRATION", True)
+        response = await client.post("/api/v1/auth/register", json={
+            "username": "wannabeadmin",
+            "password": "securepass123",
+            "is_admin": True,
+        })
+        assert response.status_code == 422
 
     async def test_login_success(self, client: AsyncClient, test_user):
         response = await client.post("/api/v1/auth/login", json={
@@ -46,6 +65,32 @@ class TestAuthFlow:
             "username": "nonexistent",
             "password": "anypassword"
         })
+        assert response.status_code == 401
+
+    async def test_refresh_token_is_single_use(self, client: AsyncClient, test_user):
+        login = await client.post("/api/v1/auth/login", json={
+            "username": test_user.username,
+            "password": "testpass123",
+        })
+        refresh_token = login.json()["refresh_token"]
+        first = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+        assert first.status_code == 200
+        second = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+        assert second.status_code == 401
+
+    async def test_logout_revokes_refresh_cookie(self, client: AsyncClient, test_user):
+        login = await client.post("/api/v1/auth/login", json={
+            "username": test_user.username,
+            "password": "testpass123",
+        })
+        refresh_token = login.json()["refresh_token"]
+        # The cookie is Secure; httpx does not send it over the test http URL.
+        logout = await client.post(
+            "/api/v1/auth/logout",
+            cookies={"kraken_refresh": refresh_token},
+        )
+        assert logout.status_code == 204
+        response = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
         assert response.status_code == 401
 
     async def test_cookie_auth_on_protected_route(self, client: AsyncClient, test_user):

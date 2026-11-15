@@ -1,9 +1,13 @@
 import pytest
 from app.core.security import (
-    hash_password, verify_password, create_access_token, decode_access_token
+    hash_password, verify_password, create_access_token, create_refresh_token,
+    decode_access_token, decode_access_payload, verify_internal_api_key,
 )
+from app.core.config import settings
 from app.schemas.schemas import SensorEventIn, LoginRequest
+from fastapi import HTTPException
 from pydantic import ValidationError
+import pytest
 import time
 
 
@@ -48,10 +52,25 @@ class TestJWT:
         assert payload is None
 
     def test_refresh_token_not_accepted_as_access(self):
-        from app.core.security import create_refresh_token
         token = create_refresh_token(subject="testuser")
         payload = decode_access_token(token)
         assert payload is None
+
+    def test_access_payload_has_jti(self):
+        payload = decode_access_payload(create_access_token(subject="testuser"))
+        assert payload is not None and payload["jti"]
+
+
+class TestInternalApiKey:
+    def test_accepts_matching_key(self, monkeypatch):
+        key = "a" * 64
+        monkeypatch.setattr(settings, "INTERNAL_API_KEY", key)
+        assert verify_internal_api_key(key) == key
+
+    def test_rejects_wrong_key(self, monkeypatch):
+        monkeypatch.setattr(settings, "INTERNAL_API_KEY", "a" * 64)
+        with pytest.raises(HTTPException):
+            verify_internal_api_key("b" * 64)
 
 
 class TestInputValidation:
@@ -90,7 +109,7 @@ class TestInputValidation:
             )
 
     def test_command_truncation(self):
-        long_commands = ["a" * 600 for _ in range(150)]
+        long_commands = ["a" * 600 for _ in range(250)]
         event = SensorEventIn(
             sensor_type="ssh",
             attacker_ip="192.168.1.1",
@@ -99,7 +118,7 @@ class TestInputValidation:
             session_id="test-session-001",
             commands=long_commands
         )
-        assert len(event.commands) == 100
+        assert len(event.commands) == 200
         assert all(len(c) <= 512 for c in event.commands)
 
     def test_login_request_validation(self):

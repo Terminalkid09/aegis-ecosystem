@@ -5,16 +5,23 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.pool import NullPool
 import os
 import sys
+import tempfile
+import shutil
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# KRAKEN-LOGIC-005: never write test artefacts into the image's /app.
+_TEST_DATA_ROOT = tempfile.mkdtemp(prefix="kraken-test-data-")
+os.environ["DATA_DIR"] = _TEST_DATA_ROOT
+os.environ["MALWARE_DIR"] = os.path.join(_TEST_DATA_ROOT, "malware")
+os.environ["LOGS_DIR"] = os.path.join(_TEST_DATA_ROOT, "logs")
+os.environ["SIEM_LOG_FILE"] = os.path.join(_TEST_DATA_ROOT, "logs", "siem.jsonl")
 
 from app.main import app
 from app.db.session import get_db, Base
 from app.core.config import settings
 from app.models.models import User
 from app.core.security import hash_password, create_access_token
-
-import tempfile
 
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 
@@ -50,6 +57,7 @@ async def setup_database():
         os.unlink(_tmp_db.name)
     except OSError:
         pass
+    shutil.rmtree(_TEST_DATA_ROOT, ignore_errors=True)
 
 
 @pytest.fixture
@@ -116,17 +124,33 @@ def admin_auth_headers(admin_user):
 
 
 @pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Keep the per-IP limiter from leaking between test modules."""
+    from app.core.limiter import limiter
+    try:
+        limiter.reset()
+    except Exception:
+        pass
+    yield
+
+
+@pytest.fixture(autouse=True)
 async def setup_redis():
     """Mock Redis for tests — no real Redis needed."""
     class FakeRedis:
+        def __init__(self):
+            self.data = {}
         async def ping(self):
             return True
         async def get(self, key):
-            return None
-        async def set(self, key, val, ex=None):
-            pass
+            return self.data.get(key)
+        async def set(self, key, val, ex=None, nx=False):
+            if nx and key in self.data:
+                return None
+            self.data[key] = val
+            return True
         async def exists(self, key):
-            return 0
+            return 1 if key in self.data else 0
         async def info(self, section=None):
             return {"used_memory_human": "1M"}
         async def aclose(self):

@@ -79,6 +79,15 @@ def test_schema_truncates_commands():
     )
     assert len(payload.commands[0]) == 512
 
+
+def test_schema_caps_command_count():
+    payload = SensorEventIn(
+        sensor_type="http", attacker_ip="1.2.3.4",
+        attacker_port=80, sensor_port=8080, session_id="abc-def-457",
+        commands=["x"] * 250,
+    )
+    assert len(payload.commands) == 200
+
 def test_schema_normalises_sensor_case():
     payload = SensorEventIn(
         sensor_type="SSH", attacker_ip="1.2.3.4",
@@ -111,6 +120,8 @@ async def test_ingest_stores_credentials(db):
         event = await ingest_sensor_event(db, p)
     assert len(event.credentials) == 1
     assert event.credentials[0].username == "admin"
+    assert event.credentials[0].password.startswith("hmac-sha256:")
+    assert "admin123" not in event.credentials[0].password
 
 @pytest.mark.asyncio
 async def test_ingest_stores_commands(db):
@@ -124,16 +135,16 @@ async def test_ingest_stores_commands(db):
     assert len(event.commands) == 2
 
 @pytest.mark.asyncio
-async def test_ingest_duplicate_session_raises(db):
+async def test_ingest_duplicate_session_is_idempotent(db):
     p = SensorEventIn(
         sensor_type="ssh", attacker_ip="10.0.0.4",
         attacker_port=1111, sensor_port=2222, session_id="test-dup",
     )
     with patch("app.services.attack_service.telegram_service.send_alert", new_callable=AsyncMock):
-        await ingest_sensor_event(db, p)
-    with pytest.raises(Exception):
-        with patch("app.services.attack_service.telegram_service.send_alert", new_callable=AsyncMock):
-            await ingest_sensor_event(db, p)
+        first = await ingest_sensor_event(db, p)
+        second = await ingest_sensor_event(db, p)
+    assert second.id == first.id
+    assert len(await get_events(db)) == 1
 
 # ── get_events ────────────────────────────────────────────────────────────────
 

@@ -94,8 +94,9 @@ async def test_login_failure(client):
 
 
 @pytest.mark.asyncio
-async def test_register_duplicate(client):
+async def test_register_duplicate(client, monkeypatch):
     import uuid
+    monkeypatch.setattr(settings, "ALLOW_REGISTRATION", True)
     uname = f"dup-{uuid.uuid4().hex[:8]}"
     async with SessionLocal() as db:
         db.add(User(username=uname, hashed_password=hash_password("pass1"), is_active=True))

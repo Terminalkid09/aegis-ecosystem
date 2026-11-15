@@ -106,11 +106,11 @@ class TestCommandValidation:
                           commands=["X" * 2000])
         assert len(p.commands[0]) == 512
 
-    def test_caps_command_list_at_100(self):
+    def test_caps_command_list_at_200(self):
         p = SensorEventIn(sensor_type="http", attacker_ip="1.2.3.4",
                           attacker_port=80, sensor_port=8080, session_id="test-cmd-002",
-                          commands=[f"cmd{i}" for i in range(200)])
-        assert len(p.commands) == 100
+                          commands=[f"cmd{i}" for i in range(250)])
+        assert len(p.commands) == 200
 
     def test_none_commands_become_empty_list(self):
         p = SensorEventIn(sensor_type="ssh", attacker_ip="1.2.3.4",
