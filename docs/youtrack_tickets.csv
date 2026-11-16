@@ -1240,17 +1240,46 @@ Details:
 
 Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
-[WP-SOC-01] Ingestione Kraken→Aegis (fase 1–2 di §5.6),"ID: WP-SOC-01
+[WP-FOUND-07] Kraken nel compose root + smoke test end-to-end,"ID: WP-FOUND-07
+Plan item: 4.1.9
+Kind: work package
+Target release (provisional): 4.1.0
+Epic: 4.1.0
+
+Details:
+- Costruire: profilo compose `kraken` con DB/Redis/rete/credenziali separati, init volume, broker sandbox senza socket nell'app, route Caddy `/kraken/*`, variabili in `.env.example`, smoke test ripetibile.
+- Dove: `docker-compose.yml`, `Caddyfile`, `Caddyfile.mtls`, `.env.example`, `services/kraken/docker-compose.yml`, `services/kraken/.env.example`.
+- Accettazione: `docker compose --profile kraken up` parte da zero; `/kraken/*` serve UI e API; un attacco SSH/HTTP produce evento, alert e incidente Aegis; Brain spento → outbox cresce e si svuota al ritorno; nessuna richiesta esterna necessaria alla UI.
+- Effort: 2 gg · Dipendenze: 4.1.7, 4.1.8.
+
+Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Versioning note: the target release name may change; the work-package ID does not."
+[WP-SOC-01] Ingestione Kraken→Aegis (verticale 4.1.7),"ID: WP-SOC-01
+Plan item: 4.1.7
+Kind: work package
+Target release (provisional): 4.1.0
+Epic: 4.1.0
+
+Details:
+- Costruire: `POST /api/v1/ingest/kraken` con `X-Api-Key` scope `kraken:write` + HMAC del body; parser che mappa su `UnifiedEvent`; dedup per `event_id`; `deception_sessions` aggiornate in upsert; outbox con retry e backoff in Kraken.
+- Dove: `aegis-brain/app/api/v1/ingest.py`, `app/ingest/kraken.py`, `services/kraken/app/services/outbox.py`.
+- Accettazione: 1.000 eventi in batch → 1.000 righe, 0 duplicati al retry; evento con HMAC errato → 401; evento >7 giorni → 422; Kraken con Brain spento → outbox cresce e si svuota al ritorno, senza perdita; eventi `context=lab` accettati, marcati e distinguibili dai `sensor`.
+- Stato 2026-11-15: implementato e verificato (outbox Postgres, retry/stale recovery, 130 test Kraken, prova live con Brain spento e ripresa).
+- Effort: 3 gg · Dipendenze: 4.1.0.
+
+Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Versioning note: the target release name may change; the work-package ID does not."
+[WP-SOC-10] Kraken→Aegis: hardening canale e replay,"ID: WP-SOC-10
 Plan item: 4.2.1
 Kind: work package
 Target release (provisional): 4.2.0
 Epic: 4.2.0
 
 Details:
-- Costruire: `POST /api/v1/ingest/kraken` con `X-Api-Key` scope `kraken:write` + HMAC del body; parser che mappa su `UnifiedEvent`; dedup per `event_id`; `deception_sessions` aggiornate in upsert; outbox con retry e backoff in Kraken.
+- Costruire: replay degli eventi velenosi, metriche outbox complete, allineamento `deception_sessions`; il percorso base è già in 4.1.7.
 - Dove: `aegis-brain/app/api/v1/ingest.py`, `app/ingest/kraken.py`, `services/kraken/app/services/outbox.py`.
-- Accettazione: 1.000 eventi in batch → 1.000 righe, 0 duplicati al retry; evento con HMAC errato → 401; evento >7 giorni → 422; Kraken con Brain spento → outbox cresce e si svuota al ritorno, senza perdita; eventi `context=lab` accettati, marcati e distinguibili dai `sensor`.
-- Effort: 3 gg · Dipendenze: 4.1.0.
+- Accettazione: replay controllato senza duplicati; metriche pending/sent/failed/attempts esposte e documentate; eventi `context=lab` marcati e distinguibili dai `sensor`.
+- Effort: 2 gg · Dipendenze: 4.1.7.
 
 Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
@@ -1280,17 +1309,32 @@ Details:
 
 Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
-[WP-SOC-04] UI Kraken dedicata + vista unificata Aegis (non sostitutiva),"ID: WP-SOC-04
+[WP-SOC-04] UI Kraken base + vista Aegis in sola lettura,"ID: WP-SOC-04
+Plan item: 4.1.8
+Kind: work package
+Target release (provisional): 4.1.0
+Epic: 4.1.0
+
+Details:
+- **Kraken UI dedicata (`/kraken/*`, servizio Kraken):** sessioni e comandi, credenziali tentate (solo pattern/hash), filtro base e dettaglio operativo; UI primaria per dati Kraken-specifici.
+- **Aegis SPA (vista unificata):** pagina read-only con eventi `source=kraken`, alert/incidente collegato e deep-link alla UI Kraken; nessuna duplicazione della gestione operativa.
+- **SSO delegato:** `POST /api/v1/deception/token`, assertion `aud=kraken` di 60 s, chiave dedicata, consumo monouso su Redis; Kraken crea un utente locale namespaced.
+- **Accettazione:** nessun dato in chiaro; UI Kraken raggiungibile e funzionante in standalone e dietro `/kraken/*`; SPA Aegis mostra correlazione senza esporre operazioni Kraken-specifiche; SSO delegato funzionante; asset UI locali (niente CDN).
+- Stato 2026-11-15: implementato e verificato (SSO monouso, routing Caddy, asset vendorizzati, smoke browser offline).
+- Effort: 5 gg (3 routing/SSO Kraken + 2 vista Aegis) · Dipendenze: 4.1.7.
+
+Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Versioning note: the target release name may change; the work-package ID does not."
+"[WP-SOC-11] UI Kraken operativa estesa (campagne, sensori, Lab)","ID: WP-SOC-11
 Plan item: 4.2.4
 Kind: work package
 Target release (provisional): 4.2.0
 Epic: 4.2.0
 
 Details:
-- **Kraken UI dedicata (`/kraken/*`, servizio Kraken):** sessioni e comandi, credenziali tentate (solo pattern/hash), mappa IP, sensori/nodi, sample, campagne, filtri e dettaglio operativo; base per topologie/run del Lab (§8.12). UI primaria per dati Kraken-specifici.
-- **Aegis SPA (vista unificata):** widget/pagina di correlazione in sola lettura (eventi deception/lab, alert/incidente collegato, stato detection/risposta) con deep-link alla UI Kraken; nessuna duplicazione della gestione operativa Kraken nel Brain/frontend Aegis.
-- **Accettazione:** nessun dato in chiaro; UI Kraken raggiungibile e funzionante in standalone e dietro `/kraken/*`; SPA Aegis mostra correlazione senza esporre operazioni Kraken-specifiche; SSO delegato funzionante dove abilitato (§5.5).
-- Effort: 8 gg (3 Kraken UI/API, 3 integrazione/SSO, 2 vista Aegis) · Dipendenze: 4.2.1, 4.2.3.
+- Costruire: campagne, sensori/nodi, sample, topologie/run del Lab e filtri avanzati nella UI Kraken; la base (sessioni, comandi, mappa, vista Aegis, SSO) è già in 4.1.8.
+- Accettazione: UI Kraken estesa senza duplicare la gestione nel Brain; SPA Aegis mostra solo collegamento/correlazione; SSO resta funzionante.
+- Effort: 5 gg · Dipendenze: 4.1.8, 4.2.1.
 
 Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."

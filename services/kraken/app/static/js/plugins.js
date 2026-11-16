@@ -1,0 +1,154 @@
+requireAuth();
+const TOKEN = localStorage.getItem('kraken_token');
+
+async function refreshPlugins() {
+  const list = document.getElementById('plugin-list');
+  list.innerHTML = '<div class="text-center py-8 text-slate-500 text-sm">Loading plugins...</div>';
+  try {
+    const res = await fetch('api/v1/plugins/', {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    if (res.status === 401) { window.location.href = 'login'; return; }
+    const plugins = await res.json();
+    document.getElementById('plugin-count').textContent = `${plugins.length} plugins`;
+    renderPlugins(plugins);
+    loadHookMap();
+  } catch (e) {
+    list.innerHTML = `<div class="text-center py-8 text-red-400 text-sm">Failed to load plugins: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderPlugins(plugins) {
+  const list = document.getElementById('plugin-list');
+  if (plugins.length === 0) {
+    list.innerHTML = '<div class="text-center py-8 text-slate-500 text-sm">No plugins installed.</div>';
+    return;
+  }
+  list.innerHTML = plugins.map(p => `
+    <div class="card plugin-card" data-enabled="${p.enabled}" data-id="${escapeHtml(p.id)}">
+        <div class="flex items-start justify-between">
+            <div class="flex-1">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm font-semibold">${escapeHtml(p.name)}</span>
+                    <span class="text-xs text-slate-500">v${escapeHtml(p.version)}</span>
+                    ${p.is_builtin ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400">built-in</span>' : ''}
+                    <span class="text-xs px-1.5 py-0.5 rounded ${p.enabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-600/30 text-slate-400'}">
+                        ${p.enabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                </div>
+                <p class="text-xs text-slate-400 mt-1">${escapeHtml(p.description)}</p>
+                ${p.author ? `<p class="text-[10px] text-slate-500 mt-1">by ${escapeHtml(p.author)}</p>` : ''}
+                ${p.hooks.length > 0 ? `
+                    <div class="flex flex-wrap gap-1 mt-2">
+                        ${p.hooks.map(h => `<span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 font-mono">${escapeHtml(h)}</span>`).join('')}
+                    </div>
+                ` : ''}
+                ${Object.keys(p.config || {}).length > 0 ? `
+                    <div class="mt-2 border-t border-slate-700 pt-2">
+                        <p class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Config</p>
+                        <div class="space-y-1 config-fields" data-plugin="${escapeHtml(p.id)}">
+                            ${Object.entries(p.config).map(([key, val]) => `
+                                <div class="flex items-center gap-2">
+                                    <label class="text-xs text-slate-400 w-32 shrink-0 font-mono">${escapeHtml(key)}</label>
+                                    <input class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono"
+                                        value="${escapeHtml(typeof val === 'string' ? val : JSON.stringify(val))}"
+                                        data-plugin="${escapeHtml(p.id)}" data-config-key="${escapeHtml(key)}" />
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+            <div class="flex items-center gap-1 ml-4">
+                <button data-toggle-plugin="${escapeHtml(p.id)}" data-enable="${p.enabled ? 'false' : 'true'}"
+                    class="px-2 py-1 rounded text-xs font-medium transition-colors ${
+                        p.enabled
+                            ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                            : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                    }">
+                    ${p.enabled ? 'Disable' : 'Enable'}
+                </button>
+            </div>
+        </div>
+    </div>
+  `).join('');
+}
+
+async function togglePlugin(pid, enable) {
+  try {
+    const res = await fetch(`api/v1/plugins/${encodeURIComponent(pid)}/${enable ? 'enable' : 'disable'}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    if (res.ok) {
+      refreshPlugins();
+    } else {
+      const err = await res.json();
+      alert(err.detail || 'Failed to toggle plugin');
+    }
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function updatePluginConfig(pid, key, value) {
+  const plugin = await getPlugin(pid);
+  plugin.config[key] = value;
+  try {
+    await fetch(`api/v1/plugins/${encodeURIComponent(pid)}/config`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(plugin.config),
+    });
+  } catch (e) {
+    console.error('Config update failed:', e);
+  }
+}
+
+async function getPlugin(pid) {
+  const res = await fetch('api/v1/plugins/', {
+    headers: { Authorization: `Bearer ${TOKEN}` },
+  });
+  const plugins = await res.json();
+  return plugins.find(p => p.id === pid) || {};
+}
+
+async function loadHookMap() {
+  const container = document.getElementById('hook-map');
+  try {
+    const res = await fetch('api/v1/plugins/hooks', {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    const data = await res.json();
+    const hooks = data.hook_points || [];
+    const active = data.active_hooks || {};
+    container.innerHTML = hooks.map(h => {
+      const subscribers = active[h] || [];
+      return `
+        <div class="flex items-center gap-2 text-xs py-1">
+            <span class="font-mono text-slate-300 w-40 shrink-0">${escapeHtml(h)}</span>
+            <div class="flex-1 flex items-center gap-1">
+                ${subscribers.length > 0
+                  ? subscribers.map(s => `<span class="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 text-[10px]">${escapeHtml(s)}</span>`).join('')
+                  : '<span class="text-slate-600">— no handlers —</span>'
+                }
+            </div>
+        </div>
+      `;
+    }).join('');
+  } catch {
+    container.innerHTML = '<div class="text-xs text-red-400">Failed to load hook map</div>';
+  }
+}
+
+document.getElementById('refresh-plugins').addEventListener('click', refreshPlugins);
+document.getElementById('plugin-list').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-toggle-plugin]');
+  if (btn) togglePlugin(btn.dataset.togglePlugin, btn.dataset.enable === 'true');
+});
+document.getElementById('plugin-list').addEventListener('change', (e) => {
+  const input = e.target.closest('[data-config-key]');
+  if (input) updatePluginConfig(input.dataset.plugin, input.dataset.configKey, input.value);
+});
+
+refreshPlugins();

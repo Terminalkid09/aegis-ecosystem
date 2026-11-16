@@ -268,6 +268,12 @@ export const siemAPI = {
   getEventStats: (hours = 24) => apiClient.get('/search/stats', { params: { hours } }),
 }
 
+// ─── Kraken (separate service; read-only view + delegated SSO) ──────────────
+export const deceptionAPI = {
+  overview: (hours = 24) => apiClient.get('/deception/overview', { params: { hours } }),
+  ssoToken: () => apiClient.post('/deception/token'),
+}
+
 // ─── Rules ───────────────────────────────────────────────────────────────────
 export const rulesAPI = {
   getCoverage: () => apiClient.get('/rules/coverage'),

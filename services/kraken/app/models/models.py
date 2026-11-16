@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, Index, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.session import Base
@@ -75,6 +75,33 @@ class CredentialAttempt(Base):
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
     event = relationship("AttackEvent", back_populates="credentials")
+
+
+class Outbox(Base):
+    """Eventi Kraken in attesa di consegna ad Aegis.
+
+    La riga viene scritta nella stessa transazione dell'evento: se il commit
+    fallisce non esiste né l'evento né la consegna; se Aegis è irraggiungibile
+    l'evento resta qui e il worker lo ritenta. Non è una coda Redis: Redis non
+    è transazionale con l'ingest.
+    """
+    __tablename__ = "outbox"
+    __allow_unmapped__ = True
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String(64), unique=True, nullable=False, index=True)
+    payload = Column(JSON, nullable=False)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_outbox_due", "status", "next_attempt_at"),
+    )
 
 
 class MalwareSample(Base):

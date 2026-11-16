@@ -21,6 +21,10 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class SsoRequest(BaseModel):
+    token: str = Field(..., min_length=20, max_length=8192)
+
+
 # ── User ──────────────────────────────────────────────────────────────────────
 
 class UserCreate(BaseModel):

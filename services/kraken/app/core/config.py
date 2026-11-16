@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str = ""
     INTERNAL_API_KEY: str = ""
     ALLOW_REGISTRATION: bool = False
+    # Mounted behind Caddy at /kraken in the Aegis stack; empty = standalone.
+    PUBLIC_BASE_PATH: str = ""
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://kraken:kraken_pass@localhost:5432/krakendb"
@@ -28,6 +30,12 @@ class Settings(BaseSettings):
     JWT_ACCESS_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_EXPIRE_MINUTES: int = 60 * 24 * 7
     JWT_ISSUER: str = "kraken"
+    # Delegated login from the Aegis Brain. The assertion is signed with a
+    # dedicated secret (never the Brain JWT key) and exchanged exactly once.
+    KRAKEN_SSO_ENABLED: bool = False
+    KRAKEN_SSO_SECRET: str = ""
+    KRAKEN_SSO_ISSUER: str = "aegis-brain"
+    KRAKEN_SSO_AUDIENCE: str = "kraken"
 
     # Docker sandbox
     SANDBOX_IMAGE: str = "kraken_sandbox"
@@ -55,6 +63,14 @@ class Settings(BaseSettings):
     AEGIS_INGEST_KEY: str = ""
     AEGIS_INGEST_SECRET: str = ""
     AEGIS_INGEST_TIMEOUT_S: float = 5.0
+    # Transactional outbox worker. The defaults drain quickly without hammering
+    # Aegis; max attempts prevents a poison event from looping forever.
+    AEGIS_OUTBOX_POLL_INTERVAL_S: float = 2.0
+    AEGIS_OUTBOX_BATCH_SIZE: int = 50
+    AEGIS_OUTBOX_MAX_ATTEMPTS: int = 8
+    AEGIS_OUTBOX_BACKOFF_BASE_S: float = 2.0
+    AEGIS_OUTBOX_BACKOFF_MAX_S: float = 300.0
+    AEGIS_OUTBOX_STALE_AFTER_S: int = 300
 
     # Telegram
     TELEGRAM_BOT_TOKEN: Optional[str] = None
@@ -116,6 +132,20 @@ class Settings(BaseSettings):
             if len(self.AEGIS_INGEST_SECRET) < 32:
                 print("❌ AEGIS_INGEST_SECRET must be at least 32 characters.")
                 sys.exit(1)
+        if self.KRAKEN_SSO_ENABLED:
+            if len(self.KRAKEN_SSO_SECRET) < 32:
+                print("❌ KRAKEN_SSO_SECRET must be at least 32 characters when KRAKEN_SSO_ENABLED=true.")
+                sys.exit(1)
+            if self.KRAKEN_SSO_SECRET == self.SECRET_KEY:
+                print("❌ KRAKEN_SSO_SECRET must be distinct from SECRET_KEY.")
+                sys.exit(1)
+
+    def base_path(self) -> str:
+        """Normalised public prefix ('' or '/kraken')."""
+        path = (self.PUBLIC_BASE_PATH or "").strip().rstrip("/")
+        if path and not path.startswith("/"):
+            path = "/" + path
+        return path
 
     def get_cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

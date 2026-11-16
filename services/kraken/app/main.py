@@ -16,6 +16,7 @@ from app.db.session import init_db
 from app.db.redis import init_redis, close_redis
 from app.services.plugin_manager import plugin_manager
 from app.services.retention import prune_malware
+from app.services.outbox import start_outbox_worker, stop_outbox_worker
 from app.core.event_bus import event_bus
 
 
@@ -47,8 +48,10 @@ async def lifespan(app: FastAPI):
     await init_redis()
     await plugin_manager.initialize()
     await event_bus.emit_async("system.startup")
+    start_outbox_worker()
     logger.info("All systems ready.")
     yield
+    await stop_outbox_worker()
     await plugin_manager.shutdown()
     await event_bus.emit_async("system.shutdown")
     await close_redis()
@@ -147,6 +150,13 @@ async def limit_body_size(request: Request, call_next):
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
+
+def _page(name: str, request: Request):
+    # Starlette's current signature is (request, name, context); the old
+    # (name, context) form broke every HTML route on this dependency version.
+    return templates.TemplateResponse(
+        request, name, {"public_base_path": settings.base_path()})
+
 # ── API routes ────────────────────────────────────────────────────────────────
 app.include_router(api_router)
 
@@ -158,22 +168,27 @@ async def metrics():
 # ── Dashboard HTML routes ─────────────────────────────────────────────────────
 @app.get("/", include_in_schema=False)
 async def dashboard(request: Request, _=Depends(verify_web_session)):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    return _page("dashboard.html", request)
 
 @app.get("/login", include_in_schema=False)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    return _page("login.html", request)
+
+@app.get("/sso", include_in_schema=False)
+async def sso_page(request: Request):
+    """Browser landing page for the Brain assertion (token stays in the hash)."""
+    return _page("sso.html", request)
 
 @app.get("/events", include_in_schema=False)
 async def events_page(request: Request, _=Depends(verify_web_session)):
-    return templates.TemplateResponse("events.html", {"request": request})
+    return _page("events.html", request)
 
 @app.get("/plugins", include_in_schema=False)
 async def plugins_page(request: Request, _=Depends(verify_web_session)):
-    return templates.TemplateResponse("plugins.html", {"request": request})
+    return _page("plugins.html", request)
 
 @app.get("/reports", include_in_schema=False)
 async def reports_page(request: Request, _=Depends(verify_web_session)):
-    return templates.TemplateResponse("reports.html", {"request": request})
+    return _page("reports.html", request)
 
 # Health endpoints are served via /api/v1/health (router)

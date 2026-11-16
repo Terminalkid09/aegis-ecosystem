@@ -188,6 +188,14 @@ class Settings(BaseSettings):
     KRAKEN_INGEST_SECRET: Optional[str] = None
     KRAKEN_INGEST_MAX_BYTES: int = 1_048_576
     KRAKEN_INGEST_MAX_EVENTS: int = 500
+    # Delegated login for the separate Kraken UI. The Brain signs a very
+    # short-lived assertion (aud=kraken) with a key that is NOT the Aegis JWT
+    # key; Kraken exchanges it once for its own local session. Disabled unless
+    # explicitly configured, so a deployment that has no Kraken keeps no
+    # cross-service signing secret around.
+    KRAKEN_SSO_ENABLED: bool = False
+    KRAKEN_SSO_SECRET: Optional[str] = None
+    KRAKEN_SSO_TTL_SECONDS: int = 60
     # Listener syslog (UDP+TCP). Default OFF: si abilita esplicitamente, così
     # nessuna porta in ascolto compare per caso in un deploy.
     SYSLOG_ENABLED: bool = False
@@ -246,6 +254,15 @@ class Settings(BaseSettings):
                     "KRAKEN_INGEST_SECRET must be at least 32 characters when "
                     "KRAKEN_INGEST_ENABLED is true"
                 )
+        if self.KRAKEN_SSO_ENABLED:
+            sso_secret = (self.KRAKEN_SSO_SECRET or "").strip()
+            if len(sso_secret) < 32:
+                raise ValueError(
+                    "KRAKEN_SSO_SECRET must be at least 32 characters when "
+                    "KRAKEN_SSO_ENABLED is true"
+                )
+            if sso_secret == (self.JWT_SECRET or ""):
+                raise ValueError("KRAKEN_SSO_SECRET must be distinct from JWT_SECRET")
         # Audit F-03: profili enterprise senza mTLS required non partono.
         if self.ENTERPRISE_STRICT and (self.MTLS_MODE or "").lower() != "required":
             raise ValueError("ENTERPRISE_STRICT requires MTLS_MODE=required")

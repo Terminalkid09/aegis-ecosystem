@@ -103,6 +103,15 @@ services:
       PKI_DIR: /app/pki
       ARTIFACT_DIR: /app/artifacts
       MTLS_MODE: ${MTLS_MODE:-off}
+      # Kraken vertical: disabled unless the operator opts in. The ingest path
+      # still requires its own API key + HMAC secret; SSO uses a dedicated key.
+      KRAKEN_INGEST_ENABLED: ${KRAKEN_INGEST_ENABLED:-false}
+      KRAKEN_INGEST_SECRET: ${KRAKEN_INGEST_SECRET:-}
+      KRAKEN_INGEST_MAX_BYTES: ${KRAKEN_INGEST_MAX_BYTES:-1048576}
+      KRAKEN_INGEST_MAX_EVENTS: ${KRAKEN_INGEST_MAX_EVENTS:-500}
+      KRAKEN_SSO_ENABLED: ${KRAKEN_SSO_ENABLED:-false}
+      KRAKEN_SSO_SECRET: ${KRAKEN_SSO_SECRET:-}
+      KRAKEN_SSO_TTL_SECONDS: ${KRAKEN_SSO_TTL_SECONDS:-60}
     volumes:
       # Post-audit: PKI e artefatti persistenti (mai effimeri nel container).
       - pki_data:/app/pki
@@ -178,6 +187,183 @@ services:
       timeout: 10s
       retries: 5
 
+  # ── Kraken vertical (profile: kraken) ──────────────────────────────────────
+  # Separate database, Redis, network, users and credentials. The Brain never
+  # reaches into Kraken's DB: it only receives signed ingest events and issues
+  # a short-lived SSO assertion for the browser.
+  aegis-kraken-db:
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    container_name: aegis-kraken-db
+    restart: unless-stopped
+    profiles: ["kraken"]
+    environment:
+      POSTGRES_DB: krakendb
+      POSTGRES_USER: kraken
+      POSTGRES_PASSWORD: ${KRAKEN_DB_PASSWORD:?KRAKEN_DB_PASSWORD must be set for the kraken profile}
+    volumes:
+      - kraken_pgdata:/var/lib/postgresql/data
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kraken -d krakendb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  aegis-kraken-redis:
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    container_name: aegis-kraken-redis
+    restart: unless-stopped
+    profiles: ["kraken"]
+    command: ["sh", "-c", "redis-server --requirepass \"$${KRAKEN_REDIS_PASSWORD}\""]
+    environment:
+      KRAKEN_REDIS_PASSWORD: ${KRAKEN_REDIS_PASSWORD:?KRAKEN_REDIS_PASSWORD must be set for the kraken profile}
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${KRAKEN_REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Build-only helper: the broker starts sandbox containers by image name.
+  # `docker compose --profile kraken build` produces this image; the helper
+  # itself exits immediately and never handles traffic.
+  aegis-kraken-sandbox-image:
+    build:
+      context: ./services/kraken
+      dockerfile: Dockerfile.sandbox
+    image: kraken_sandbox:latest
+    container_name: aegis-kraken-sandbox-image
+    profiles: ["kraken"]
+    network_mode: none
+    restart: "no"
+    entrypoint: ["/bin/true"]
+
+  aegis-kraken-init:
+    image: alpine:3.19
+    profiles: ["kraken"]
+    restart: "no"
+    command: ["sh", "-c", "mkdir -p /data/malware /data/logs && chown -R 1000:1000 /data"]
+    volumes:
+      - kraken_data:/data
+
+  aegis-kraken-broker:
+    build:
+      context: ./services/kraken
+      dockerfile: Dockerfile.broker
+    container_name: aegis-kraken-broker
+    restart: unless-stopped
+    profiles: ["kraken"]
+    environment:
+      SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set for the kraken profile}
+      SANDBOX_IMAGE: kraken_sandbox
+      MALWARE_DIR: /app/data/malware
+      MALWARE_MAX_FILE_BYTES: ${MALWARE_MAX_FILE_BYTES:-67108864}
+      MALWARE_MAX_SESSION_BYTES: ${MALWARE_MAX_SESSION_BYTES:-268435456}
+      MALWARE_RETENTION_DAYS: ${MALWARE_RETENTION_DAYS:-30}
+      MALWARE_MAX_TOTAL_BYTES: ${MALWARE_MAX_TOTAL_BYTES:-5368709120}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - kraken_data:/app/data
+    depends_on:
+      aegis-kraken-init:
+        condition: service_completed_successfully
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  aegis-kraken:
+    build:
+      context: ./services/kraken
+      dockerfile: Dockerfile
+    image: aegis-kraken:local
+    container_name: aegis-kraken
+    restart: unless-stopped
+    profiles: ["kraken"]
+    expose:
+      - "8000"
+    ports:
+      - "127.0.0.1:${KRAKEN_PORT_EXTERNAL:-8001}:8000"
+    environment:
+      DEBUG: "false"
+      PUBLIC_BASE_PATH: /kraken
+      SECRET_KEY: ${KRAKEN_SECRET_KEY:?KRAKEN_SECRET_KEY must be set for the kraken profile}
+      INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set for the kraken profile}
+      ALLOW_REGISTRATION: "false"
+      DATABASE_URL: postgresql+asyncpg://kraken:${KRAKEN_DB_PASSWORD:?KRAKEN_DB_PASSWORD must be set for the kraken profile}@aegis-kraken-db:5432/krakendb
+      REDIS_URL: redis://:${KRAKEN_REDIS_PASSWORD:?KRAKEN_REDIS_PASSWORD must be set for the kraken profile}@aegis-kraken-redis:6379/0
+      REDIS_PASSWORD: ${KRAKEN_REDIS_PASSWORD:?KRAKEN_REDIS_PASSWORD must be set for the kraken profile}
+      KRAKEN_SSO_ENABLED: ${KRAKEN_SSO_ENABLED:-true}
+      KRAKEN_SSO_SECRET: ${KRAKEN_SSO_SECRET:?KRAKEN_SSO_SECRET must be set for the kraken profile}
+      SANDBOX_BROKER_URL: http://aegis-kraken-broker:8100
+      SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set for the kraken profile}
+      MALWARE_RETENTION_DAYS: ${MALWARE_RETENTION_DAYS:-30}
+      MALWARE_MAX_TOTAL_BYTES: ${MALWARE_MAX_TOTAL_BYTES:-5368709120}
+      CORS_ORIGINS: ${ALLOWED_ORIGINS:-https://aegis.local,http://localhost:3000}
+      AEGIS_INGEST_ENABLED: ${KRAKEN_INGEST_ENABLED:-false}
+      AEGIS_INGEST_URL: http://aegis-brain:8000
+      AEGIS_INGEST_KEY: ${KRAKEN_INGEST_KEY:-}
+      AEGIS_INGEST_SECRET: ${KRAKEN_INGEST_SECRET:-}
+      AEGIS_INGEST_TIMEOUT_S: ${AEGIS_INGEST_TIMEOUT_S:-5}
+      AEGIS_OUTBOX_POLL_INTERVAL_S: ${AEGIS_OUTBOX_POLL_INTERVAL_S:-2}
+      AEGIS_OUTBOX_BATCH_SIZE: ${AEGIS_OUTBOX_BATCH_SIZE:-50}
+      AEGIS_OUTBOX_MAX_ATTEMPTS: ${AEGIS_OUTBOX_MAX_ATTEMPTS:-8}
+      AEGIS_OUTBOX_BACKOFF_BASE_S: ${AEGIS_OUTBOX_BACKOFF_BASE_S:-2}
+      AEGIS_OUTBOX_BACKOFF_MAX_S: ${AEGIS_OUTBOX_BACKOFF_MAX_S:-300}
+      AEGIS_OUTBOX_STALE_AFTER_S: ${AEGIS_OUTBOX_STALE_AFTER_S:-300}
+    volumes:
+      - kraken_data:/app/data
+    depends_on:
+      aegis-kraken-init:
+        condition: service_completed_successfully
+      aegis-kraken-db:
+        condition: service_healthy
+      aegis-kraken-redis:
+        condition: service_healthy
+      aegis-kraken-broker:
+        condition: service_healthy
+    networks:
+      - default
+      - kraken_internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  aegis-kraken-sensors:
+    build:
+      context: ./services/kraken
+      dockerfile: Dockerfile
+    image: aegis-kraken:local
+    container_name: aegis-kraken-sensors
+    restart: unless-stopped
+    profiles: ["kraken"]
+    command: python honeypot/runner.py
+    environment:
+      INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set for the kraken profile}
+      SSH_SENSOR_PORT: 2222
+      HTTP_SENSOR_PORT: 8080
+      FTP_SENSOR_PORT: 2121
+      TELNET_SENSOR_PORT: 2323
+    ports:
+      - "${KRAKEN_SSH_PORT:-12222}:2222"
+      - "${KRAKEN_HTTP_PORT:-18080}:8080"
+      - "${KRAKEN_FTP_PORT:-12121}:2121"
+      - "${KRAKEN_TELNET_PORT:-12323}:2323"
+    depends_on:
+      aegis-kraken:
+        condition: service_healthy
+    networks:
+      - kraken_internal
+
   aegis-backup:
     image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     container_name: aegis-backup
@@ -209,12 +395,20 @@ services:
     depends_on:
       - aegis-postgres
 
+networks:
+  # Kraken's DB/Redis/broker are reachable only on this internal network.
+  # The app also joins the default network so Caddy can route /kraken/* to it.
+  kraken_internal:
+    internal: true
+
 volumes:
   postgres_data:
   redis_data:
   ollama_data:
   caddy_data:
   caddy_config:
+  kraken_pgdata:
+  kraken_data:
   guard_data:
   nodetrace_data:
   postgres_backups:

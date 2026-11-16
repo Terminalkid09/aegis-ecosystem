@@ -14,6 +14,12 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5173',
     trace: 'retain-on-failure',
+    // The compose smoke test reaches Caddy at https://aegis.local without
+    // changing the host's hosts file; both knobs are opt-in.
+    ignoreHTTPSErrors: process.env.E2E_IGNORE_HTTPS === '1',
+    launchOptions: process.env.E2E_RESOLVE_AEGIS === '1'
+      ? { args: ['--host-resolver-rules=MAP aegis.local 127.0.0.1'] }
+      : undefined,
   },
   webServer: process.env.E2E_NO_SERVER
     ? undefined

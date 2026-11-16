@@ -1,6 +1,6 @@
 # AEGIS ECOSYSTEM + KRAKEN — specifica di lavoro (handoff)
 
-**Versione documento:** 2.5 — 2026-11-14 (D1–D16 chiuse in v2.3; v2.4: D16 portfolio-first senza data fissa, D2 chiarita agente vs sensore, flusso PR/merge/release in B.5; v2.5: tag pubblicati immutabili, audit release e import ticket)
+**Versione documento:** 2.7 — 2026-11-15 (D1–D16 chiuse in v2.3; v2.4: D16 portfolio-first senza data fissa, D2 chiarita agente vs sensore, flusso PR/merge/release in B.5; v2.5: tag pubblicati immutabili, audit release e import ticket; v2.6: scope 4.1 senza UI Kraken e release train unica 4.2.1+4.2.4; v2.7: la 4.1 include la verticale Kraken completa, l'espansione passa alla 4.2+)
 **Destinatario:** sessione di sviluppo successiva (umana o agente)
 **Repo Aegis:** `Terminalkid09/aegis-ecosystem`, branch `dev` @ `ea57f08` (codice identico a `c9831c5`; dopo `c9831c5` solo commit documentali. `main` @ `38e245f`)
 **Repo Kraken:** `Terminalkid09/Kraken`, branch `main` locale @ `7fd50a9` (1 commit avanti a `origin/main` @ `d86c8d5`, **non pushato**). Il fix di avvio KRAKEN-SEC-000 è già in `7fd50a9`; su `origin/main` il servizio non parte ancora.
@@ -19,7 +19,7 @@
 - **Sample:** Aegis conserva **solo metadati** (`sha256`, tipo, YARA, IOC, `kraken_sample_id`); nessun `storage_path` e nessun file malware nel perimetro Aegis. I file restano nel volume cifrato di Kraken.
 - **Test Kraken:** 103 funzioni di test (non 108); su `7fd50a9` sono **58 passed / 7 failed** e i 7 fallimenti scrivono in `/app` (KRAKEN-LOGIC-005).
 - **Frontend:** 18 viste nella `PAGE_MAP` di `App.tsx` + login (19 schermate), non 19 viste SOC + login.
-- **Stime:** Gate B 41–45 h (5–6 gg), Gate C 56–60 h (7–7,5 gg), Gate D 4–5 gg, Gate 0 4–6 gg. La 4.1.0 non è «9–13 giornate» ma **17–18 giornate di lavoro netto** (~4 settimane). Roadmap realistica: **36–42 settimane a 40 h/settimana**, 48–54 a 30 h. Vedi §6 e §10.1.
+- **Stime:** Gate B 41–45 h (5–6 gg), Gate C 56–60 h (7–7,5 gg), Gate D 9–10 gg, Gate 0 4–6 gg. La 4.1.0 con la verticale Kraken completa non è «9–13 giornate» ma **27–28 giornate di lavoro netto** (~9 settimane a 30 h). Roadmap realistica: **37–43 settimane a 40 h/settimana**, 49–55 a 30 h. Vedi §6 e §10.1.
 - **Retention sample:** KRAKEN-OPS-003 passa alla 4.1.0 (è un requisito legale, non una feature della 4.2).
 - **Release Aegis:** il job `release` pubblica **solo** il jar di Guard. Brain, frontend, Link, NodeTrace, compose, SBOM e checksum non sono artefatti di release: AEGIS-REL-002.
 
@@ -37,7 +37,8 @@
 - **D13 — Multi-tenancy:** un deployment per cliente nella 4.x, `tenant_id` predisposto nello schema; multi-tenant solo per MSSP in 5.0.
 - **D14 — Compliance:** ISO 27001 dopo la 4.1, con DPA e registro trattamenti subito; niente SOC 2 o ACN senza partner.
 - **D15 — Posizionamento:** flank mid-market con SOC-in-a-box + deception/Lab; nessun nome di vendor o prodotto usato come benchmark compare in codice, doc, commit o marketing.
-- **D16 — Capacità e orizzonte:** sviluppatore singolo, 30 h/settimana sostenibili; progetto **portfolio-first**, senza data fissa. La 4.1 è ~6 settimane di lavoro netto e la roadmap 48–54 settimane è una stima, non una scadenza. 40 h solo in vacanza; nessuna compressione delle stime.
+- **D16 — Capacità e orizzonte:** sviluppatore singolo, 30 h/settimana sostenibili; progetto **portfolio-first**, senza data fissa. Con la verticale Kraken completa la 4.1 è ~9 settimane di lavoro netto e la roadmap 49–55 settimane è una stima, non una scadenza. 40 h solo in vacanza; nessuna compressione delle stime.
+- **D17 — Perimetro 4.1:** la 4.1 non è una release “Kraken avviabile”. È la release in cui la **verticale Kraken è completa e utilizzabile**: servizio nel compose, contratto firmato con outbox/retry, UI Kraken raggiungibile, vista Aegis in sola lettura, smoke test end-to-end. L'espansione (nuovi sensori, campagne, Lab, timeline, ATT&CK) resta alla 4.2+. Il cambiamento sposta lavoro tra release, non riduce il totale: le stime di §10 vanno ricalcolate, non copiate.
 
 ---
 
@@ -702,11 +703,19 @@ Ordine obbligato, perché tutto il resto presuppone un servizio che parte.
 
 **Uscita:** CI completamente verde, 0 High da `pip-audit`/`npm audit`, nessun finding Critical/High aperto in Aegis.
 
-### 6.4 Cancello D — "integrazione" (4–5 giornate)
+### 6.4 Cancello D — "integrazione" (9–10 giornate)
 
-Solo dopo A+B+C. Voci: §5.3 (ingest), §5.5 (SSO), §5.6 fasi 1–3, §10 (4.2.0).
+Solo dopo A+B+C. Voci: §5.3 (ingest), §5.5 (SSO), §5.6 fasi 1–3,
+§10 (4.1.7–4.1.9): outbox, UI Kraken, vista Aegis, compose e smoke test.
 
-**Totale fino a 4.1.0 production-ready: 17–18 giornate uomo di lavoro netto** (Gate A 0,5 + B 5,5 + C 7,5 + D 4), di cui 6 su Kraken. Con il 20% di buffer si arriva a **21–22 giornate**, cioè **4–4,5 settimane a 40 h** o **5,5–6 settimane a 30 h**. Con D16 (30 h) la 4.1.0 è ~6 settimane di lavoro netto, senza una data di calendario. Il Gate 0 (4–6 giornate, in parte legali) è aggiuntivo. La stima v2.1 di 9–13 giornate era ottimistica di circa il 40%.
+**Totale fino a 4.1.0 production-ready: 27–28 giornate uomo di lavoro netto**
+(Gate A 0,5 + B 5,5 + C 7,5 + D 9,5 + overhead di integrazione), di cui ~15 su
+Kraken. Con il 20% di buffer si arriva a **33–34 giornate**, cioè **6,5–7
+settimane a 40 h** o **8,5–9 settimane a 30 h**. Con D16 (30 h) la 4.1.0 è
+~9 settimane di lavoro netto, senza una data di calendario. Il Gate 0 (4–6
+giornate, in parte legali) è aggiuntivo. La stima v2.1 di 9–13 giornate era
+otimistica di circa il 60%; la v2.6 di 17–18 giornate era corretta per il
+vecchio perimetro senza UI, non per questo.
 
 ### 6.5 Come provare ogni fix (ricette)
 
@@ -1054,9 +1063,17 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 
 ---
 
-### 4.1.0 — "Foundation" (settimane 1–6)
+### 4.1.0 — "Foundation + Kraken integration" (settimane 1–8, stima da ricalcolare)
 
-**Tema:** rendere vere le cose già scritte. Nessuna feature nuova. Cancello: tutto ciò che è in §6.1–6.3 verde.
+**Tema:** rendere vere le cose già scritte e chiudere la verticale Kraken
+end-to-end. Nessuna espansione del prodotto: solo il percorso minimo completo
+che un analista può usare davvero. Cancello: tutto ciò che è in §6.1–6.3 verde.
+
+**Scope utente (v2.7):** la 4.1 è la release in cui Kraken è realmente
+integrato, non solo “avviabile”. Deve contenere: servizio nel compose,
+contratto firmato con outbox/retry, UI Kraken raggiungibile, vista Aegis in sola
+lettura e smoke test end-to-end. L'espansione (nuovi sensori, campagne, Lab,
+timeline, ATT&CK) resta alla 4.2+.
 
 #### 4.1.1 Kraken si avvia e ha una CI
 - Obiettivo: `import`, migrazioni, test, immagine, pipeline.
@@ -1094,25 +1111,80 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 - Accettazione: suite verde a qualunque data (test con `freezegun` a 2026-09-15, 2027-01-01, 2030-06-01); `pip-audit` 0; `npm audit --omit=dev` 0 high; job di restore notturno verde.
 - Effort: 1,5 gg · Dipendenze: 4.1.5.
 
+#### 4.1.7 Kraken → Aegis: consegna affidabile
+- Obiettivo: il percorso firmato non perde eventi se Aegis è lento o spento.
+- Dove: nuova tabella `outbox` in Kraken (stessa transazione dell'ingest),
+  worker con backoff e jitter, `aegis_ingest.py`, migrazione Alembic, test.
+- Accettazione: con Brain spento l'outbox cresce; al ritorno si svuota senza
+  perdita; retry idempotente per `event_id`; HMAC errato → 401; evento vecchio
+  → 422; 1.000 eventi in batch → 1.000 righe e 0 duplicati; `context=lab`
+  distinto da `sensor`; metriche `outbox_pending`, `outbox_sent`,
+  `outbox_failed` esposte.
+- Stato 2026-11-15: implementato e verificato — outbox Postgres transazionale, worker con backoff, poison handling e stale recovery, prova live con Brain spento e ripresa, 130 test Kraken verdi.
+- Effort: 3 gg · Dipendenze: 4.1.1, 4.1.2.
+
+#### 4.1.8 UI Kraken e vista unificata Aegis
+- Obiettivo: l'analista vede Kraken senza gestire due login separati, ma le
+  operazioni Kraken-specifiche restano nella UI Kraken.
+- Dove: routing Caddy `/kraken/*`, profilo compose, SSO delegato breve
+  (`POST /api/v1/deception/token`), UI Kraken esistente, nuova pagina frontend
+  Aegis in sola lettura, endpoint Brain per sessioni/eventi/incidenti collegati.
+- Accettazione: Kraken raggiungibile dietro `/kraken/*`; login delegato
+  funzionante e token breve non riutilizzabile; la SPA Aegis mostra eventi
+  `source=kraken`, alert/incidente collegato e deep-link alla sessione Kraken,
+  senza duplicare le operazioni Kraken; nessun dato in chiaro; asset UI
+  (Tailwind, Chart.js, Leaflet) serviti localmente, senza dipendenza CDN, così
+  la UI funziona anche in deploy air-gapped.
+- Stato 2026-11-15: implementato e verificato — SSO monouso con chiave dedicata e assertion di 60 s, routing Caddy `/kraken/*`, asset vendorizzati e CSP senza JS inline, vista Aegis in sola lettura; smoke browser offline (2 test Playwright).
+- Effort: 5 gg (3 routing/SSO Kraken + 2 vista Aegis) · Dipendenze: 4.1.7.
+
+#### 4.1.9 Compose, configurazione e smoke test end-to-end
+- Obiettivo: la verticale parte da un compose pulito, non dalla macchina dello
+  sviluppatore.
+- Dove: compose root con profilo `kraken`, `.env.example`, Caddy, documentazione
+  di deploy, script di smoke test.
+- Accettazione: `docker compose --profile kraken up` avvia Kraken, DB e broker
+  senza socket montato nell'app; un attacco SSH su Kraken produce evento,
+  alert/incidente e riga visibile in Aegis entro 10 s; restart di Brain o
+  Kraken non perde eventi; la procedura è documentata e ripetibile da zero.
+- Stato 2026-11-16: implementato e verificato — profilo `kraken` con Postgres/Redis/rete/init separati e broker sandbox unico titolare del Docker socket; `docker compose --profile kraken config` e `caddy validate` verdi; smoke live SSH→Brain con evento, alert e incidente; nessuna richiesta esterna dalla UI.
+- Effort: 2 gg · Dipendenze: 4.1.7, 4.1.8.
+
 **Definition of done 4.1.0**
 - [ ] Nessun finding Critical/High aperto in §4 (esclusi quelli esplicitamente spostati a 4.2 con motivazione).
-- [ ] `pytest` Aegis 787 raccolti, 0 failed, 0 error, con e senza DB.
+- [ ] `pytest` Aegis, 0 failed, 0 error, con e senza DB.
 - [ ] Kraken: 65+ test verdi in CI, immagine che parte, privesc e pivot non riproducibili.
+- [x] Kraken compare nel compose root con profilo dedicato e senza Docker socket nell'app.
+- [x] Un attacco SSH su Kraken arriva in Aegis entro 10 s e resta idempotente al retry.
+- [x] UI Kraken raggiungibile e vista Aegis in sola lettura funzionante; nessun secondo login obbligatorio.
 - [ ] `bandit` 0 High su entrambi; `pip-audit` 0; `npm audit --omit=dev` 0 high.
 - [ ] Documento `SECURITY.md` aggiornato con la nuova postura.
 - [ ] Tag `v4.1.0`, release notes con tabella "prima/dopo".
 
+**Stato 2026-11-16 (working tree, non release):** Brain **823 passed, 3 skipped** con PostgreSQL e Redis; Kraken **130 passed**; frontend build OK e lint **0 errori / 25 warning**; Playwright offline **2 passed**; compose e Caddy validi; smoke live SSO (exchange 200, replay 401) e ingest con Brain spento/ripreso (outbox `processing` → `sent`, overview aggiornata). Restano aperti i gate non eseguiti in questa sessione (bandit, pip-audit, npm audit, smoke dal bundle scaricato) e il tag.
+
 ---
 
-### 4.2.0 — "Unified SOC" (settimane 7–15)
+### 4.2.0 — "Kraken expansion & Unified SOC" (settimane 9–16, stima da ricalcolare)
 
-**Tema:** Kraken, come **microservizio separato** con UI dedicata, diventa sensore/lab collegato ad Aegis: visibilità unificata e verifica della detection, senza fondere i servizi. Nessun contenimento nuovo.
+**Tema:** dopo la verticale 4.1, Kraken si espande come sensore/lab e la SPA
+Aegis guadagna la timeline unificata. La separazione dei servizi non cambia:
+Kraken resta un microservizio con DB, UI e ciclo di rilascio propri.
 
-#### 4.2.1 Ingestione Kraken→Aegis (fase 1–2 di §5.6)
-- Costruire: `POST /api/v1/ingest/kraken` con `X-Api-Key` scope `kraken:write` + HMAC del body; parser che mappa su `UnifiedEvent`; dedup per `event_id`; `deception_sessions` aggiornate in upsert; outbox con retry e backoff in Kraken.
-- Dove: `aegis-brain/app/api/v1/ingest.py`, `app/ingest/kraken.py`, `services/kraken/app/services/outbox.py`.
-- Accettazione: 1.000 eventi in batch → 1.000 righe, 0 duplicati al retry; evento con HMAC errato → 401; evento >7 giorni → 422; Kraken con Brain spento → outbox cresce e si svuota al ritorno, senza perdita; eventi `context=lab` accettati, marcati e distinguibili dai `sensor`.
-- Effort: 3 gg · Dipendenze: 4.1.0.
+#### 4.2.1 Kraken→Aegis: hardening del canale e replay
+- Costruire: batch da 500, metriche outbox, replay degli eventi velenosi,
+  allineamento di `deception_sessions`; il percorso base è già in 4.1.7.
+- Dove: `aegis-brain/app/api/v1/ingest.py`, `app/ingest/kraken.py`,
+  `services/kraken/app/services/outbox.py`.
+- Accettazione: 1.000 eventi in batch → 1.000 righe, 0 duplicati al retry;
+  evento con HMAC errato → 401; evento >7 giorni → 422; Kraken con Brain
+  spento → outbox cresce e si svuota al ritorno, senza perdita; eventi
+  `context=lab` accettati, marcati e distinguibili dai `sensor`.
+- Effort: 2 gg · Dipendenze: 4.1.7.
+
+**Gate di release:** la 4.2 non è la release che “collega Kraken”: quella
+verticale è già in 4.1. Qui si aggiungono solo capacità dichiarate come
+espansione, e nessuna può essere presentata come integrazione base.
 
 #### 4.2.2 Regole di detection su deception
 - Costruire: 6 regole Sigma nuove (`deception_ssh_bruteforce`, `deception_post_auth_commands`, `deception_credential_stuffing`, `deception_malware_download`, `deception_canary_trigger` — quest'ultima in 4.3, `deception_lateral_scan`), con `logsource: kraken`; correlazione `multi_sensor_same_ip`.
@@ -1124,11 +1196,17 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 - Accettazione: p95 < 400 ms su 10k eventi; ordinamento corretto; link funzionanti.
 - Effort: 3 gg · Dipendenze: 4.2.1.
 
-#### 4.2.4 UI Kraken dedicata + vista unificata Aegis (non sostitutiva)
-- **Kraken UI dedicata (`/kraken/*`, servizio Kraken):** sessioni e comandi, credenziali tentate (solo pattern/hash), mappa IP, sensori/nodi, sample, campagne, filtri e dettaglio operativo; base per topologie/run del Lab (§8.12). UI primaria per dati Kraken-specifici.
-- **Aegis SPA (vista unificata):** widget/pagina di correlazione in sola lettura (eventi deception/lab, alert/incidente collegato, stato detection/risposta) con deep-link alla UI Kraken; nessuna duplicazione della gestione operativa Kraken nel Brain/frontend Aegis.
-- **Accettazione:** nessun dato in chiaro; UI Kraken raggiungibile e funzionante in standalone e dietro `/kraken/*`; SPA Aegis mostra correlazione senza esporre operazioni Kraken-specifiche; SSO delegato funzionante dove abilitato (§5.5).
-- Effort: 8 gg (3 Kraken UI/API, 3 integrazione/SSO, 2 vista Aegis) · Dipendenze: 4.2.1, 4.2.3.
+#### 4.2.4 UI Kraken operativa estesa (campagne, sensori, Lab)
+- **Kraken UI dedicata (`/kraken/*`, servizio Kraken):** campagne e
+  fingerprint, sensori/nodi, topologie e run del Lab, sample, filtri e dettaglio
+  operativo; la base (sessioni, comandi, mappa, vista Aegis) è già in 4.1.8.
+- **Aegis SPA:** la vista unificata di base resta quella di 4.1.8; qui si
+  aggiungono solo collegamenti a campagne e run Lab, senza duplicare la
+  gestione operativa Kraken nel Brain/frontend Aegis.
+- **Accettazione:** nessun dato in chiaro; campagne e run Lab visibili in UI
+  Kraken; SPA Aegis mostra il collegamento senza esporre operazioni
+  Kraken-specifiche; SSO delegato resta funzionante.
+- Effort: 5 gg · Dipendenze: 4.1.8, 4.2.1.
 
 #### 4.2.5 ATT&CK coverage (§7.4)
 - Accettazione: matrice coerente con `coverage()`; buchi visibili; export.
@@ -1152,8 +1230,8 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 - Effort: 4 gg · Dipendenze: 4.1.5.
 
 **Definition of done 4.2.0**
-- [ ] Un attacco SSH su Kraken produce: sessione in UI Kraken, evento `siem_events`, alert/incidente, riga in timeline Aegis — entro 10 s (via contratto, microservizi separati).
-- [ ] UI Kraken dedicata operativa per dati Kraken-specifici; SPA Aegis mostra correlazione senza sostituirla.
+- [ ] La verticale 4.1 resta verde: attacco SSH → sessione UI Kraken, evento `siem_events`, alert/incidente, vista Aegis — entro 10 s.
+- [ ] UI Kraken estesa a campagne, sensori e run Lab; la vista Aegis di base non viene duplicata.
 - [ ] Nessuna doppia autenticazione per l'operatore (SSO delegato dove abilitato).
 - [ ] Base Kraken Lab (topologia + scenario + run shadow) produce evidenze correlate in UI Kraken.
 - [ ] Le 6 nuove regole hanno test di replay; load test documentato (200 rps, 2 worker).
@@ -1161,7 +1239,7 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 
 ---
 
-### 4.3.0 — "Containment & Deception" (settimane 16–29)
+### 4.3.0 — "Containment & Deception" (settimane 17–30)
 
 **Tema:** dalla visibilità all'azione, e Kraken da honeypot a piattaforma di deception.
 
@@ -1227,7 +1305,7 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 
 ---
 
-### 5.0.0 — "Platform + Range" (settimane 30–51)
+### 5.0.0 — "Platform + Range" (settimane 31–52)
 
 **Tema:** ciò che serve a un design partner o a un pilota che ha requisiti, non per convincere un tecnico. Da fare solo con almeno un design partner che lo chiede; senza trazione, si taglia lo scope, non la sicurezza.
 
@@ -1279,12 +1357,12 @@ Quattro release. Ogni voce ha: obiettivo, cosa si costruisce, dove, criterio di 
 | Release | Settimane | Contenuto | Dipendenza critica |
 |---|---|---|---|
 | Gate 0 | 1 | licenza, `SECURITY.md`, release completa, privacy | nessuna (in parallelo) |
-| 4.1.0 | 1–6 | fix bloccanti, CI verde, Kraken avviabile e non pericoloso | nessuna |
-| 4.2.0 | 7–15 | ingestione, UI Kraken dedicata + vista unificata, timeline, ATT&CK, soppressioni, flotta, SMB/RDP, base Lab shadow | 4.1 completa |
-| 4.3.0 | 16–29 | contenimento rete/credenziali, catalogo azioni, YARA/detonazione, canary, blocklist, PDF, routing, scenari Lab e verifica detection | 4.2 completa |
-| 5.0.0 | 30–51 | IdP enterprise, HA, audit/compliance, intel, performance, SDK, range v1 | un design partner o un pilota |
+| 4.1.0 | 1–8 | fix bloccanti, CI verde, verticale Kraken completa (compose, outbox, UI, vista Aegis, smoke test) | nessuna |
+| 4.2.0 | 9–16 | espansione Kraken (campagne, sensori, Lab), timeline, ATT&CK, soppressioni, flotta, SMB/RDP, base Lab shadow | 4.1 completa |
+| 4.3.0 | 17–30 | contenimento rete/credenziali, catalogo azioni, YARA/detonazione, canary, blocklist, PDF, routing, scenari Lab e verifica detection | 4.2 completa |
+| 5.0.0 | 31–52 | IdP enterprise, HA, audit/compliance, intel, performance, SDK, range v1 | un design partner o un pilota |
 
-**Lettura onesta:** 51 settimane di lavoro stimate a 30 h/settimana (D16), già con un buffer per release; non sono 51 settimane di calendario né una scadenza. A 40 h/settimana il realistico è **36–42 settimane**; a 30 h/settimana **48–54**. Il totale delle voci è **181 giornate uomo (176–186)**: Gate 0 5 + 4.1 17 + 4.2 31 + 4.3 48 + 5.0 75–85. Sono ~36 settimane di lavoro puro a 5 giorni/settimana: ogni settimana in meno è una promessa non mantenuta, e con una data fissa sarebbe un debito.
+**Lettura onesta:** 52 settimane di lavoro stimate a 30 h/settimana (D16), già con un buffer per release; non sono 52 settimane di calendario né una scadenza. A 40 h/settimana il realistico è **37–43 settimane**; a 30 h/settimana **49–55**. Il totale delle voci è **187 giornate uomo (182–192)**: Gate 0 5 + 4.1 27 + 4.2 27 + 4.3 48 + 5.0 75–85. Sono ~37 settimane di lavoro puro a 5 giorni/settimana: ogni settimana in meno è una promessa non mantenuta, e con una data fissa sarebbe un debito.
 
 ### 10.2 Cosa può slittare senza rompere nulla
 - 5.0.4 (federation) e 5.0.6 (SDK): utili, non urgenti.
@@ -1474,9 +1552,9 @@ Regole:
 | 8 | Il cliente chiede multi-tenant e si accetta | Media | Alto | risposta scritta: 5.0+, con stima |
 | 9 | Si vende senza licenza o senza privacy/DPA | Alta | Critico | Gate 0 prima di ogni pilot; revisione legale |
 | 10 | Si svende il prodotto come SIEM enterprise e si perde la nicchia | Alta | Alto | posizionamento SOC-in-a-box + deception/Lab; nessun confronto con vendor esterni |
-| 11 | Bus factor 1: una persona, 181 giornate (176–186), nessun margine | Alta | Alto | buffer 20%, documentazione operativa, primo collaboratore su frontend/QA |
+| 11 | Bus factor 1: una persona, 187 giornate (182–192), nessun margine | Alta | Alto | buffer 20%, documentazione operativa, primo collaboratore su frontend/QA |
 
-**Decisioni chiuse (v2.3, D16 aggiornata in v2.4):** D1 AGPL-3.0-only; D2 mid-market multi-superficie; D3/D4 visibilità, non vendita; D5 Compose + K8s-ready; D6 Aegis root + `services/kraken`, push/subtree solo su autorizzazione; D7 `script` rimosso; D9 Lab a fasi; D10 Helm 5.1; D11 soglie; D12 AI locale; D13 single deployment; D14 ISO dopo 4.1; D15 nessun vendor nominato; D16 30 h/settimana, portfolio-first, nessuna data fissa.
+**Decisioni chiuse (v2.3, D16 aggiornata in v2.4, D17 in v2.7):** D1 AGPL-3.0-only; D2 mid-market multi-superficie; D3/D4 visibilità, non vendita; D5 Compose + K8s-ready; D6 Aegis root + `services/kraken`, push/subtree solo su autorizzazione; D7 `script` rimosso; D9 Lab a fasi; D10 Helm 5.1; D11 soglie; D12 AI locale; D13 single deployment; D14 ISO dopo 4.1; D15 nessun vendor nominato; D16 30 h/settimana, portfolio-first, nessuna data fissa; D17 verticale Kraken completa in 4.1, espansione in 4.2+.
 
 **Restano da fare tu:** autorizzare il push di `7fd50a9` e il subtree; confermare il nome pubblico (Aegis è molto conteso); decidere se serve un tutore/legale per licenza e privacy da minorenne.
 
@@ -1611,7 +1689,7 @@ Regola finale: **nessuna feature, nessun refactor estetico, nessuna nuova dipend
 
 ---
 
-## Appendice A — Decisioni chiuse (D1–D16)
+## Appendice A — Decisioni chiuse (D1–D17)
 
 > Chiuse il 2026-11-13. Non sono più opzioni: sono vincoli di lavoro. Ogni modifica futura che le contraddice richiede una nuova decisione scritta.
 
@@ -1632,7 +1710,8 @@ Regola finale: **nessuna feature, nessun refactor estetico, nessuna nuova dipend
 | D13 | **Un deployment per cliente**, `tenant_id` predisposto | isolamento e backup semplici; MSSP non è il target iniziale | §5.4; multi-tenant solo 5.0 |
 | D14 | **ISO 27001 dopo la 4.1**, DPA e registro subito | credibilità enterprise senza bruciare 6–12 mesi ora | Gate 0 privacy; niente SOC 2/ACN senza partner |
 | D15 | **Flank mid-market** con SOC-in-a-box + deception/Lab; nessun vendor nominato | si vince sul tempo al valore, non sulla scala SIEM | nessun confronto in codice, doc, commit o marketing |
-| D16 | **30 h/settimana**, portfolio-first, nessuna data fissa; 4.1 ~6 settimane di lavoro, roadmap 48–54 stimate | il progetto è un biglietto da visita, non una consegna contrattuale; sostenibilità e qualità | §6.4, §10; 40 h solo in vacanza; stime aggiornate quando la realtà cambia |
+| D16 | **30 h/settimana**, portfolio-first, nessuna data fissa; 4.1 ~9 settimane di lavoro, roadmap 49–55 stimate | il progetto è un biglietto da visita, non una consegna contrattuale; sostenibilità e qualità | §6.4, §10; 40 h solo in vacanza; stime aggiornate quando la realtà cambia |
+| D17 | **4.1 = verticale Kraken completa** (compose, outbox, UI, vista Aegis, smoke test); espansione in 4.2+ | evita una release “Kraken avviabile” e una UI promessa alla release dopo | §4.1.7–4.1.9, §10.1, `docs/RELEASES.md`; le stime si spostano, non si riducono |
 
 ### A.1 Cosa non è negoziabile
 

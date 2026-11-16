@@ -1,20 +1,51 @@
+import secrets
 import time
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.session import get_db
 from app.models.models import User
-from app.schemas.schemas import LoginRequest, TokenResponse, RefreshRequest, UserCreate, UserOut
+from app.schemas.schemas import LoginRequest, TokenResponse, RefreshRequest, SsoRequest, UserCreate, UserOut
 from app.core.security import (
     verify_password, hash_password,
     create_access_token, create_refresh_token,
-    decode_access_payload, decode_refresh_payload,
+    decode_access_payload, decode_refresh_payload, decode_sso_assertion,
 )
 from app.core.limiter import limiter
 from app.core.config import settings
-from app.db.redis import consume_refresh_jti
+from app.db.redis import consume_refresh_jti, consume_sso_jti
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _cookie_path() -> str:
+    """Scope session cookies to the mounted prefix (or / when standalone)."""
+    return settings.base_path() or "/"
+
+
+def _issue_session(response: Response, username: str) -> TokenResponse:
+    access_token = create_access_token(subject=username)
+    refresh_token = create_refresh_token(subject=username)
+    path = _cookie_path()
+    response.set_cookie(
+        key="kraken_token",
+        value=access_token,
+        httponly=True,
+        samesite="strict",
+        secure=not settings.DEBUG,
+        max_age=settings.JWT_ACCESS_EXPIRE_MINUTES * 60,
+        path=path,
+    )
+    response.set_cookie(
+        key="kraken_refresh",
+        value=refresh_token,
+        httponly=True,
+        samesite="strict",
+        secure=not settings.DEBUG,
+        max_age=settings.JWT_REFRESH_EXPIRE_MINUTES * 60,
+        path=path,
+    )
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -24,25 +55,7 @@ async def login(request: Request, response: Response, payload: LoginRequest, db:
     user = result.scalar_one_or_none()
     if not user or not user.is_active or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
-    access_token = create_access_token(subject=user.username)
-    refresh_token = create_refresh_token(subject=user.username)
-    response.set_cookie(
-        key="kraken_token",
-        value=access_token,
-        httponly=True,
-        samesite="strict",
-        secure=not settings.DEBUG,
-        max_age=settings.JWT_ACCESS_EXPIRE_MINUTES * 60,
-    )
-    response.set_cookie(
-        key="kraken_refresh",
-        value=refresh_token,
-        httponly=True,
-        samesite="strict",
-        secure=not settings.DEBUG,
-        max_age=settings.JWT_REFRESH_EXPIRE_MINUTES * 60,
-    )
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    return _issue_session(response, user.username)
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -59,17 +72,7 @@ async def refresh(request: Request, response: Response, payload: RefreshRequest,
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive.")
-    access_token = create_access_token(subject=user.username)
-    new_refresh = create_refresh_token(subject=user.username)
-    response.set_cookie(
-        key="kraken_refresh",
-        value=new_refresh,
-        httponly=True,
-        samesite="strict",
-        secure=not settings.DEBUG,
-        max_age=settings.JWT_REFRESH_EXPIRE_MINUTES * 60,
-    )
-    return TokenResponse(access_token=access_token, refresh_token=new_refresh)
+    return _issue_session(response, user.username)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -95,9 +98,60 @@ async def logout(request: Request, response: Response):
             ttl = max(int(exp - time.time()), 0) if exp else 0
             from app.db.redis import blacklist_token
             await blacklist_token(refresh_payload["jti"], ttl)
-    response.delete_cookie("kraken_token", path="/")
-    response.delete_cookie("kraken_refresh", path="/")
+    for path in {_cookie_path(), "/"}:
+        response.delete_cookie("kraken_token", path=path)
+        response.delete_cookie("kraken_refresh", path=path)
     return None
+
+
+@router.post("/sso", response_model=TokenResponse)
+@limiter.limit("20/minute")
+async def sso_exchange(
+    request: Request,
+    response: Response,
+    payload: SsoRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Exchange a Brain assertion for a real local Kraken session.
+
+    The assertion is valid for one minute and can be used once. The local user
+    is namespaced (`aegis:<brain-username>`) so it can never shadow a native
+    Kraken account; no password is ever set for it.
+    """
+    claims = decode_sso_assertion(payload.token)
+    if not claims or not claims.get("jti") or not claims.get("username"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired SSO assertion.",
+        )
+    ttl = max(int(claims.get("exp", time.time()) - time.time()), 1)
+    if not await consume_sso_jti(str(claims["jti"]), ttl):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="SSO assertion already used or revoked.",
+        )
+
+    username = f"aegis:{str(claims['username'])[:56]}"
+    result = await db.execute(select(User).where(User.username == username))
+    user = result.scalar_one_or_none()
+    role = str(claims.get("role") or "user").lower()
+    if user is None:
+        user = User(
+            username=username,
+            # Unguessable random secret: this account only authenticates via SSO.
+            hashed_password=hash_password(secrets.token_urlsafe(48)),
+            is_admin=role == "admin",
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    elif not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled.")
+    elif user.is_admin != (role == "admin"):
+        user.is_admin = role == "admin"
+        await db.commit()
+
+    return _issue_session(response, user.username)
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)

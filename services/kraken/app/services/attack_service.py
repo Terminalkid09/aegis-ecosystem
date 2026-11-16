@@ -8,6 +8,7 @@ from typing import List, Optional
 from app.models.models import AttackEvent, AttackCommand, CredentialAttempt, MalwareSample
 from app.schemas.schemas import SensorEventIn
 from app.services.geoip import geoip_service
+from app.services.aegis_ingest import enqueue_attack_event
 from app.services.telegram import telegram_service
 from app.core.security import hash_credential
 from loguru import logger
@@ -48,6 +49,10 @@ async def ingest_sensor_event(db: AsyncSession, payload: SensorEventIn) -> Attac
     for cmd in payload.commands or []:
         db.add(AttackCommand(event_id=event.id, command=cmd))
 
+    # Stessa transazione dell'evento: se il commit fallisce non esiste né
+    # l'attacco locale né una consegna orfana. Il worker la spedisce dopo.
+    enqueue_attack_event(db, event, payload)
+
     try:
         await db.commit()
     except IntegrityError:
@@ -79,14 +84,8 @@ async def ingest_sensor_event(db: AsyncSession, payload: SensorEventIn) -> Attac
     }
     await event_bus.emit_async("attack.ingested", attack_event=event_dict)
 
-    # Gate D: the signed event is what makes the attack visible in Aegis.
-    # Fail-soft: Aegis being down must not lose the local honeypot record.
-    try:
-        from app.services.aegis_ingest import publish_attack_event
-        await publish_attack_event(event, payload)
-    except Exception as e:
-        logger.warning(f"Aegis event emission failed: {e}")
-
+    # L'invio ad Aegis è demandato alla outbox: un Brain spento non perde
+    # l'evento e non blocca la risposta al sensore.
     try:
         # La password in chiaro non deve mai uscire dal percorso di ingest.
         # Telegram riceve solo i campi che servono all'alert: il dump completo

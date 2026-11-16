@@ -72,7 +72,7 @@ The safe correction is:
 | `v2.0.0` | Modular-monolith Brain, unified agents, VaultX, AI suite | historical |
 | `v3.0.0` | Standalone agents and Discovery Center | historical |
 | `v4.0.0` | EDR + SIEM platform, ETW, Sigma, Telegram, signed enrollment | historical; last batch tag |
-| `v4.1.0` | Foundation: blocking fixes, CI green, Kraken starts safely, complete release | next; not tagged |
+| `v4.1.0` | Foundation + complete Kraken vertical: blocking fixes, CI green, compose/outbox/UI/unified view, complete release | next; not tagged |
 
 `v4.1.0` is a **minor** because it fixes and hardens existing contracts. The
 removal of the disabled-by-default `script` playbook action will be documented
@@ -80,13 +80,36 @@ in `UPGRADING.md` in the release PR; it does not justify a major. A future `v5.0
 an incompatible public contract change or a platform milestone that actually
 requires it. It is not a reward for finishing a batch.
 
+## Release integrity gate
+
+A release is a vertical slice, not a backend milestone with the UI promised for
+the next version. Before tagging, the release must have:
+
+- the user-visible path complete: API + UI + documentation + test;
+- a capability labelled **experimental/opt-in** when it is not complete, and no
+  release note that calls it “integrated”;
+- a smoke test executed from the downloaded release artifact, not from the
+  working tree;
+- no known half-feature whose missing half is already scheduled for the next
+  release train.
+
+Kraken is the current example. `v4.1.0` is the release in which the complete
+vertical ships: Kraken in the compose profile, signed ingest with outbox and
+retry, reachable Kraken UI, read-only Aegis view and an end-to-end smoke test.
+It must **not** be tagged with the service merely “startable” and the UI
+promised for later. Expansion work (new sensors, campaigns, Lab, unified
+timeline, ATT&CK) belongs to `v4.2.0` and later, and must be described as
+expansion — not as the missing half of 4.1.
+
 ## Checklist before `v4.1.0`
 
 - [ ] Gate 0 complete: license, security policy, privacy documents, trademark
       check.
 - [ ] AEGIS-REL-002 complete: Brain, Link, Frontend, NodeTrace, Guard, compose
-      bundle, per-component SBOM, checksums, signature, changelog, upgrade
-      notes.
+      bundle (including the `kraken` profile), per-component SBOM, checksums,
+      signature, changelog, upgrade notes.
+- [ ] Kraken vertical complete: outbox/retry, signed ingest, reachable UI,
+      read-only Aegis view, end-to-end smoke test from the downloaded bundle.
 - [ ] All version fields updated together: Brain `APP_VERSION`, frontend
       `package.json`, Guard `pom.xml`, NodeTrace `AGENT_VERSION`, OCSF agent
       version, `scripts/pack-artifacts.py`.
@@ -96,6 +119,22 @@ requires it. It is not a reward for finishing a batch.
 - [ ] GitHub Release built from the tag, with assets and smoke test from the
       downloaded artifacts, not from the repository.
 - [ ] No force-push, no tag rewrite, no `latest` tag.
+
+## Kraken vertical status (working tree, 2026-11-16)
+
+Not a release: the tag is not cut and the checklist above stays open. Measured
+on the working tree:
+
+- Brain: **823 passed, 3 skipped** with PostgreSQL and Redis; Kraken: **130
+  passed**; frontend build OK and lint **0 errors / 25 warnings**; offline
+  Playwright smoke **2 passed**; `docker compose --profile kraken config` and
+  `caddy validate` valid.
+- Live smoke: delegated SSO exchange 200 and replayed assertion 401; SSH ingest
+  reaches the Brain as event, alert and incident; with the Brain stopped the
+  outbox stays `processing` and drains (`sent`) after restart without loss.
+- Still open before the checklist can close: release-artifact build and smoke
+  test from the downloaded bundle, the release-wide audits, `UPGRADING.md`, and
+  the annotated tag from `main`.
 
 ## Current version fields
 

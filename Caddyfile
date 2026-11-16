@@ -27,6 +27,17 @@ aegis.local {
 		reverse_proxy aegis-brain:8000
 	}
 
+	# Kraken is a separate service. `handle_path` strips /kraken before the
+	# request reaches it, so its own API/static/template paths stay unchanged;
+	# the UI uses a <base href="/kraken/"> for every relative link.
+	redir /kraken /kraken/ 308
+	handle_path /kraken/* {
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		}
+		reverse_proxy aegis-kraken:8000
+	}
+
 	# Audit S5: la dashboard era servita SENZA Content-Security-Policy (i CSP
 	# settati in aegis-brain/main.py coprono solo /api/*). Con azioni SOC a un
 	# click una XSS nella UI e' la superficie che conta: qui si blinda il

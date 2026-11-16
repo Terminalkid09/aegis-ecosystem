@@ -54,6 +54,35 @@ def _decode_jwt(token: str, expected_type: Optional[str] = None) -> Optional[dic
         return None
 
 
+def decode_sso_assertion(token: str) -> Optional[dict]:
+    """Verify a one-shot Brain -> Kraken login assertion.
+
+    Deliberately separate from `_decode_jwt`: different key, issuer, audience
+    and no local token `type`. Returns None on any failure, so the caller can
+    answer with one generic 401 instead of leaking which check failed.
+    """
+    if not settings.KRAKEN_SSO_ENABLED:
+        return None
+    secret = (settings.KRAKEN_SSO_SECRET or "").strip()
+    if len(secret) < 32 or not token:
+        return None
+    try:
+        header = jwt.get_unverified_header(token)
+        if header.get("alg") != "HS256":
+            return None
+        return jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            audience=settings.KRAKEN_SSO_AUDIENCE,
+            issuer=settings.KRAKEN_SSO_ISSUER,
+            options={"require": ["exp", "iat", "iss", "aud", "jti", "sub"]},
+        )
+    except PyJWTError as e:
+        logger.debug(f"SSO assertion rejected: {e}")
+        return None
+
+
 def create_access_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
     now = datetime.now(timezone.utc)
     expire = now + (expires_delta if expires_delta is not None else timedelta(minutes=settings.JWT_ACCESS_EXPIRE_MINUTES))

@@ -74,6 +74,12 @@ async def db_session():
 
 
 @pytest.fixture
+def test_session_factory():
+    """Factory for the test DB, for services that open their own sessions."""
+    return TestAsyncSessionLocal
+
+
+@pytest.fixture
 async def client(db_session):
     async def override_get_db():
         yield db_session

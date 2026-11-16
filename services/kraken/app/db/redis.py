@@ -7,6 +7,7 @@ redis_client: Optional[aioredis.Redis] = None
 
 TOKEN_BLACKLIST_PREFIX = "kraken:bl:"  # TTL = max token lifetime
 REFRESH_USED_PREFIX = "kraken:rt:"  # single-use refresh token rotation
+SSO_USED_PREFIX = "kraken:sso:"  # single-use Brain -> Kraken assertion
 
 
 async def get_redis() -> Optional[aioredis.Redis]:
@@ -69,4 +70,19 @@ async def consume_refresh_jti(jti: str, ttl_seconds: int) -> bool:
         return bool(result)
     except Exception as e:
         logger.error(f"Refresh-token rotation failed: {e}")
+        return False
+
+
+async def consume_sso_jti(jti: str, ttl_seconds: int) -> bool:
+    """Atomically burn a Brain SSO assertion. Fail closed without Redis."""
+    r = await get_redis()
+    if r is None:
+        logger.warning("Redis unavailable — refusing SSO exchange (fail-closed)")
+        return False
+    try:
+        result = await r.set(
+            f"{SSO_USED_PREFIX}{jti}", "1", ex=max(ttl_seconds, 1), nx=True)
+        return bool(result)
+    except Exception as e:
+        logger.error(f"SSO assertion consume failed: {e}")
         return False

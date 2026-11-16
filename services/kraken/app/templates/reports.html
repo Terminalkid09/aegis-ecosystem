@@ -6,7 +6,7 @@
 {% block content %}
 <div class="flex items-center justify-between mb-6">
     <p class="text-sm text-slate-400">Generate and download professional security reports with executive summaries, findings matrices, and recommendations.</p>
-    <button onclick="showGenerateModal()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+    <button id="open-generate" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
         </svg>
@@ -60,10 +60,10 @@
                 </label>
             </div>
             <div class="flex items-center gap-2 pt-2">
-                <button onclick="generateReport()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium transition-colors">
+                <button id="generate-report" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium transition-colors">
                     Generate
                 </button>
-                <button onclick="closeGenerateModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium transition-colors">
+                <button id="cancel-generate" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium transition-colors">
                     Cancel
                 </button>
             </div>
@@ -74,134 +74,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-requireAuth();
-const TOKEN = localStorage.getItem('kraken_token');
-
-async function loadReports() {
-    const list = document.getElementById('report-list');
-    list.innerHTML = '<div class="text-center py-8 text-slate-500 text-sm">Loading reports...</div>';
-    try {
-        const res = await fetch('/api/v1/reports/', {
-            headers: { Authorization: `Bearer ${TOKEN}` }
-        });
-        if (res.status === 401) { window.location.href = '/login'; return; }
-        const reports = await res.json();
-        renderReports(reports);
-    } catch(e) {
-        list.innerHTML = `<div class="text-center py-8 text-red-400 text-sm">Failed to load reports: ${e.message}</div>`;
-    }
-}
-
-function renderReports(reports) {
-    const list = document.getElementById('report-list');
-    if (!reports || reports.length === 0) {
-        list.innerHTML = '<div class="text-center py-12 text-slate-500"><p class="text-lg mb-2">No reports yet</p><p class="text-sm">Generate your first report using the button above.</p></div>';
-        return;
-    }
-    list.innerHTML = reports.map(r => `
-        <div class="card flex items-center justify-between">
-            <div class="flex-1">
-                <div class="flex items-center gap-2">
-                    <span class="text-sm font-semibold">${r.title}</span>
-                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400">${r.template}</span>
-                </div>
-                <div class="flex items-center gap-4 mt-1 text-xs text-slate-400">
-                    <span>${r.created_at ? r.created_at.slice(0, 19).replace('T', ' ') : ''}</span>
-                    <span>${r.event_count || 0} events</span>
-                    <span>${(r.total_attacks || 0).toLocaleString()} total attacks</span>
-                    <span>${(r.unique_ips || 0).toLocaleString()} unique IPs</span>
-                </div>
-            </div>
-            <div class="flex items-center gap-1 ml-4">
-                <a href="/api/v1/reports/${r.id}/html" target="_blank"
-                    class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-xs font-medium transition-colors flex items-center gap-1">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                    </svg>
-                    HTML
-                </a>
-                <a href="/api/v1/reports/${r.id}/pdf" target="_blank"
-                    class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 rounded text-xs font-medium transition-colors flex items-center gap-1">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                    </svg>
-                    PDF
-                </a>
-                <button onclick="deleteReport('${r.id}')"
-                    class="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded text-xs font-medium transition-colors">
-                    Delete
-                </button>
-            </div>
-        </div>
-    `).join('');
-}
-
-async function deleteReport(id) {
-    if (!confirm('Delete this report?')) return;
-    try {
-        const res = await fetch(`/api/v1/reports/${id}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${TOKEN}` }
-        });
-        if (res.ok) loadReports();
-        else alert('Failed to delete report');
-    } catch(e) { alert(e.message); }
-}
-
-document.getElementById('gen-template').addEventListener('change', function() {
-    const descs = {
-        'professional': 'Full professional report with executive summary, findings matrix, recommendations, and detailed event listing.',
-        'executive': 'High-level executive summary with key metrics, top threats, and strategic recommendations.',
-        'technical': 'Detailed technical report with full event data, command logs, credential attempts, and malware samples.'
-    };
-    document.getElementById('template-desc').textContent = descs[this.value] || '';
-});
-
-function showGenerateModal() {
-    document.getElementById('generate-modal').classList.remove('hidden');
-}
-
-function closeGenerateModal() {
-    document.getElementById('generate-modal').classList.add('hidden');
-    document.getElementById('gen-status').classList.add('hidden');
-}
-
-async function generateReport() {
-    const status = document.getElementById('gen-status');
-    status.classList.remove('hidden');
-    status.textContent = 'Generating report...';
-    status.className = 'text-xs text-indigo-400';
-
-    const params = new URLSearchParams({
-        title: document.getElementById('gen-title').value,
-        template: document.getElementById('gen-template').value,
-        include_executive_summary: document.getElementById('gen-summary').checked,
-        include_findings_matrix: document.getElementById('gen-matrix').checked,
-        include_recommendations: document.getElementById('gen-recs').checked,
-        limit: document.getElementById('gen-limit').value,
-    });
-    const days = document.getElementById('gen-days').value;
-    if (days) params.append('days_back', days);
-
-    try {
-        const res = await fetch(`/api/v1/reports/generate?${params.toString()}`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${TOKEN}` }
-        });
-        if (res.status === 401) { window.location.href = '/login'; return; }
-        const report = await res.json();
-        status.textContent = `Report generated successfully! (${report.event_count} events)`;
-        status.className = 'text-xs text-emerald-400';
-        closeGenerateModal();
-        loadReports();
-    } catch(e) {
-        status.textContent = `Failed: ${e.message}`;
-        status.className = 'text-xs text-red-400';
-    }
-}
-
-loadReports();
-</script>
+<script src="static/js/reports.js"></script>
 {% endblock %}

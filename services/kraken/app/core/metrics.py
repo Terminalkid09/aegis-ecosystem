@@ -79,6 +79,32 @@ export_requests_total = Counter(
     registry=registry
 )
 
+outbox_pending = Gauge(
+    "kraken_outbox_pending",
+    "Events waiting for delivery to Aegis",
+    registry=registry
+)
+
+outbox_sent_total = Counter(
+    "kraken_outbox_sent_total",
+    "Events delivered to Aegis",
+    registry=registry
+)
+
+outbox_failed_total = Counter(
+    "kraken_outbox_failed_total",
+    "Events permanently failed or exhausted retries",
+    ["reason"],
+    registry=registry
+)
+
+outbox_attempts_total = Counter(
+    "kraken_outbox_attempts_total",
+    "Delivery attempts by outcome",
+    ["outcome"],
+    registry=registry
+)
+
 def record_http_request(method: str, endpoint: str, status: int, duration: float):
     http_requests_total.labels(method=method, endpoint=endpoint, status=status).inc()
     http_request_duration_seconds.labels(method=method, endpoint=endpoint).observe(duration)
@@ -117,6 +143,18 @@ def record_auth_failure(reason: str):
 
 def record_export(format_type: str, success: bool):
     export_requests_total.labels(format=format_type, status="success" if success else "failure").inc()
+
+def set_outbox_pending(count: int):
+    outbox_pending.set(count)
+
+def record_outbox_sent():
+    outbox_sent_total.inc()
+
+def record_outbox_failed(reason: str):
+    outbox_failed_total.labels(reason=reason).inc()
+
+def record_outbox_attempt(outcome: str):
+    outbox_attempts_total.labels(outcome=outcome).inc()
 
 async def metrics_endpoint():
     return Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)

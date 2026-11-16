@@ -20,15 +20,38 @@ the tag audit and the release policy.
 - Gate 0 licensing groundwork: `LICENSE` (AGPL-3.0-only), `NOTICE`,
   `TRADEMARK.md`, `SECURITY.md`, `CONTRIBUTING.md`, and the
   `THIRD_PARTY_NOTICES.md` placeholder.
-- `docs/PLAN_AEGIS_KRAKEN_HANDOFF.md` v2.5: D2 agent vs network sensor, D16
-  portfolio-first with no fixed date, PR/merge/release flow, and the published
-  tag policy.
-- `docs/RELEASES.md`: audit of the published tags and the release checklist.
+- `docs/PLAN_AEGIS_KRAKEN_HANDOFF.md` v2.7: the 4.1 scope is the complete
+  Kraken vertical (compose, signed ingest with outbox/retry, UI, read-only
+  Aegis view, end-to-end smoke test); new sensors, campaigns, Lab and unified
+  timeline move to 4.2+.
+- `docs/RELEASES.md`: audit of the published tags, the release checklist and
+  the release-integrity gate: no user-visible capability is called integrated
+  until API, UI, docs and tests ship together. The gate now names the complete
+  Kraken vertical as a 4.1 requirement.
+- `docs/ENTERPRISE_ROADMAP.md`: explicit OSINT/SentinelX and deploy/fleet
+  workstreams, separate from the release hardening checklist.
 - `docs/youtrack_tickets.csv` and `scripts/youtrack_import.py`: import path for
   the findings and roadmap work packages.
 - `scripts/test-restore.sh` and the nightly `Backup Restore Check` workflow:
   an encrypted backup/restore round-trip creates disposable databases and
   verifies a probe row instead of trusting the restore path by inspection.
+- Kraken transactional outbox (4.1.7): the signed event is queued in the same
+  transaction as the attack record, then delivered by a worker with exponential
+  backoff, poison handling, stale-claim recovery and `kraken_outbox_*` metrics.
+  A Brain outage no longer drops the event from the Aegis side; retries are
+  idempotent because the Brain deduplicates by `event_id`.
+- Kraken UI and unified Aegis view (4.1.8): Kraken is served behind `/kraken/`
+  with delegated SSO — a 60-second, single-use assertion signed with the
+  dedicated `KRAKEN_SSO_SECRET` — and keeps its own users, database and cookie
+  scope. The UI loads only local assets and no inline JavaScript, so it works
+  under the `script-src 'self'` CSP and in air-gapped deployments. The Aegis
+  SPA adds a read-only Kraken page with the related events, alerts and
+  incidents; Kraken-specific operations stay in the Kraken UI.
+- Kraken in the root compose (4.1.9): a `kraken` profile with its own Postgres,
+  Redis, network and init volume. The app no longer mounts the Docker socket;
+  a dedicated sandbox broker is the only service that talks to the daemon. A
+  live smoke test covers the SSH attack → event → alert/incident path, plus an
+  outbox drain after a Brain outage.
 
 ### Changed
 
@@ -39,6 +62,8 @@ the tag audit and the release policy.
   `yara-python` has no CPython 3.15 wheel yet.
 - README tagline and license section now describe the actual open-source
   positioning.
+- The frontend no longer loads Google Fonts: typography uses system fonts, so
+  the dashboard and the Kraken UI make no external request at runtime.
 - `v4.1.0` is the next release. It is a hardening minor, not a new major; the
   version fields in the code stay at `4.0.0` until the release PR.
 
@@ -61,6 +86,12 @@ the tag audit and the release policy.
   (AEGIS-SEC-007).
 - Other findings are documented in the handoff plan; this section lists only
   changes present on `dev`. They ship only after merge.
+
+### Fixed
+
+- A tab left open across a frontend rebuild no longer keeps failing to load
+  lazy pages until a manual refresh: `vite:preloadError` triggers one guarded
+  page reload, so the tab picks up the new chunk names automatically.
 
 ### Known limitations
 

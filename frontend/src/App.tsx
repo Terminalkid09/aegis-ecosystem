@@ -25,6 +25,7 @@ const AuditLogViewer = lazy(() => import('@/components/pages/AuditLogViewer'))
 const SyslogViewer   = lazy(() => import('@/components/pages/SyslogViewer'))
 const LogSources     = lazy(() => import('@/components/pages/LogSources'))
 const Search       = lazy(() => import('@/components/pages/Search'))
+const Kraken       = lazy(() => import('@/components/pages/Kraken'))
 const YaraManager   = lazy(() => import('@/components/pages/YaraManager'))
 const SettingsPage   = lazy(() => import('@/components/pages/SettingsPage'))
 
@@ -122,6 +123,7 @@ function AppShell() {
     syslog:     <SyslogViewer />,
     logsources: <LogSources />,
     search:     <Search />,
+    kraken:     <Kraken />,
     yara:       <YaraManager />,
     settings:   <SettingsPage />,
   }

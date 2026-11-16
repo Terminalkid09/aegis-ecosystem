@@ -3,14 +3,10 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="{{ public_base_path }}/" />
     <title>Login — Kraken</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = { darkMode: 'class' }
-        if (localStorage.getItem('theme') !== 'light') {
-            document.documentElement.classList.add('dark');
-        }
-    </script>
+    <script src="static/vendor/tailwind.js"></script>
+    <script src="static/js/base.js"></script>
 </head>
 <body class="bg-slate-900 min-h-screen flex items-center justify-center p-4">
 
@@ -36,7 +32,7 @@
                     <input id="password" type="password" autocomplete="current-password"
                            class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors" />
                 </div>
-                <button id="login-btn" onclick="doLogin()"
+                <button id="login-btn"
                         class="bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-semibold rounded-lg py-2.5 text-sm transition-colors mt-1">
                     Sign In
                 </button>
@@ -45,50 +41,6 @@
         <p class="text-center text-xs text-slate-600 mt-6">Kraken v1.0.0</p>
     </div>
 
-    <script>
-        async function doLogin() {
-            const username = document.getElementById('username').value.trim();
-            const password = document.getElementById('password').value;
-            const errorEl = document.getElementById('error-msg');
-            const btn     = document.getElementById('login-btn');
-
-            errorEl.classList.add('hidden');
-            if (!username || !password) {
-                errorEl.textContent = 'Please enter username and password.';
-                errorEl.classList.remove('hidden');
-                return;
-            }
-
-            btn.disabled = true;
-            btn.textContent = 'Signing in…';
-
-            try {
-                const res = await fetch('/api/v1/auth/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password }),
-                });
-                if (!res.ok) {
-                    const data = await res.json().catch(() => ({}));
-                    errorEl.textContent = data.detail || 'Invalid credentials.';
-                    errorEl.classList.remove('hidden');
-                    return;
-                }
-                const { access_token } = await res.json();
-                localStorage.setItem('kraken_token', access_token);
-                window.location.href = '/';
-            } catch {
-                errorEl.textContent = 'Connection error. Is the server running?';
-                errorEl.classList.remove('hidden');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Sign In';
-            }
-        }
-
-        document.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-        // Redirect if already logged in
-        if (localStorage.getItem('kraken_token')) window.location.href = '/';
-    </script>
+    <script src="static/js/login.js"></script>
 </body>
 </html>

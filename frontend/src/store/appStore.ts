@@ -18,6 +18,7 @@ export type Page =
   | 'syslog'
   | 'logsources'
   | 'search'
+  | 'kraken'
   | 'yara'
   | 'settings'
 
