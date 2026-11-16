@@ -103,13 +103,16 @@ expansion — not as the missing half of 4.1.
 
 ## Checklist before `v4.1.0`
 
-- [ ] Gate 0 complete: license, security policy, privacy documents, trademark
+- [x] Gate 0 complete: license, security policy, privacy documents, trademark
       check.
-- [ ] AEGIS-REL-002 complete: Brain, Link, Frontend, NodeTrace, Guard, compose
+- [ ] AEGIS-REL-002 assets: Brain, Link, Frontend, NodeTrace, Guard, compose
       bundle (including the `kraken` profile), per-component SBOM, checksums,
-      signature, changelog, upgrade notes.
-- [ ] Kraken vertical complete: outbox/retry, signed ingest, reachable UI,
+      changelog, upgrade notes. **Cosign signature pending.**
+- [x] Kraken vertical complete: outbox/retry, signed ingest, reachable UI,
       read-only Aegis view, end-to-end smoke test from the downloaded bundle.
+- [x] Release bundle built from a clean commit and verified with
+      `release-smoke.py`: 21 files; `nodetrace.zip` excludes `token.json`,
+      `device.key`, `device.crt` and `nodetrace.pid`.
 - [x] All version fields updated together: Brain `APP_VERSION`, frontend
       `package.json`, Guard `pom.xml`, NodeTrace `AGENT_VERSION`, OCSF agent
       version, `scripts/pack-artifacts.py`.
@@ -120,21 +123,24 @@ expansion — not as the missing half of 4.1.
       downloaded artifacts, not from the repository.
 - [ ] No force-push, no tag rewrite, no `latest` tag.
 
-## Kraken vertical status (working tree, 2026-11-16)
+## v4.1.0 release candidate (2026-11-16)
 
-Not a release: the tag is not cut and the checklist above stays open. Measured
-on the working tree:
+Measured on commit `4ac83b5` before the release merge:
 
-- Brain: **823 passed, 3 skipped** with PostgreSQL and Redis; Kraken: **130
-  passed**; frontend build OK and lint **0 errors / 25 warnings**; offline
-  Playwright smoke **2 passed**; `docker compose --profile kraken config` and
-  `caddy validate` valid.
-- Live smoke: delegated SSO exchange 200 and replayed assertion 401; SSH ingest
-  reaches the Brain as event, alert and incident; with the Brain stopped the
-  outbox stays `processing` and drains (`sent`) after restart without loss.
-- Still open before the checklist can close: release-artifact build and smoke
-  test from the downloaded bundle, the release-wide audits, `UPGRADING.md`, and
-  the annotated tag from `main`.
+- Brain **823 passed, 3 skipped**; Kraken **130 passed**; Guard **140**; Link
+  **17**; NodeTrace **58 passed, 2 skipped**; frontend build OK and lint
+  **0 errors / 25 warnings**; Playwright pages **4 passed** and Kraken
+  vertical **2 passed**; `scripts/api_smoke.py` **ALL PASS**.
+- Security: bandit Brain **0 High**, Kraken **0 High** (one Medium B108 on the
+  container tmpfs path); `pip-audit` Brain and Kraken **0**; `npm audit` **0
+  vulnerabilities**; compose and Caddy valid; SSO exchange 200 / replay 401;
+  outbox `pending 0` with deliveries `sent`.
+- Release bundle: **21 files**, `release-smoke.py` **OK** from a copied
+  directory; `nodetrace.zip` has 39 entries and no `token.json`, `device.key`,
+  `device.crt` or `nodetrace.pid`; Guard jar is 4.1.0.
+- Still open at this commit: CI on the release commit, annotated tag and GitHub
+  Release. Cosign signing is not produced; the bundle is checksummed, not
+  signed.
 
 ## Current version fields
 
