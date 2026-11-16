@@ -1,12 +1,12 @@
 # Release audit — Aegis Ecosystem
 
-Status: 2026-11-14. This document audits the tags that already exist. It is not
-a release and it does not move history.
+Status: 2026-11-16. This document audits the tags that already exist, including
+the completed `v4.1.0` release. It does not move history.
 
 ## Published tags are immutable
 
-`v1.0.0`, `v2.0.0`, `v3.0.0` and `v4.0.0` exist on `origin` and have GitHub
-Releases. They are historical facts. Do not delete them, force-move them, or
+`v1.0.0`, `v2.0.0`, `v3.0.0`, `v4.0.0` and `v4.1.0` exist on `origin` and have
+GitHub Releases. They are historical facts. Do not delete them, force-move them, or
 reuse their numbers. A published version is a promise, even when the release
 behind it was incomplete.
 
@@ -30,12 +30,13 @@ tags.
 | `v2.0.0` | 2026-05-29 | `f464e98` | `f464e98` | yes | none |
 | `v3.0.0` | 2026-07-09 | `058dea5` | `058dea5` | yes | none |
 | `v4.0.0` | 2026-09-21 | `38e245f` | `de52206` | yes | `aegis-guard.jar`, `sbom.spdx.json`, `SHA256SUMS.txt` |
+| `v4.1.0` | 2026-11-16 | `17c499f` | `17c499f` | yes | 24 assets: Brain/Link/Frontend/Guard/NodeTrace, compose, SBOM, source, seven images, manifests/checksums |
 
-All four are lightweight tags. `v4.0.0` is the only one whose code version
-matches the tag: `aegis-brain` and `frontend` declared `4.0.0`, and Guard
-declared `4.0.0`. At `v1.0.0`–`v3.0.0`, the frontend still declared `0.1.0`
-and Guard `1.0.0`, so the tag numbers were batch labels rather than a coherent
-product version.
+The first four are lightweight tags; `v4.1.0` is annotated. `v4.0.0` and
+`v4.1.0` are the only ones whose code version matches the tag: `aegis-brain`
+and `frontend` declared `4.0.0`/`4.1.0`, and Guard declared the same. At
+`v1.0.0`–`v3.0.0`, the frontend still declared `0.1.0` and Guard `1.0.0`, so
+the tag numbers were batch labels rather than a coherent product version.
 
 ## What the old releases actually contain
 
@@ -72,7 +73,7 @@ The safe correction is:
 | `v2.0.0` | Modular-monolith Brain, unified agents, VaultX, AI suite | historical |
 | `v3.0.0` | Standalone agents and Discovery Center | historical |
 | `v4.0.0` | EDR + SIEM platform, ETW, Sigma, Telegram, signed enrollment | historical; last batch tag |
-| `v4.1.0` | Foundation + complete Kraken vertical: blocking fixes, CI green, compose/outbox/UI/unified view, complete release | next; not tagged |
+| `v4.1.0` | Foundation + complete Kraken vertical: blocking fixes, CI green, compose/outbox/UI/unified view, complete release | released 2026-11-16; complete |
 
 `v4.1.0` is a **minor** because it fixes and hardens existing contracts. The
 removal of the disabled-by-default `script` playbook action will be documented
@@ -105,27 +106,30 @@ expansion — not as the missing half of 4.1.
 
 - [x] Gate 0 complete: license, security policy, privacy documents, trademark
       check.
-- [ ] AEGIS-REL-002 assets: Brain, Link, Frontend, NodeTrace, Guard, compose
-      bundle (including the `kraken` profile), per-component SBOM, checksums,
+- [x] AEGIS-REL-002 assets: Brain, Link, Frontend, NodeTrace, Guard, compose
+      bundle (including the `kraken` profile), CycloneDX SBOM, checksums,
       changelog, upgrade notes. The seven release images are shipped as
       `aegis-images.tar.gz`; if the compressed archive exceeds the 1.9 GB
       safety threshold it is split into `aegis-images.tar.gz.part-*` and must
-      be reassembled with `cat` before `docker load`. **Cosign signature
-      pending.**
+      be reassembled with `cat` before `docker load`. **Cosign signature is
+      still not produced; the release is checksummed, not signed.**
 - [x] Kraken vertical complete: outbox/retry, signed ingest, reachable UI,
       read-only Aegis view, end-to-end smoke test from the downloaded bundle.
-- [x] Release bundle built from a clean commit and verified with
-      `release-smoke.py`: 21 files; `nodetrace.zip` excludes `token.json`,
-      `device.key`, `device.crt` and `nodetrace.pid`.
+- [x] Release bundle built from the tag commit and verified with
+      `release-smoke.py` from a fresh download: 22 manifest files;
+      `nodetrace.zip` excludes `token.json`, `device.key`, `device.crt` and
+      `nodetrace.pid`.
 - [x] All version fields updated together: Brain `APP_VERSION`, frontend
       `package.json`, Guard `pom.xml`, NodeTrace `AGENT_VERSION`, OCSF agent
       version, `scripts/pack-artifacts.py`.
 - [x] `CHANGELOG.md` and `UPGRADING.md` updated in the release PR.
-- [ ] CI green on the release commit.
-- [ ] Annotated tag from `main`: `git tag -a v4.1.0 -m "Aegis 4.1.0"`.
-- [ ] GitHub Release built from the tag, with assets and smoke test from the
-      downloaded artifacts, not from the repository.
-- [ ] No force-push, no tag rewrite, no `latest` tag.
+- [x] CI green on the release commit: tag run `43916328707`, all jobs green.
+- [x] Annotated tag from `main`: `git tag -a v4.1.0 -m "Aegis 4.1.0"` at
+      `17c499f`.
+- [x] GitHub Release built from the tag, with assets and smoke test from the
+      downloaded artifacts, not from the repository:
+      <https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v4.1.0>.
+- [x] No force-push, no tag rewrite, no `latest` tag.
 
 ## v4.1.0 release candidate (2026-11-16)
 
@@ -145,6 +149,26 @@ Measured on commit `4ac83b5` before the release merge:
 - Still open at this commit: CI on the release commit, annotated tag and GitHub
   Release. Cosign signing is not produced; the bundle is checksummed, not
   signed.
+
+## v4.1.0 final release verification (2026-11-16)
+
+- Annotated tag `v4.1.0` at `17c499f`; tag CI run `43916328707` green,
+  including `Build & Test` (NVD audit) and `Release Artifacts`.
+- GitHub Release: 24 assets. The 22 manifest entries are the 20 core/SBOM
+  assets plus `nodetrace.zip` and `aegis-images.tar.gz`; `RELEASE_MANIFEST.json`
+  and `SHA256SUMS.txt` complete the 24.
+- Fresh-download smoke: `release-smoke.py` **OK, 22 files**; every
+  `sha256sum -c` entry **OK**; `nodetrace.zip` **39 entries**, no
+  `token.json`, `device.key`, `device.crt` or `nodetrace.pid`; image archive
+  `gzip -t` **OK**; source tar contains `.env.example` and the smoke script.
+- GitHub normalizes release asset names that begin with a dot: the uploaded
+  asset is `default.env.example`, and the operator must rename it to
+  `.env.example` before running the smoke test. This is documented in the
+  Release notes and is a release-pipeline defect to remove in 4.2.
+- Honest limitations: no cosign signature; no per-image SBOM (the release has
+  one CycloneDX SBOM for the repository); the Windows NodeTrace zip is built
+  locally and attached to the release because the Linux release job cannot
+  produce it; Playwright and live detection batteries remain manual gates.
 
 ## Current version fields
 
