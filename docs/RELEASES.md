@@ -110,10 +110,10 @@ expansion — not as the missing half of 4.1.
       signature, changelog, upgrade notes.
 - [ ] Kraken vertical complete: outbox/retry, signed ingest, reachable UI,
       read-only Aegis view, end-to-end smoke test from the downloaded bundle.
-- [ ] All version fields updated together: Brain `APP_VERSION`, frontend
+- [x] All version fields updated together: Brain `APP_VERSION`, frontend
       `package.json`, Guard `pom.xml`, NodeTrace `AGENT_VERSION`, OCSF agent
       version, `scripts/pack-artifacts.py`.
-- [ ] `CHANGELOG.md` and `UPGRADING.md` updated in the release PR.
+- [x] `CHANGELOG.md` and `UPGRADING.md` updated in the release PR.
 - [ ] CI green on the release commit.
 - [ ] Annotated tag from `main`: `git tag -a v4.1.0 -m "Aegis 4.1.0"`.
 - [ ] GitHub Release built from the tag, with assets and smoke test from the
@@ -138,14 +138,13 @@ on the working tree:
 
 ## Current version fields
 
-These stay at `4.0.0` until the release PR. Do not bump them by hand in a
-feature PR.
+These are the release version fields for `v4.1.0`.
 
 | Component | File | Current |
 |---|---|---|
-| Brain API | `aegis-brain/app/core/config.py` | `4.0.0` |
-| Frontend | `frontend/package.json` | `4.0.0` |
-| Guard | `aegis-guard/pom.xml` | `4.0.0` |
-| NodeTrace | `NodeTrace/agents/python/agent.py` | `4.0.0` |
-| OCSF agent metadata | `aegis-brain/app/services/ocsf.py` | `4.0.0` |
-| Artifact packer | `scripts/pack-artifacts.py` | `v4.0.0` |
+| Brain API | `aegis-brain/app/core/config.py` | `4.1.0` |
+| Frontend | `frontend/package.json` | `4.1.0` |
+| Guard | `aegis-guard/pom.xml` | `4.1.0` |
+| NodeTrace | `NodeTrace/agents/python/agent.py` | `4.1.0` |
+| OCSF agent metadata | `aegis-brain/app/services/ocsf.py` | `4.1.0` |
+| Artifact packer | `scripts/pack-artifacts.py` | `v4.1.0` |

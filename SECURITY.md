@@ -2,9 +2,9 @@
 
 ## Supported versions
 
-Aegis has no stable production release yet. The first supported line will be
-**4.1.x**. The `dev` and `main` branches are development branches and are not
-supported for production use.
+**4.1.x** is the first supported release line. `dev` is the development
+branch; `main` tracks the latest release. Older tags are historical and are
+not supported for production use.
 
 ## Reporting a vulnerability
 
@@ -38,8 +38,7 @@ Please include:
 ## Scope
 
 In scope: `aegis-brain`, `aegis-guard`, `aegis-link`, `NodeTrace`,
-`aegis-ebpf`, `frontend`, the deployment manifests, and `services/kraken`
-once imported.
+`aegis-ebpf`, `frontend`, the deployment manifests, and `services/kraken`.
 
 Out of scope: vulnerabilities in third-party dependencies (report them
 upstream), social engineering, physical attacks, denial of service, spam,

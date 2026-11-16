@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     # Versione della piattaforma: una sola fonte per OpenAPI, endpoint root e
     # dashboard (prima era scritta a mano in due punti e la UI mostrava una
     # versione diversa da quella vera). Si alza qui, in un posto solo.
-    APP_VERSION: str = "4.0.0"
+    APP_VERSION: str = "4.1.0"
     OLLAMA_URL: Optional[str] = None
     OLLAMA_DEFAULT_MODEL: str = "aegis-default"
     # Audit: allowlist modelli caricabili via API (niente pull arbitrari).

@@ -8,12 +8,14 @@ Semantic Versioning applies to releases after `v4.0.0`. The older tags
 published and are not rewritten. See [docs/RELEASES.md](docs/RELEASES.md) for
 the tag audit and the release policy.
 
-> A published version is immutable. The next release is `v4.1.0`; it is cut
-> only after Gate 0 and AEGIS-REL-002 are complete.
+> A published version is immutable. `v4.1.0` is the first complete release
+> after the batch tags: the full Kraken vertical ships with the hardening
+> fixes, and expansion moves to 4.2+.
 
-## [Unreleased]
+## [4.1.0] - 2026-11-16
 
-> Changes on `dev`. Not released.
+The complete Kraken vertical: transactional outbox and retry, delegated SSO,
+mounted UI, read-only Aegis view and the isolated compose profile.
 
 ### Added
 
@@ -95,11 +97,14 @@ the tag audit and the release policy.
 
 ### Known limitations
 
-- The 12 Playwright e2e tests pass manually against the live stack, but they
-  are not a v4.1 CI gate; the CI runner is planned for 4.2. The two live
-  detection batteries are also manual in 4.1.
-- The local release dry-run verifies checksums and the manifest. It does not
-  produce a cosign signature, and the GitHub release job has not been run.
+- The 12 Playwright e2e tests and the opt-in Kraken vertical smoke pass
+  manually against the live stack, but they are not a v4.1 CI gate; the CI
+  runner is planned for 4.2. The two live detection batteries are also manual
+  in 4.1.
+- Release assets are checksummed with `SHA256SUMS.txt` and verified against
+  `RELEASE_MANIFEST.json`. Cosign signing is a separate release step: a bundle
+  without `SHA256SUMS.txt.sig` is checksummed, not a signed production
+  artifact.
 
 ## [4.0.0] - 2026-09-21
 
@@ -194,7 +199,8 @@ Release notes report 166 tests passing.
 - Asynchronous Redis-backed ingestion, PostgreSQL persistence, Docker Compose
   deployment, and Windows/Linux installation scripts.
 
-[Unreleased]: https://github.com/Terminalkid09/aegis-ecosystem/compare/v4.0.0...HEAD
+[Unreleased]: https://github.com/Terminalkid09/aegis-ecosystem/compare/v4.1.0...HEAD
+[4.1.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v4.1.0
 [4.0.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v4.0.0
 [3.0.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v3.0.0
 [2.0.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v2.0.0

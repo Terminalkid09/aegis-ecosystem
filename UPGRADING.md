@@ -1,7 +1,7 @@
 # Upgrading to Aegis Ecosystem 4.1.0
 
-This is the upgrade guide for the **4.1.0 hardening minor**. It is written for
-the release candidate and must be checked again for the final tag.
+This is the upgrade guide for the **4.1.0 hardening minor**, the first
+complete release after the batch tags.
 
 ## Before upgrading
 
@@ -83,5 +83,6 @@ sha256sum -c SHA256SUMS.txt
 python scripts/release-smoke.py release
 ```
 
-Signing is performed by the GitHub release job with cosign; a bundle without a
-valid `SHA256SUMS.txt.sig` is a dry-run artifact, not a production release.
+The release job attaches the checksummed bundle. Cosign signing is a separate
+step: verify `SHA256SUMS.txt.sig` when it is present, and do not describe a
+bundle without it as a signed production artifact.

@@ -60,12 +60,17 @@ def _copy(src: Path, dst: Path) -> None:
     shutil.copy2(src, dst)
 
 
-def _zip_tree(src: Path, dst: Path) -> None:
+NODETRACE_IDENTITY_FILES = frozenset({
+    "token.json", "device.crt", "device.key", "nodetrace.pid",
+})
+
+
+def _zip_tree(src: Path, dst: Path, exclude: frozenset[str] = frozenset()) -> None:
     if not src.is_dir():
         raise SystemExit(f"[X] missing release directory: {src}")
     with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(src.rglob("*")):
-            if path.is_file():
+            if path.is_file() and path.name not in exclude:
                 archive.write(path, path.relative_to(src).as_posix())
 
 
@@ -95,7 +100,9 @@ def main() -> int:
 
     nt = ROOT / "NodeTrace/agents/python/dist/nodetrace-agent"
     if nt.is_dir():
-        _zip_tree(nt, out / "nodetrace.zip")
+        # Never ship a developer identity: the dist directory can contain the
+        # local device key, certificate, token and pid lock from a test run.
+        _zip_tree(nt, out / "nodetrace.zip", exclude=NODETRACE_IDENTITY_FILES)
     frontend = ROOT / "frontend/dist"
     if frontend.is_dir():
         _zip_tree(frontend, out / "frontend.zip")

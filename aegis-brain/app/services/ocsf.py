@@ -25,7 +25,7 @@ OCSF_VERSION = "1.4.0"
 PRODUCT = {
     "name": "Aegis Brain",
     "vendor_name": "Aegis Ecosystem",
-    "version": "4.0.0",
+    "version": "4.1.0",
     "feature": {"name": "Static + behavioral detection"},
 }
 

@@ -212,7 +212,7 @@ Equivalent installers: `./install.sh lab|pilot [--observability]` and `.\install
 ### Quality gates
 
 ```bash
-# Brain tests (820 passed, 3 YARA skips, DB-backed)
+# Brain tests (823 passed, 3 YARA skips, DB-backed)
 python scripts/run_integration_tests.py --import-mode=importlib
 
 # Guard tests (140 JUnit)
@@ -232,7 +232,7 @@ python scripts/live_battery.py
 python scripts/hard_battery.py
 ```
 
-Verification layers: 820 pytest, 140 Guard JUnit, 17 Link JUnit, 12 Playwright e2e and 2 live detection batteries. CI gates pytest, Guard/Link, NodeTrace, frontend lint/build, pip-audit, Trivy and SBOM; Playwright and the live batteries are manual in 4.1. The Playwright CI runner is planned for 4.2.
+Verification layers: 823 Brain pytest, 130 Kraken pytest, 140 Guard JUnit, 17 Link JUnit, 12 Playwright e2e and 2 live detection batteries. CI gates pytest, Guard/Link, NodeTrace, frontend lint/build, pip-audit, Trivy and SBOM; Playwright and the live batteries are manual in 4.1. The Playwright CI runner is planned for 4.2.
 
 ---
 
@@ -328,7 +328,7 @@ One preparative step is yours — **publish the artifacts the brain serves** (th
 
 ```bash
 python scripts/pack-artifacts.py            # -> aegis-brain/artifacts/*-latest.{zip,tar.gz}
-python scripts/pack-artifacts.py --version v4.0.0
+python scripts/pack-artifacts.py --version v4.1.0
 ```
 
 It packs exactly what a local install copies: `aegis-guard.jar`, a bundled `jre/` when `build.bat` produced one, `aegis-etw.exe` (kernel telemetry) and `bin/yara64.exe` for Guard; the full PyInstaller bundle for NodeTrace. Missing runtime = hard failure; missing optional piece = declared in the output (`python -m ...`-style honesty, no silent gaps). What the target needs: **Administrator** (service registration + ETW trace session), and a **Java 25+** runtime — either bundled in the artifact or installed there (`Get-JavaMajor` verifies the version, because a Java 8 on `PATH` installs a service that starts and dies with `UnsupportedClassVersionError`).
@@ -552,7 +552,7 @@ aegis-ecosystem/
 │   ├── app/services/        # telemetry, sigma, correlation, notifier, total
 │   ├── app/rules/           # static rules + Sigma engine
 │   ├── alembic/versions/    # DB migrations
-│   └── tests/               # 820 pytest (CI-verified; 3 YARA skips)
+│   └── tests/               # 823 pytest (CI-verified; 3 YARA skips)
 ├── aegis-link/              # Spring Boot ingestion gateway
 ├── aegis-guard/             # Java endpoint agent (processes, FIM, remediation)
 │   └── install/windows/     # NSSM service installer/uninstaller
