@@ -389,6 +389,15 @@ jobs:
           AGENT_ENROLL_KEY: ci-dummy-enroll-key
           JWT_SECRET: ci-dummy-jwt-secret-32-chars-min
           MASTER_KEY_B64: Q/wCZ5reU82bQpZppUc6Qq80sybBPz4Q276NbMBF97Q=
+          # The root compose now interpolates the optional Kraken profile at
+          # config time. Build-only dummy values keep the supply-chain job
+          # independent of deployment secrets; no container is started here.
+          KRAKEN_DB_PASSWORD: ci-dummy-kraken-db-password
+          KRAKEN_REDIS_PASSWORD: ci-dummy-kraken-redis-password
+          KRAKEN_SECRET_KEY: ci-dummy-kraken-secret-key-32-chars-min
+          KRAKEN_INTERNAL_API_KEY: ci-dummy-kraken-internal-key-32-chars-min
+          KRAKEN_SSO_SECRET: ci-dummy-kraken-sso-secret-32-chars-min
+          SANDBOX_BROKER_TOKEN: ci-dummy-sandbox-broker-token-32-chars-min
         run: |
           # Niente aegis-guard qui: e' un agente Windows, non un servizio
           # compose (il suo Dockerfile non e' referenziato; le sue dipendenze
