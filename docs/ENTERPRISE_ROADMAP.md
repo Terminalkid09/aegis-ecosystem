@@ -37,11 +37,14 @@ Il progetto deve rimanere indipendente: il confronto con prodotti o aziende este
 Il cambio di perimetro sposta lavoro tra release, non lo elimina: le stime
 vanno ricalcolate, non presentate come ridotte.
 
-**Stato al 2026-11-16:** la verticale 4.1.7–4.1.9 è implementata e verificata
-nel working tree — outbox con ripresa dopo un outage del Brain, SSO e UI dietro
-`/kraken/*`, vista Aegis in sola lettura, profilo compose `kraken` con broker
-sandbox, smoke live e browser offline. Non è ancora una release: mancano il tag
-`v4.1.0`, lo smoke dal bundle scaricato e i gate di release.
+**Stato al 2026-11-16:** `v4.1.0` è rilasciata sul tag annotato `17c499f`.
+La verticale 4.1.7–4.1.9 è completa — outbox con ripresa dopo un outage del
+Brain, SSO e UI dietro `/kraken/*`, vista Aegis in sola lettura, profilo compose
+`kraken` con broker sandbox — e la CI del tag è verde. Lo smoke test è stato
+eseguito da un download pulito: 22 file di manifest, checksum OK, NodeTrace
+senza identità e archivio immagini valido. Restano fuori dalla 4.1 la firma
+cosign e la generazione CI del pacchetto Windows NodeTrace; sono debiti della
+release pipeline da chiudere prima del prossimo tag, non lavoro di feature.
 
 ## Stato di partenza
 

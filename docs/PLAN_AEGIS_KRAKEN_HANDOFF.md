@@ -1159,9 +1159,9 @@ timeline, ATT&CK) resta alla 4.2+.
 - [x] UI Kraken raggiungibile e vista Aegis in sola lettura funzionante; nessun secondo login obbligatorio.
 - [x] `bandit` 0 High su entrambi (Kraken: 1 Medium B108 sul path tmpfs del container); `pip-audit` 0; `npm audit --omit=dev` 0 high.
 - [x] Documento `SECURITY.md` aggiornato con la nuova postura.
-- [ ] Tag `v4.1.0`, release notes con tabella "prima/dopo".
+- [x] Tag `v4.1.0`, release notes con tabella "prima/dopo".
 
-**Stato 2026-11-16 (release candidate, pre-tag):** Brain **823 passed, 3 skipped**; Kraken **130 passed**; Guard **140**; Link **17**; NodeTrace **58 passed, 2 skipped**; frontend lint **0 errori / 25 warning** e build OK; Playwright pagine **4/4** e verticale Kraken **2/2**; API smoke **ALL PASS**; bandit Brain **0 High**, Kraken **0 High** (1 Medium B108 su tmpfs), pip-audit **0**, npm audit **0 high**; compose e Caddy validi; smoke live SSO (exchange 200, replay 401) e ingest con Brain spento/ripreso (outbox `pending 0`, `sent`). Restano aperti CI sul commit, tag e release; il bundle è verificato ma non firmato con cosign.
+**Stato 2026-11-16 (rilasciata):** Brain **823 passed, 3 skipped**; Kraken **130 passed**; Guard **140**; Link **17**; NodeTrace **58 passed, 2 skipped**; frontend lint **0 errori / 25 warning** e build OK; Playwright pagine **4/4** e verticale Kraken **2/2**; API smoke **ALL PASS**; bandit Brain **0 High**, Kraken **0 High** (1 Medium B108 su tmpfs), pip-audit **0**, npm audit **0 high**; compose e Caddy validi; smoke live SSO (exchange 200, replay 401) e ingest con Brain spento/ripreso (outbox `pending 0`, `sent`). Tag annotato `v4.1.0` a `17c499f`, CI del tag **verde** (`43916328707`), GitHub Release con 24 asset e smoke da download pulito (22 file, checksum OK). Restano fuori: firma cosign, SBOM per immagine e generazione CI del pacchetto Windows NodeTrace.
 
 ---
 
