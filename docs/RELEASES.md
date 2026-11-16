@@ -107,7 +107,11 @@ expansion — not as the missing half of 4.1.
       check.
 - [ ] AEGIS-REL-002 assets: Brain, Link, Frontend, NodeTrace, Guard, compose
       bundle (including the `kraken` profile), per-component SBOM, checksums,
-      changelog, upgrade notes. **Cosign signature pending.**
+      changelog, upgrade notes. The seven release images are shipped as
+      `aegis-images.tar.gz`; if the compressed archive exceeds the 1.9 GB
+      safety threshold it is split into `aegis-images.tar.gz.part-*` and must
+      be reassembled with `cat` before `docker load`. **Cosign signature
+      pending.**
 - [x] Kraken vertical complete: outbox/retry, signed ingest, reachable UI,
       read-only Aegis view, end-to-end smoke test from the downloaded bundle.
 - [x] Release bundle built from a clean commit and verified with

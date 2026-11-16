@@ -510,7 +510,7 @@ jobs:
 
       - name: Build and save release images
         run: |
-          set -e
+          set -euo pipefail
           docker build -t "aegis-brain:${GITHUB_REF_NAME}" aegis-brain
           docker build -t "aegis-link:${GITHUB_REF_NAME}" aegis-link
           docker build -t "aegis-frontend:${GITHUB_REF_NAME}" frontend
@@ -518,6 +518,9 @@ jobs:
           docker build -t "aegis-nodetrace:${GITHUB_REF_NAME}" NodeTrace/agents/python
           docker build -t "kraken:${GITHUB_REF_NAME}" services/kraken
           docker build -f services/kraken/Dockerfile.broker -t "kraken-broker:${GITHUB_REF_NAME}" services/kraken
+          # GitHub Releases limita ogni singolo asset a 2 GiB. Il tar non
+          # compresso delle sette immagini supera quel limite; gzip lo riduce
+          # e, se ancora troppo grande, lo dividiamo in parti riassemblabili.
           docker save \
             "aegis-brain:${GITHUB_REF_NAME}" \
             "aegis-link:${GITHUB_REF_NAME}" \
@@ -526,8 +529,16 @@ jobs:
             "aegis-nodetrace:${GITHUB_REF_NAME}" \
             "kraken:${GITHUB_REF_NAME}" \
             "kraken-broker:${GITHUB_REF_NAME}" \
-            -o release/aegis-images.tar
-          sha256sum release/aegis-images.tar >> release/SHA256SUMS.txt
+            | gzip -9 > release/aegis-images.tar.gz
+          if [ "$(stat -c%s release/aegis-images.tar.gz)" -gt 1900000000 ]; then
+            split -b 1900M release/aegis-images.tar.gz release/aegis-images.tar.gz.part-
+            rm release/aegis-images.tar.gz
+            echo "Image archive split into parts:"
+            ls -lh release/aegis-images.tar.gz.part-*
+          else
+            ls -lh release/aegis-images.tar.gz
+          fi
+          sha256sum release/aegis-images.tar.gz* >> release/SHA256SUMS.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
