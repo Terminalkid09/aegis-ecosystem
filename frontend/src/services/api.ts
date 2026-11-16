@@ -46,6 +46,9 @@ apiClient.interceptors.response.use(
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 export const authAPI = {
+  // Public policy for the login screen: with self-service off, do not show a
+  // Register tab that can only end in 403.
+  config: () => apiClient.get('/auth/config'),
   // remember: "Mantieni l'accesso su questo dispositivo" — il server emette un
   // cookie remember separato (30 gg, revocabile da Settings → Dispositivi).
   login: (email: string, password: string, remember = false) =>
@@ -263,6 +266,12 @@ export const siemAPI = {
   searchSimple: (params = {}) => apiClient.get('/search/events', { params }),
   getFields: () => apiClient.get('/search/fields'),
   getEventStats: (hours = 24) => apiClient.get('/search/stats', { params: { hours } }),
+}
+
+// ─── Kraken (separate service; read-only view + delegated SSO) ──────────────
+export const deceptionAPI = {
+  overview: (hours = 24) => apiClient.get('/deception/overview', { params: { hours } }),
+  ssoToken: () => apiClient.post('/deception/token'),
 }
 
 // ─── Rules ───────────────────────────────────────────────────────────────────

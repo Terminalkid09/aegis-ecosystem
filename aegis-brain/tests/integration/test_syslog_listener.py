@@ -19,6 +19,7 @@ import asyncio
 import socket
 import uuid
 
+import pytest
 from sqlalchemy import delete, func, select
 
 from app.database.connection import AsyncSessionLocal
@@ -93,6 +94,7 @@ def _free_udp_port() -> int:
         return sock.getsockname()[1]
 
 
+@pytest.mark.usefixtures("require_db")
 async def test_udp_datagram_is_ingested_and_stored():
     source = _source("syslog-udp")
     port = _free_udp_port()
@@ -131,6 +133,7 @@ async def test_udp_datagram_is_ingested_and_stored():
         await _cleanup(source)
 
 
+@pytest.mark.usefixtures("require_db")
 async def test_tcp_line_is_ingested_and_stored():
     source = _source("syslog-tcp")
     port = _free_udp_port()

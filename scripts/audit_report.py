@@ -60,7 +60,7 @@ def run_maven(cwd):
     """Esegue `mvn -B test` con JAVA_HOME impostato (portabile Windows+Linux)."""
     java_home = os.environ.get(
         "AEGIS_JAVA_HOME",
-        r"C:\Program Files\Eclipse Adoptium\jdk-25.0.2.10-hotspot"
+        r"C:\Program Files\Eclipse Adoptium\jdk-25.0.5.8-hotspot"
         if platform.system() == "Windows"
         else "/usr/lib/jvm/default-java",
     )
@@ -141,7 +141,7 @@ def env_versions():
     # Java via JAVA_HOME-aware java
     java_home = os.environ.get(
         "AEGIS_JAVA_HOME",
-        r"C:\Program Files\Eclipse Adoptium\jdk-25.0.2.10-hotspot"
+        r"C:\Program Files\Eclipse Adoptium\jdk-25.0.5.8-hotspot"
         if platform.system() == "Windows"
         else "/usr/lib/jvm/default-java",
     )

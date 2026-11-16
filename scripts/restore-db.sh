@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Aegis DB Restore — uso manuale dell'operatore (MAI automatico).
 # Uso: ./scripts/restore-db.sh <file-backup> [target_db]
 # Il file può essere .sql.gz (chiaro) o .sql.gz.gpg (cifrato: serve
@@ -6,7 +6,7 @@
 # I backup cifrati si decifrano SEMPRE su file temporaneo PRIMA di toccare il
 # DB: l'MDC viene verificato per intero e un backup manomesso non ripristina
 # nulla (GPG esce non-zero e `set -eu` abortisce).
-set -eu
+set -euo pipefail
 
 if [ "${1:-}" = "" ]; then
   echo "Uso: $0 <aegis_db_*.sql.gz[.enc]> [target_db]" >&2
@@ -38,11 +38,11 @@ case "$FILE" in
     trap 'rm -rf "$WORK"' EXIT INT TERM
     printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
       --passphrase-fd 0 --decrypt -o "$WORK/restore.sql.gz" "$FILE"
-    gunzip -c "$WORK/restore.sql.gz" | psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$TARGET_DB"
+    gunzip -c "$WORK/restore.sql.gz" | psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$TARGET_DB" -v ON_ERROR_STOP=1
     ;;
   *.gz)
     echo "WARNING: backup in chiaro." >&2
-    gunzip -c "$FILE" | psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$TARGET_DB"
+    gunzip -c "$FILE" | psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$TARGET_DB" -v ON_ERROR_STOP=1
     ;;
   *)
     echo "Estensione non riconosciuta (attesi .sql.gz o .sql.gz.gpg)." >&2

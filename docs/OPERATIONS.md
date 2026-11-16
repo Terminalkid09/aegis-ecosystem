@@ -13,7 +13,7 @@ docker compose ps                    # tutti healthy
 curl -sk https://aegis.local/api/v1/health  # {"status":"ok"}
 ```
 
-Prerequisiti: Docker + Compose v2, Python 3.10+ per `scripts/run_integration_tests.py`,
+Prerequisiti: Docker + Compose v2, Python 3.15+ per `scripts/run_integration_tests.py`,
 `POSTGRES_PORT`/`REDIS_PORT_EXTERNAL` raggiungibili su 127.0.0.1. Vedi
 `scripts/run_integration_tests.py --help` e `aegis-brain/tests/conftest.py`
 (`TEST_DATABASE_URL`/`REQUIRE_INTEGRATION=1` per CI fail-closed).
@@ -26,6 +26,13 @@ reale in prod (sostituire `tls internal` nel Caddyfile con email ACME).
 Da **Deployment Manager** creare un token per `Aegis-Guard`, `NodeTrace` o
 `Both agents`. Il token è breve e monouso per ogni tipo di agent: con `Both`
 Guard e NodeTrace effettuano due enrollment separati sullo stesso host.
+
+Per **ri-enrollare** un host già registrato il token deve essere creato con
+`target_hostname` uguale all'hostname esistente. La chiave statica
+`AGENT_ENROLL_KEY` serve solo al primo enrollment: non può sostituire il device
+secret di un host già presente. Gli agent inviano anche il machine-id
+(`MachineGuid` su Windows, `/etc/machine-id` su Linux); il Brain ne conserva
+solo l'hash e registra l'eventuale cambio identità nell'audit.
 
 Il comando generato:
 
@@ -54,7 +61,7 @@ Dentro l'artefatto di Guard finiscono `aegis-guard.jar`, il `jre/` incluso
 `bin/yara64.exe`. Manca il runtime → lo script fallisce; manca un pezzo
 opzionale (collector ETW, YARA) → lo dichiara e Guard degrada dicendolo
 (`quality=degraded:etw-...`). Sul target serve **admin** (registrazione
-servizio + sessione di trace ETW) e **Java 21+**, incluso nell'artefatto o
+servizio + sessione di trace ETW) e **Java 25+**, incluso nell'artefatto o
 installato lì: la versione viene verificata, non solo la presenza (`java` 8
 avviva un servizio che muore con `UnsupportedClassVersionError`).
 
@@ -70,6 +77,11 @@ docker compose exec aegis-brain python -m app.services.pki --dir /app/pki
 # -> CA in /app/pki/ca.crt + chiave manifest; distribuire la pubkey_b64
 #    stampata come AEGIS_MANIFEST_PUBKEY agli agent (env/GPO/Intune).
 ```
+
+L'installer one-liner inietta la pubblica manifest nell'ambiente dell'agente;
+il token di enrollment viene scritto in un file `0600` e non nell'env
+persistente. L'OTA è solo Ed25519: un comando senza manifest firmato viene
+rifiutato, senza fallback HMAC.
 
 Volume consigliato: montare `/app/pki` su storage persistente separato e
 includerlo nei backup cifrati (senza CA niente nuove firme).
@@ -104,6 +116,17 @@ Restore MANUALE (doppia conferma):
 I_CONFIRM_RESTORE=yes ./scripts/restore-db.sh /backups/aegis_db_<ts>.sql.gz.enc aegis
 # target diverso per prove: ... restore-db.sh <file> aegis_restore_test
 ```
+
+Round-trip automatico (crea DB usa-e-getta, non tocca il DB reale):
+
+```bash
+DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=postgres PGPASSWORD=... \
+  BACKUP_PASSPHRASE=... bash scripts/test-restore.sh
+```
+
+Il job GitHub `Backup Restore Check` esegue lo stesso percorso ogni notte con
+backup cifrato; `restore-db.sh` usa `ON_ERROR_STOP=1`, quindi un dump corrotto
+non può terminare con exit 0.
 
 Ripristino PKI: ricopiare `/app/pki` dal backup prima di firmare.
 

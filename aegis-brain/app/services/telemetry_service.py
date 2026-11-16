@@ -668,8 +668,13 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
 
 
 async def send_command_to_agent(agent_id: Any, command: Dict[str, Any]):
-    # FIFO: RPUSH + LPOP (was LPUSH + LPOP = LIFO, order reversed).
-    # Consistent with deploy.py scan-via-agent (rpush).
-    queue_name = f"aegis:commands:{str(agent_id)}"
-    await redis_client.rpush(queue_name, json.dumps(command))
-    await redis_client.ltrim(queue_name, 0, 99)
+    """Accoda un comando FIFO; a coda piena restituisce `queued=False`.
+
+    Non si usa piu' `LTRIM 0 99`: a coda piena buttava via il comando appena
+    inserito (il piu' recente) e il chiamante credeva fosse stato consegnato.
+    """
+    from app.services.command_queue import enqueue_command
+    result = await enqueue_command(redis_client, str(agent_id), command)
+    if not result.get("queued"):
+        logger.warning("Command queue full for %s: %s", agent_id, command.get("command"))
+    return result

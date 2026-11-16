@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     # Versione della piattaforma: una sola fonte per OpenAPI, endpoint root e
     # dashboard (prima era scritta a mano in due punti e la UI mostrava una
     # versione diversa da quella vera). Si alza qui, in un posto solo.
-    APP_VERSION: str = "4.0.0"
+    APP_VERSION: str = "4.1.0"
     OLLAMA_URL: Optional[str] = None
     OLLAMA_DEFAULT_MODEL: str = "aegis-default"
     # Audit: allowlist modelli caricabili via API (niente pull arbitrari).
@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     # una sola volta per (playbook, alert) entro questa finestra. Evita che un
     # alert non risolto ri-attivi contenimento (kill/isolate) ogni minuto.
     PLAYBOOK_IDEMPOTENCY_TTL_S: int = 86400
+    # Coda comandi per agente: oltre il cap il comando viene RIFIUTATO, non
+    # silenziosamente scartato dal LTRIM. 100 comandi coprono un burst di
+    # contenimento mentre l'agente e' momentaneamente offline.
+    COMMAND_QUEUE_MAX: int = 100
 
     # Rate limiting (audit S1). Lo storage in memoria vale solo per il singolo
     # processo uvicorn: in pilot/HA va puntato a Redis (es. redis://...).
@@ -108,9 +112,6 @@ class Settings(BaseSettings):
 
     # Detection canary (M4 Fase 5): rule_id separati da virgola in log-only.
     RULE_CANARY_IDS: str = ""
-    # Audit F-02: azioni playbook "script" = shell sul server Brain.
-    # Default OFF: abilitarle solo in enterprise con approvazione documentata.
-    PLAYBOOK_SCRIPT_ENABLED: bool = False
 
     # Correlation windows (M5 Fase 6): finestre configurabili, mai hardcodate.
     CORR_BRUTEFORCE_THRESHOLD: int = 5
@@ -136,6 +137,10 @@ class Settings(BaseSettings):
     PKI_DEVICE_TTL_DAYS: int = 825
     # Mutual auth agent (post-audit): off | optional | required.
     MTLS_MODE: str = "off"
+    # Profilo di deployment esplicito: lab (compat), pilot (mTLS optional),
+    # prod (mTLS required + strict). Evita di dedurre la postura da flag
+    # sparsi e rende riconoscibile un deploy "prod" ancora senza mTLS.
+    AEGIS_PROFILE: str = "lab"
     # Guard production (gap-closing P2.7): con true il brain RIFIUTA di partire
     # se MTLS_MODE != required. Default false (dev/lab liberi).
     ENTERPRISE_STRICT: bool = False
@@ -175,6 +180,22 @@ class Settings(BaseSettings):
     # Bound sull'ingestione: oltre, il payload viene troncato dichiarandolo.
     SIEM_MAX_EVENTS_PER_REQUEST: int = 5000
     SIEM_SEARCH_MAX_LIMIT: int = 500
+
+    # Kraken deception ingest (Gate D). Off by default: enabling it requires
+    # both a dedicated API key and the HMAC secret, so a missing secret can
+    # never turn into an unauthenticated write path.
+    KRAKEN_INGEST_ENABLED: bool = False
+    KRAKEN_INGEST_SECRET: Optional[str] = None
+    KRAKEN_INGEST_MAX_BYTES: int = 1_048_576
+    KRAKEN_INGEST_MAX_EVENTS: int = 500
+    # Delegated login for the separate Kraken UI. The Brain signs a very
+    # short-lived assertion (aud=kraken) with a key that is NOT the Aegis JWT
+    # key; Kraken exchanges it once for its own local session. Disabled unless
+    # explicitly configured, so a deployment that has no Kraken keeps no
+    # cross-service signing secret around.
+    KRAKEN_SSO_ENABLED: bool = False
+    KRAKEN_SSO_SECRET: Optional[str] = None
+    KRAKEN_SSO_TTL_SECONDS: int = 60
     # Listener syslog (UDP+TCP). Default OFF: si abilita esplicitamente, così
     # nessuna porta in ascolto compare per caso in un deploy.
     SYSLOG_ENABLED: bool = False
@@ -226,9 +247,37 @@ class Settings(BaseSettings):
         # Audit F-01: vale anche col flag enterprise esplicito in lab.
         if self.ENTERPRISE_STRICT and self.ALLOW_OPEN_REGISTRATION:
             raise ValueError("ALLOW_OPEN_REGISTRATION must be false when ENTERPRISE_STRICT is true")
+        if self.KRAKEN_INGEST_ENABLED:
+            secret = (self.KRAKEN_INGEST_SECRET or "").strip()
+            if len(secret) < 32:
+                raise ValueError(
+                    "KRAKEN_INGEST_SECRET must be at least 32 characters when "
+                    "KRAKEN_INGEST_ENABLED is true"
+                )
+        if self.KRAKEN_SSO_ENABLED:
+            sso_secret = (self.KRAKEN_SSO_SECRET or "").strip()
+            if len(sso_secret) < 32:
+                raise ValueError(
+                    "KRAKEN_SSO_SECRET must be at least 32 characters when "
+                    "KRAKEN_SSO_ENABLED is true"
+                )
+            if sso_secret == (self.JWT_SECRET or ""):
+                raise ValueError("KRAKEN_SSO_SECRET must be distinct from JWT_SECRET")
         # Audit F-03: profili enterprise senza mTLS required non partono.
         if self.ENTERPRISE_STRICT and (self.MTLS_MODE or "").lower() != "required":
             raise ValueError("ENTERPRISE_STRICT requires MTLS_MODE=required")
+        profile = (self.AEGIS_PROFILE or "lab").strip().lower()
+        if profile not in ("lab", "pilot", "prod"):
+            raise ValueError("AEGIS_PROFILE must be one of: lab, pilot, prod")
+        if profile == "prod":
+            if (self.MTLS_MODE or "").lower() != "required":
+                raise ValueError("AEGIS_PROFILE=prod requires MTLS_MODE=required")
+            if not self.ENTERPRISE_STRICT:
+                raise ValueError("AEGIS_PROFILE=prod requires ENTERPRISE_STRICT=true")
+            if not (self.RATE_LIMIT_STORAGE_URI or "").strip():
+                raise ValueError(
+                    "AEGIS_PROFILE=prod requires RATE_LIMIT_STORAGE_URI (shared Redis)"
+                )
         return self
 
 settings = Settings()

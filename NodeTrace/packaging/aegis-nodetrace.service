@@ -17,7 +17,8 @@ AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_DAC_READ_SEARCH
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
-# Env via file separato (mai segreti nell'unit): AEGIS_ENROLL_KEY, NODETRACE_*.
+# Env via file separato (mai segreti nell'unit): AEGIS_ENROLL_TOKEN_FILE,
+# AEGIS_MANIFEST_PUBKEY, NODETRACE_*.
 EnvironmentFile=-/etc/aegis/nodetrace.env
 
 [Install]

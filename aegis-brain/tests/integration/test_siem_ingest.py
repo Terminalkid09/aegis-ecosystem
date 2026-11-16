@@ -134,6 +134,39 @@ class TestIngestApiKey:
         # Chiave non configurata sul server: non deve diventare accesso libero.
         assert response.status_code in (401, 500)
 
+    async def test_scoped_key_cannot_write_other_source_and_revocation_is_immediate(
+            self, client, db_session):
+        from app.database.models import APIKey
+        from app.services.api_keys import hash_api_key
+
+        source_a = _source("scoped-a")
+        source_b = _source("scoped-b")
+        raw = "aegis_scoped_test_key"
+        key = APIKey(
+            user_id=None, name="scoped-test", hashed_key=hash_api_key(raw),
+            source=source_a, scopes={"scopes": ["ingest"]}, active=True,
+        )
+        db_session.add(key)
+        await db_session.commit()
+
+        payload = _auth_failure_line(1, _random_src_ip())
+        allowed = await client.post(
+            f"/api/v1/ingest/{source_a}?parser=syslog", json=payload,
+            headers={"X-Api-Key": raw})
+        assert allowed.status_code == 200, allowed.text
+
+        denied = await client.post(
+            f"/api/v1/ingest/{source_b}?parser=syslog", json=payload,
+            headers={"X-Api-Key": raw})
+        assert denied.status_code == 403, denied.text
+
+        key.active = False
+        await db_session.commit()
+        revoked = await client.post(
+            f"/api/v1/ingest/{source_a}?parser=syslog", json=payload,
+            headers={"X-Api-Key": raw})
+        assert revoked.status_code == 403, revoked.text
+
 
 class TestIngestPipeline:
     async def test_windows_corpus_is_ingested_and_stored(self, client, admin_auth_headers,
@@ -288,8 +321,14 @@ class TestParsersAndSources:
 class TestSearch:
     async def _seed(self, client, headers) -> str:
         source = _source("search")
+        # The corpus is intentionally fixed, but search is bounded by `hours`
+        # (max 720). Shift its date to today so the test measures search, not
+        # the calendar; the payload and event count stay unchanged.
+        corpus = _corpus("windows_security.jsonl")
+        now = datetime.now(timezone.utc)
+        corpus = corpus.replace("2026-09-15T12:", f"{now:%Y-%m-%d}T{now:%H}:")
         response = await client.post(f"/api/v1/ingest/{source}?parser=windows_event",
-                                     json=_corpus("windows_security.jsonl"),
+                                     json=corpus,
                                      headers=headers)
         assert response.status_code == 200, response.text
         return source

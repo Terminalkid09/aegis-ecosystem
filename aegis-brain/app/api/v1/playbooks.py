@@ -71,14 +71,13 @@ async def create_playbook(data: PlaybookCreate, db: AsyncSession = Depends(get_d
     existing = await db.execute(select(Playbook).where(Playbook.name == data.name))
     if existing.scalars().first():
         raise HTTPException(status_code=400, detail="Playbook with this name already exists")
-    # `script` runs shell ON THE SERVER — admin only (analyst/viewer blocked)
-    # + feature flag (audit F-02): default off, enterprise opt-in.
+    # AEGIS-SEC-003 / D7: `script` eseguiva shell sul server Brain. Non e'
+    # piu' un'azione disponibile, nemmeno per un admin con flag legacy.
     if any((a.action_type or "").lower() == "script" for a in data.actions):
-        from app.core.config import settings as _settings
-        if not _settings.PLAYBOOK_SCRIPT_ENABLED:
-            raise HTTPException(status_code=403, detail="Playbook 'script' actions are disabled (PLAYBOOK_SCRIPT_ENABLED=false)")
-        if (_user.role or "user").lower() != "admin":
-            raise HTTPException(status_code=403, detail="Playbook 'script' actions require admin role")
+        raise HTTPException(
+            status_code=400,
+            detail="Playbook 'script' actions were removed in 4.1; use a named action",
+        )
     
     playbook = Playbook(
         name=data.name,

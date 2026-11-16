@@ -235,6 +235,15 @@ set "AEGIS_BRAIN_URL=%NODETRACE_BASE%"
 set "AEGIS_GATEWAY_URL=%NODETRACE_BASE%/telemetry/report"
 set "AEGIS_SCAN_INTERVAL_MS=10000"
 
+:: OTA: la pubblica Ed25519 viene dal manifest pubblico del brain. Se manca,
+:: l'update fallisce chiuso; non si ripiega su HMAC con la enroll key.
+for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Invoke-RestMethod '%NODETRACE_BASE%/deploy/manifest' -UseBasicParsing -TimeoutSec 10).pubkey_b64"`) do set "AEGIS_MANIFEST_PUBKEY=%%A"
+if not defined AEGIS_MANIFEST_PUBKEY (
+    echo  %RED%[X] Manifest Ed25519 non disponibile dal brain: OTA disabilitata.%RESET%
+    call :maybe_pause
+    goto menu_or_exit
+)
+
 :: ---- NodeTrace Agent ----
 set "PYTHONUNBUFFERED=1"
 echo  %YELLOW%[*] Starting NodeTrace Agent...%RESET%
@@ -263,7 +272,7 @@ if exist "%ROOT%aegis-guard\install\windows\bin\yara64.exe" (
     echo  %YELLOW%  [i] yara64.exe non trovato: scansioni YARA disabilitate%RESET%
 )
 
-:: Detect runtime Java: JRE minimale (jlink) > JDK 21+ installato > java di PATH.
+:: Detect runtime Java: JRE minimale (jlink) > JDK 25+ installato > java di PATH.
 :: MAI il primo "java" di PATH alla cieca: e' spesso un JRE 8 e Guard muore con
 :: NoClassDefFoundError: jdk/net/Sockets (HttpClient 5 richiede Java 11+).
 set "JAVA_CMD="
@@ -294,7 +303,7 @@ echo.
 echo  %PURPLE%=== AEGIS PILOT: platform + agents + verify (single command) ===%RESET%
 where python >nul 2>&1
 if errorlevel 1 (
-    echo  %RED%[!] Python not found on PATH. Install Python 3.10+ to run pilot.%RESET%
+    echo  %RED%[!] Python not found on PATH. Install Python 3.15+ to run pilot.%RESET%
     exit /b 1
 )
 python "%ROOT%scripts\pilot.py" %~2 %~3 %~4 %~5

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Kraken{% endblock %}
+{% block header %}Dashboard{% endblock %}
+{% set active_page = 'dashboard' %}
+
+{% block content %}
+<div id="auth-guard" class="hidden"></div>
+
+<!-- Stat cards -->
+<div class="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+    <div class="card flex flex-col gap-1">
+        <span class="text-xs text-slate-400 uppercase tracking-wide font-medium">Total Attacks</span>
+        <span class="text-3xl font-bold text-indigo-500" id="stat-total">—</span>
+        <span class="text-xs text-slate-400">all time</span>
+    </div>
+    <div class="card flex flex-col gap-1">
+        <span class="text-xs text-slate-400 uppercase tracking-wide font-medium">Today</span>
+        <span class="text-3xl font-bold text-emerald-500" id="stat-today">—</span>
+        <span class="text-xs text-slate-400">attacks in last 24h</span>
+    </div>
+    <div class="card flex flex-col gap-1">
+        <span class="text-xs text-slate-400 uppercase tracking-wide font-medium">Unique IPs</span>
+        <span class="text-3xl font-bold text-amber-500" id="stat-ips">—</span>
+        <span class="text-xs text-slate-400">distinct attackers</span>
+    </div>
+    <div class="card flex flex-col gap-1">
+        <span class="text-xs text-slate-400 uppercase tracking-wide font-medium">Active Sandboxes</span>
+        <span class="text-3xl font-bold text-rose-500" id="stat-sandboxes">—</span>
+        <span class="text-xs text-slate-400">running containers</span>
+    </div>
+</div>
+
+<!-- Map + Timeline -->
+<div class="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-4">
+    <div class="card xl:col-span-3">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Attack Origins</h2>
+        <div id="map" style="height:300px; border-radius:8px; overflow:hidden; background: radial-gradient(circle at 30% 30%, #1e293b, #0f172a 60%);"></div>
+        <p class="text-[10px] text-slate-500 mt-2">Offline mode: no external map tiles are requested.</p>
+    </div>
+    <div class="card xl:col-span-2">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Attacks Over Time (30d)</h2>
+        <canvas id="timelineChart"></canvas>
+    </div>
+</div>
+
+<!-- Countries + Sensors -->
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+    <div class="card">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">Top Countries</h2>
+        <canvas id="countriesChart" height="200"></canvas>
+    </div>
+    <div class="card">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">Sensor Distribution</h2>
+        <canvas id="sensorsChart" height="200"></canvas>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="static/js/dashboard.js"></script>
+{% endblock %}

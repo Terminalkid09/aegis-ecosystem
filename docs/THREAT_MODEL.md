@@ -21,9 +21,9 @@ Verificato sul codice (non su descrizioni): `aegis-brain/app/main.py`,
 | A1 | Telemetria endpoint / eventi | PG `telemetry`, Redis queue, `aegis-brain/artifacts` no | Dati consentiti: cmdline, username, path, hash, dest rete |
 | A2 | Alert, threat report, incidenti | PG `alerts`, `threat_reports`, `incidents`, `incident_alerts` | Retention target 90gg (da implementare Fase 8/9) |
 | A3 | Credenziali VaultX | PG `notes` (cifrate, `encrypted_dek` su `users`) | Envelope `MASTER_KEY_B64` |
-| A4 | Enroll token monouso | PG `enroll_tokens` (solo hash sha256) | TTL default 15 min, single-use, revocabili |
-| A5 | Segreti agent (device token) | PG `agents.device_token_hash` (argon2), Redis `auth:agent:{sha256}` best-effort | Mai plaintext su Redis |
-| A6 | Artefatti agent / OTA | `ARTIFACT_DIR` (`/app/artifacts`) | Firma oggi HMAC simmetrica; PKI/mTLS in Fase 7 |
+| A4 | Enroll token monouso | PG `enroll_tokens` (solo hash sha256) | TTL default 15 min, single-use, revocabili; un token con `target_hostname` è l'unica prova accettata per il re-enroll |
+| A5 | Segreti agent (device token) | PG `agents.device_token_hash` (argon2), Redis `auth:agent:{sha256}` best-effort | Mai plaintext su Redis; `machine_id_hash` è solo un hash, non un segreto |
+| A6 | Artefatti agent / OTA | `ARTIFACT_DIR` (`/app/artifacts`) | Manifest Ed25519 obbligatorio; HMAC OTA rimosso in 4.1.0 |
 | A7 | Comandi agent (incl. `UPDATE_AGENT`, isolate) | Redis queue via `telemetry_service.send_command_to_agent` | Coda con fallback 202 se Redis giù |
 | A8 | Audit log | PG `audit_logs` | Retention target 365gg (da implementare) |
 | A9 | Syslog | PG `syslog_events`, UDP 1514 via aegis-link | Retention target 30gg |
@@ -59,7 +59,7 @@ endpoint (user-mode, NO driver) ──TLS(Caddy, oggi `tls internal` dev)──�
 browser ──cookie httpOnly `aegis_token` + Bearer──▶ brain (CSRF origin-check su mutazioni cookie, security headers, CORS allowlist, rate-limit)
 aegis-link/syslog ──X-Api-Key / UDP 1514──▶ Redis ──▶ brain consumer ──▶ PG
 brain ──▶ OSINT esterni (VT/Shodan/AbuseIPDB, opzionali) / Ollama locale (profilo `ollama`)
-deploy: admin/analyst → token breve → one-liner ps1/sh (trasporto TLS) → enroll → OTA HMAC(AGENT_ENROLL_KEY)
+deploy: admin/analyst → token breve → one-liner ps1/sh (trasporto TLS) → enroll → OTA Ed25519(manifest key)
 ```
 
 Boundary critici: kernel→user pipe (solo telemetria, mai comandi);

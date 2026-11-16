@@ -102,6 +102,55 @@ class TestManifestEd25519(unittest.TestCase):
                                          "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"))
         self.assertFalse(manifest_covers("not-json", "a", "b"))
 
+    def test_hmac_is_not_an_ed25519_manifest_signature(self):
+        from services.updater import hmac_sign
+        sig = hmac_sign(INTEROP_MANIFEST, "enroll-key")
+        self.assertFalse(verify_manifest_ed25519(INTEROP_MANIFEST, sig, INTEROP_PUB))
+
+
+class TestEnrollmentTokenFile(unittest.TestCase):
+    def test_file_is_preferred_over_env(self):
+        import agent as _agent_mod
+        import types
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "enroll.token")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("file-token\n")
+            old_file = os.environ.get("AEGIS_ENROLL_TOKEN_FILE")
+            old_key = os.environ.get("AEGIS_ENROLL_KEY")
+            try:
+                os.environ["AEGIS_ENROLL_TOKEN_FILE"] = path
+                os.environ["AEGIS_ENROLL_KEY"] = "static-key"
+                self.assertEqual(
+                    _agent_mod.Agent._enroll_token(types.SimpleNamespace()),
+                    "file-token")
+            finally:
+                if old_file is None: os.environ.pop("AEGIS_ENROLL_TOKEN_FILE", None)
+                else: os.environ["AEGIS_ENROLL_TOKEN_FILE"] = old_file
+                if old_key is None: os.environ.pop("AEGIS_ENROLL_KEY", None)
+                else: os.environ["AEGIS_ENROLL_KEY"] = old_key
+
+    def test_env_fallback_and_missing_file(self):
+        import agent as _agent_mod
+        import types
+        old_file = os.environ.get("AEGIS_ENROLL_TOKEN_FILE")
+        old_key = os.environ.get("AEGIS_ENROLL_KEY")
+        try:
+            os.environ["AEGIS_ENROLL_TOKEN_FILE"] = os.path.join(
+                tempfile.gettempdir(), "missing-enroll-token")
+            os.environ["AEGIS_ENROLL_KEY"] = "static-key"
+            self.assertEqual(
+                _agent_mod.Agent._enroll_token(types.SimpleNamespace()),
+                "static-key")
+            os.environ.pop("AEGIS_ENROLL_KEY", None)
+            self.assertEqual(
+                _agent_mod.Agent._enroll_token(types.SimpleNamespace()), "")
+        finally:
+            if old_file is None: os.environ.pop("AEGIS_ENROLL_TOKEN_FILE", None)
+            else: os.environ["AEGIS_ENROLL_TOKEN_FILE"] = old_file
+            if old_key is None: os.environ.pop("AEGIS_ENROLL_KEY", None)
+            else: os.environ["AEGIS_ENROLL_KEY"] = old_key
+
 
 class TestServerPin(unittest.TestCase):
     def test_same_ok(self):

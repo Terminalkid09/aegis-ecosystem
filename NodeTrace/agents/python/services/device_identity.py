@@ -9,6 +9,7 @@ import base64
 import datetime as _dt
 import os
 import ssl
+import sys
 
 KEY_FILE = "device.key"
 CRT_FILE = "device.crt"
@@ -25,6 +26,42 @@ def _need_crypto():
     except ImportError as e:
         raise RuntimeError(
             "mTLS richiede il pacchetto 'cryptography' (requirements.txt)") from e
+
+
+def machine_id():
+    """Identificatore stabile dell'host, senza segreti.
+
+    Windows: MachineGuid; Linux: /etc/machine-id; macOS: IOPlatformUUID.
+    Su piattaforme non supportate ritorna stringa vuota, mai un valore
+    inventato che sembri una prova di possesso.
+    """
+    try:
+        if os.name == "nt":
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"SOFTWARE\Microsoft\Cryptography") as key:
+                value, _ = winreg.QueryValueEx(key, "MachineGuid")
+            return str(value).strip()
+        for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    value = f.read().strip()
+                if value:
+                    return value
+            except OSError:
+                continue
+        if sys.platform == "darwin":
+            import re
+            import subprocess
+            out = subprocess.check_output(
+                ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                text=True, timeout=5)
+            match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', out)
+            if match:
+                return match.group(1).strip()
+    except Exception:
+        pass
+    return ""
 
 
 def identity_paths(base_dir):

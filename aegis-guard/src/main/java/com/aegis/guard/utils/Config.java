@@ -1,5 +1,7 @@
 package com.aegis.guard.utils;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
 
 public class Config {
@@ -24,9 +26,24 @@ public class Config {
             "AEGIS_GATEWAY_URL", BRAIN_URL + "/telemetry/report"
     );
 
-    public static final String ENROLL_KEY = getEnvOrThrow(
-            "AEGIS_ENROLL_KEY", "Enrollment key must be set via AEGIS_ENROLL_KEY environment variable"
-    );
+    /** Chiave statica per enrollment headless. Non richiesta se il device è già registrato. */
+    public static final String ENROLL_KEY = getEnv("AEGIS_ENROLL_KEY", "");
+
+    /** File one-shot del token di enrollment (one-liner). Mai il token nell'env. */
+    public static final String ENROLL_TOKEN_FILE = getEnv("AEGIS_ENROLL_TOKEN_FILE", "");
+
+    /** Token del primo enrollment: file one-shot, altrimenti chiave statica. */
+    public static String readEnrollToken() {
+        if (!ENROLL_TOKEN_FILE.isBlank()) {
+            try {
+                String token = Files.readString(Path.of(ENROLL_TOKEN_FILE)).trim();
+                if (!token.isEmpty()) return token;
+            } catch (Exception ignored) {
+                // Fallback esplicito alla chiave statica per install headless.
+            }
+        }
+        return ENROLL_KEY;
+    }
 
     public static final int SCAN_INTERVAL_MS = Integer.parseInt(
             getEnv("AEGIS_SCAN_INTERVAL_MS", "1000")
@@ -42,7 +59,7 @@ public class Config {
     );
 
     public static final String AGENT_VERSION = getEnv(
-            "AEGIS_AGENT_VERSION", "4.0.0"
+            "AEGIS_AGENT_VERSION", "4.1.0"
     );
 
     /** Spool persistente outbox (M1 Fase 2): dir locale per eventi non recapitati. */
@@ -55,7 +72,7 @@ public class Config {
             getEnv("AEGIS_SPOOL_MAX_MB", "50")
     ) * 1024 * 1024;
 
-    /** Pubblica Ed25519 manifest (base64 raw 32B): se assente, solo HMAC. */
+    /** Pubblica Ed25519 manifest (base64 raw 32B): obbligatoria per OTA. */
     public static final String MANIFEST_PUBKEY = getEnv(
             "AEGIS_MANIFEST_PUBKEY", ""
     );
@@ -74,13 +91,5 @@ public class Config {
     private static String getEnv(String key, String defaultValue) {
         String val = System.getenv(key);
         return (val != null && !val.isBlank()) ? val : defaultValue;
-    }
-
-    private static String getEnvOrThrow(String key, String message) {
-        String val = System.getenv(key);
-        if (val == null || val.isBlank()) {
-            throw new RuntimeException(message);
-        }
-        return val;
     }
 }

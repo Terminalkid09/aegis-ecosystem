@@ -7,6 +7,7 @@ from app.database.models import Playbook, PlaybookAction, PlaybookExecution, Ale
 from app.core.logging import get_logger
 import redis.asyncio as redis
 from app.core.config import settings
+from app.services.command_queue import enqueue_command
 
 logger = get_logger(__name__)
 rc = redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -49,8 +50,6 @@ ACTION_RISK = {
     "update_agent": {"risk": "medium", "approver": "analyst", "reversible": True,
                      "preconditions": "signed artifact published",
                      "rollback": "UPDATE_AGENT to the previous version"},
-    "script": {"risk": "critical", "approver": "admin", "reversible": False,
-               "preconditions": "admin only, reviewed command, audited"},
     "eradicate": {"risk": "critical", "approver": "analyst", "reversible": False,
                   "preconditions": "chain COLLECT→QUARANTINE→KILL→REMOVE→VERIFY"},
 }
@@ -200,6 +199,13 @@ async def _execute_action(
     target = action.target
     params = action.params or {}
 
+    # AEGIS-SEC-003 / D7: l'azione `script` e' stata rimossa. Il controllo
+    # resta per le righe storiche scritte a mano nel DB, ma non esiste piu'
+    # alcun percorso verso subprocess o shell sul server Brain.
+    if (action_type or "").lower() == "script":
+        return {"status": "blocked",
+                "output": "script actions were removed in 4.1; use a named action"}
+
     if action_type == "webhook":
         import httpx
         try:
@@ -257,9 +263,11 @@ async def _execute_action(
     elif action_type == "update_agent":
         # target = "aegis-guard" | "nodetrace" (default nodetrace), params.version
         from app.api.v1.deploy import (
-            artifact_name_for, build_update_command, sha256_file, sign_artifact,
+            ManifestUnavailable, artifact_name_for, build_manifest,
+            build_update_command, sha256_file, sign_manifest_bundle,
         )
         from app.core.config import settings as _settings
+        from app.services import pki as _pki
         from pathlib import Path as _Path
         version = str(params.get("version", "latest"))
         atype = "aegis-guard" if "guard" in str(target).lower() else "nodetrace"
@@ -268,33 +276,18 @@ async def _execute_action(
         if not path.is_file():
             return {"status": "failed", "output": f"Artifact {fname} not published"}
         digest = sha256_file(path)
-        cmd = build_update_command(atype, version, _settings.PUBLIC_BASE_URL,
-                                   digest, sign_artifact(digest))
+        try:
+            bundle = sign_manifest_bundle(
+                build_manifest([{"name": fname, "sha256": digest}]))
+        except ManifestUnavailable as exc:
+            return {"status": "failed", "output": str(exc)}
+        cmd = build_update_command(
+            atype, version, _settings.PUBLIC_BASE_URL, digest,
+            _pki.canonical_manifest_bytes(bundle["manifest"]).decode("utf-8"),
+            bundle["ed25519"],
+        )
         cmd["alert_id"] = alert.id
         return await _send_agent_command(alert.agent_id, cmd)
-
-    elif action_type == "script":
-        # DANGER: arbitrary shell on the BRAIN server. Gated at API layer
-        # (admin-only + feature flag, see playbooks.py) AND here at execution
-        # (defense in depth: righe scritte prima del flag o a mano nel DB).
-        from app.core.config import settings as _settings
-        if not _settings.PLAYBOOK_SCRIPT_ENABLED:
-            logger.warning("Playbook 'script' blocked: PLAYBOOK_SCRIPT_ENABLED=false")
-            return {"status": "blocked", "output": "script actions disabled"}
-        import subprocess
-        try:
-            result = subprocess.run(
-                target.split(),
-                capture_output=True,
-                text=True,
-                timeout=min(int(params.get("timeout", 30)), 120),
-            )
-            return {
-                "status": "completed" if result.returncode == 0 else "failed",
-                "output": (result.stdout or result.stderr)[:4000],
-            }
-        except Exception as e:
-            return {"status": "failed", "output": str(e)[:500]}
 
     elif action_type == "quarantine_binary":
         if alert.pid:
@@ -370,13 +363,13 @@ async def _execute_action(
 
 
 async def _send_agent_command(agent_id, command: Dict[str, Any]):
-    import json
-    queue_name = f"aegis:commands:{str(agent_id)}"
     try:
-        # FIFO: RPUSH + LPOP (was LPUSH = LIFO, order reversed vs telemetry).
-        await rc.rpush(queue_name, json.dumps(command))
-        await rc.ltrim(queue_name, 0, 99)
+        result = await enqueue_command(rc, str(agent_id), command)
     except Exception as e:
         logger.warning(f"Command queue unavailable for {agent_id}: {e}")
         return {"status": "failed", "output": f"Queue unavailable: {command.get('command')}"}
+    if not result.get("queued"):
+        logger.warning("Command queue full for %s: %s", agent_id, command.get("command"))
+        return {"status": "failed",
+                "output": f"Queue full ({result.get('depth')}/{result.get('limit')}): {command.get('command')}"}
     return {"status": "completed", "output": f"Command queued: {command.get('command')}"}

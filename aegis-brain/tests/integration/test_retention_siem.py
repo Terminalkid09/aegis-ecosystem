@@ -13,6 +13,7 @@ Verifica che:
 """
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import func, select
 
 from app.core.config import settings
@@ -42,6 +43,7 @@ async def _count(source: str) -> int:
             select(func.count(SiemEvent.id)).where(SiemEvent.source == source)) or 0)
 
 
+@pytest.mark.usefixtures("require_db")
 async def test_expired_siem_event_is_removed_by_retention():
     # Evento più vecchio della retention configurata: deve sparire.
     source = f"retention-old-{datetime.now(timezone.utc).timestamp():.0f}"
@@ -56,6 +58,7 @@ async def test_expired_siem_event_is_removed_by_retention():
     assert result["retention_days"] == settings.SIEM_RETENTION_DAYS
 
 
+@pytest.mark.usefixtures("require_db")
 async def test_recent_siem_event_survives_retention():
     source = f"retention-new-{datetime.now(timezone.utc).timestamp():.0f}"
     await _insert_event(source, f"new-{source}", _old_time(1))
@@ -65,6 +68,7 @@ async def test_recent_siem_event_survives_retention():
     assert await _count(source) == 1, "la retention ha cancellato un evento recente"
 
 
+@pytest.mark.usefixtures("require_db")
 async def test_preview_retention_reports_siem_events():
     """Il preview deve dire la verità anche sul SIEM."""
     source = f"retention-preview-{datetime.now(timezone.utc).timestamp():.0f}"

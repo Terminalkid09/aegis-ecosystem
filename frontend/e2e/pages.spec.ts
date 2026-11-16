@@ -31,6 +31,7 @@ const PAGES: { id: string; label: string }[] = [
   { id: 'syslog', label: 'Syslog' },
   { id: 'logsources', label: 'Log Sources' },
   { id: 'search', label: 'Search' },
+  { id: 'kraken', label: 'Kraken' },
   { id: 'yara', label: 'YARA & FIM' },
   { id: 'settings', label: 'Settings' },
 ];

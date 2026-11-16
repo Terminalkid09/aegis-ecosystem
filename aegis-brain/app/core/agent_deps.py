@@ -4,7 +4,10 @@ import uuid
 from app.database.connection import get_db
 from app.database.models import Agent
 from app.core.security import verify_password
+from app.core.logging import get_logger
 from sqlalchemy import select
+
+logger = get_logger(__name__)
 
 async def _verify_agent_secret(
     x_agent_id: str, authorization: str, db: AsyncSession,
@@ -37,8 +40,14 @@ async def _verify_agent_secret(
             raise HTTPException(status_code=403, detail="Agent revoked: contact SOC for re-admission")
     except HTTPException:
         raise
-    except Exception:
-        pass  # tabella assente o errore transitorio: lascia passare al check file/mTLS (fail-open qui, fail-closed lì)
+    except Exception as exc:
+        # Fail-closed: con MTLS_MODE=off questo e' l'unico controllo di revoca.
+        # Un errore DB non puo' trasformare un agente revocato in autorizzato.
+        logger.exception("Revocation check failed for agent %s", agent_id_uuid)
+        raise HTTPException(
+            status_code=503,
+            detail="Revocation store unavailable: agent authentication refused",
+        ) from exc
 
     return agent
 

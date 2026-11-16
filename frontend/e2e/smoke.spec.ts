@@ -35,6 +35,20 @@ test.describe('unauthenticated', () => {
     await expect(signIn).toBeVisible({ timeout: 15000 });
   });
 
+  test('registration UI follows the server policy', async ({ page, request }) => {
+    const cfg = await request.get('http://localhost:8000/api/v1/auth/config');
+    expect(cfg.ok()).toBeTruthy();
+    const { open_registration: openRegistration } = await cfg.json();
+    await page.goto('/');
+    await expect(page.getByTestId('auth-tab-login')).toBeVisible({ timeout: 15000 });
+    if (openRegistration) {
+      await expect(page.getByTestId('auth-tab-register')).toBeVisible();
+    } else {
+      await expect(page.getByTestId('auth-tab-register')).toHaveCount(0);
+      await expect(page.getByTestId('registration-disabled')).toBeVisible();
+    }
+  });
+
   test('self-service registration is refused without an admin', async ({ request }) => {
     // Fail-closed. Deve girare SENZA sessione: la richiesta API eredita i
     // cookie del contesto, quindi con la sessione admin la registrazione

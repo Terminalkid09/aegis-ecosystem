@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Events — Kraken{% endblock %}
+{% block header %}Attack Events{% endblock %}
+{% set active_page = 'events' %}
+
+{% block content %}
+<!-- Filters -->
+<div class="flex flex-wrap gap-3 mb-5">
+    <select id="filter-sensor"
+        class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <option value="">All Sensors</option>
+        <option value="ssh">SSH</option>
+        <option value="http">HTTP</option>
+        <option value="ftp">FTP</option>
+        <option value="telnet">Telnet</option>
+    </select>
+    <input id="filter-ip" type="text" placeholder="Filter by IP…"
+        class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 w-48 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+    <button id="apply-filters"
+        class="text-sm bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium transition-colors">
+        Apply
+    </button>
+    <button id="reset-filters"
+        class="text-sm bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 px-4 py-2 rounded-lg font-medium transition-colors">
+        Reset
+    </button>
+</div>
+
+<!-- Table -->
+<div class="card p-0 overflow-hidden">
+    <table class="w-full text-sm">
+        <thead class="bg-slate-50 dark:bg-slate-700/50 text-slate-400 uppercase text-xs tracking-wider">
+            <tr>
+                <th class="px-5 py-3 text-left">Timestamp</th>
+                <th class="px-5 py-3 text-left">Attacker IP</th>
+                <th class="px-5 py-3 text-left">Sensor</th>
+                <th class="px-5 py-3 text-left">Country</th>
+                <th class="px-5 py-3 text-left">City</th>
+                <th class="px-5 py-3 text-left">Threat</th>
+                <th class="px-5 py-3 text-left">Detail</th>
+            </tr>
+        </thead>
+        <tbody id="events-tbody" class="divide-y divide-slate-100 dark:divide-slate-700/50">
+            <tr><td colspan="7" class="px-5 py-10 text-center text-slate-400">Loading…</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+<div class="flex items-center justify-between mt-4">
+    <span class="text-sm text-slate-400" id="page-info"></span>
+    <div class="flex gap-2">
+        <button id="btn-prev"
+            class="text-sm px-4 py-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            ← Prev
+        </button>
+        <button id="btn-next"
+            class="text-sm px-4 py-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            Next →
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="static/js/events.js"></script>
+{% endblock %}

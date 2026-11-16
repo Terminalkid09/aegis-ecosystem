@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Reports — Kraken{% endblock %}
+{% block header %}Professional Reports{% endblock %}
+{% set active_page = 'reports' %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <p class="text-sm text-slate-400">Generate and download professional security reports with executive summaries, findings matrices, and recommendations.</p>
+    <button id="open-generate" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        Generate Report
+    </button>
+</div>
+
+<!-- Report list -->
+<div id="report-list" class="space-y-3">
+    <div class="text-center py-8 text-slate-500 text-sm">Loading reports...</div>
+</div>
+
+<!-- Generate Modal -->
+<div id="generate-modal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 hidden">
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <h2 class="text-lg font-semibold mb-4">Generate Report</h2>
+        <div class="space-y-4">
+            <div>
+                <label class="text-xs text-slate-400 block mb-1">Report Title</label>
+                <input id="gen-title" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200"
+                    value="Kraken Intelligence Report" />
+            </div>
+            <div>
+                <label class="text-xs text-slate-400 block mb-1">Template</label>
+                <select id="gen-template" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200">
+                    <option value="professional">Professional Report</option>
+                    <option value="executive">Executive Summary</option>
+                    <option value="technical">Technical Report</option>
+                </select>
+                <p class="text-[10px] text-slate-500 mt-1" id="template-desc">Full professional report with executive summary, findings matrix, and recommendations.</p>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="text-xs text-slate-400 block mb-1">Events (max)</label>
+                    <input id="gen-limit" type="number" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200" value="100" min="1" max="10000" />
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400 block mb-1">Days Back</label>
+                    <input id="gen-days" type="number" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200" value="30" min="1" max="365" placeholder="All" />
+                </div>
+            </div>
+            <div class="space-y-2">
+                <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                    <input type="checkbox" id="gen-summary" checked class="accent-indigo-500" /> Include Executive Summary
+                </label>
+                <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                    <input type="checkbox" id="gen-matrix" checked class="accent-indigo-500" /> Include Findings Matrix
+                </label>
+                <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                    <input type="checkbox" id="gen-recs" checked class="accent-indigo-500" /> Include Recommendations
+                </label>
+            </div>
+            <div class="flex items-center gap-2 pt-2">
+                <button id="generate-report" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium transition-colors">
+                    Generate
+                </button>
+                <button id="cancel-generate" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium transition-colors">
+                    Cancel
+                </button>
+            </div>
+            <div id="gen-status" class="text-xs text-slate-400 hidden"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="static/js/reports.js"></script>
+{% endblock %}

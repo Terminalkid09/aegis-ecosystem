@@ -1,5 +1,5 @@
 # ─── Build stage ──────────────────────────────────────────────────────────────
-FROM python:3.12-slim AS build
+FROM python:3.15-slim AS build
 
 # Installa dipendenze di sistema necessarie per compilare alcuni pacchetti Python
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -13,7 +13,7 @@ COPY requirements.txt .
 RUN pip install --user --no-cache-dir -r requirements.txt
 
 # ─── Runtime stage ────────────────────────────────────────────────────────────
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 WORKDIR /app
 
@@ -38,6 +38,14 @@ RUN chown -R aegis:aegis /app /home/aegis/.local
 RUN mkdir -p /app/pki /app/artifacts && chown -R aegis:aegis /app/pki /app/artifacts && chmod 700 /app/pki
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
+
+# pip non serve a runtime: l'app importa solo i pacchetti in /home/aegis/.local.
+# La copia di sistema porta con se' dipendenze vendorizzate (msgpack, setuptools,
+# urllib3) che Trivy segnala come HIGH anche se non sono usate dal servizio.
+# Rimuoverle riduce la superficie d'attacco e rende la scansione pulita.
+RUN rm -rf /usr/local/lib/python3.15/site-packages/pip \
+           /usr/local/lib/python3.15/site-packages/pip-*.dist-info \
+           /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.15
 
 # Runtime non-root (trivy AVD-DS-0002): il server gira come `aegis`; la correzione
 # dei volumi legacy root-owned è gestita negli upgrade (docs/OPERATIONS.md).

@@ -23,6 +23,7 @@ import {
   Database,
   SearchCode,
   Binary,
+  Bug,
 } from 'lucide-react'
 import { type Page, useAppStore } from '@/store/appStore'
 import { cn } from '@/lib/utils'
@@ -38,6 +39,7 @@ const NAV_ITEMS: { id: Page; label: string; icon: React.ElementType; section?: s
   { id: 'total',      label: 'Aegis Total',     icon: FileSearch },
   { id: 'ai',         label: 'AI Chat',         icon: Bot },
   { id: 'search',     label: 'Log Search',      icon: SearchCode,      section: 'SIEM' },
+  { id: 'kraken',     label: 'Kraken',          icon: Bug },
   { id: 'logsources', label: 'Log Sources',     icon: Database },
   { id: 'yara',       label: 'YARA & FIM',      icon: Binary },
   { id: 'deploy',     label: 'Deploy',          icon: Rocket,          section: 'MANAGE' },

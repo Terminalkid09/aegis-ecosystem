@@ -1,0 +1,306 @@
+services:
+  # ── Reverse Proxy ────────────────────────────────────────────────────────────
+  kraken_nginx:
+    image: nginx:1.26-alpine
+    container_name: kraken_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      - PROFILE=${PROFILE:-prod}
+    depends_on:
+      kraken_app:
+        condition: service_healthy
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  kraken_sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    image: kraken_sandbox:latest
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+      - /home/sandbox:noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    pids_limit: 64
+    cpu_quota: 25000
+    init: true
+
+  kraken_sandbox_broker:
+    build:
+      context: .
+      dockerfile: Dockerfile.broker
+    container_name: kraken_sandbox_broker
+    restart: unless-stopped
+    environment:
+      - SANDBOX_BROKER_TOKEN=${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
+      - SANDBOX_IMAGE=kraken_sandbox
+      - MALWARE_DIR=/app/data/malware
+      - MALWARE_MAX_FILE_BYTES=${MALWARE_MAX_FILE_BYTES:-67108864}
+      - MALWARE_MAX_SESSION_BYTES=${MALWARE_MAX_SESSION_BYTES:-268435456}
+      - MALWARE_RETENTION_DAYS=${MALWARE_RETENTION_DAYS:-30}
+      - MALWARE_MAX_TOTAL_BYTES=${MALWARE_MAX_TOTAL_BYTES:-5368709120}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  kraken_app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kraken_app
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://kraken:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@kraken_db:5432/krakendb
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@kraken_redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set}
+      - PUBLIC_BASE_PATH=${PUBLIC_BASE_PATH:-}
+      - KRAKEN_SSO_ENABLED=${KRAKEN_SSO_ENABLED:-false}
+      - KRAKEN_SSO_SECRET=${KRAKEN_SSO_SECRET:-}
+      - KRAKEN_SSO_ISSUER=${KRAKEN_SSO_ISSUER:-aegis-brain}
+      - KRAKEN_SSO_AUDIENCE=${KRAKEN_SSO_AUDIENCE:-kraken}
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-false}
+      - SANDBOX_BROKER_URL=http://kraken_sandbox_broker:8100
+      - SANDBOX_BROKER_TOKEN=${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
+      - MALWARE_RETENTION_DAYS=${MALWARE_RETENTION_DAYS:-30}
+      - MALWARE_MAX_TOTAL_BYTES=${MALWARE_MAX_TOTAL_BYTES:-5368709120}
+      - DEBUG=false
+      - GEOIP_DB_PATH=/app/data/GeoLite2-City.mmdb
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:80}
+      - AEGIS_INGEST_ENABLED=${AEGIS_INGEST_ENABLED:-false}
+      - AEGIS_INGEST_URL=${AEGIS_INGEST_URL:-}
+      - AEGIS_INGEST_KEY=${AEGIS_INGEST_KEY:-}
+      - AEGIS_INGEST_SECRET=${AEGIS_INGEST_SECRET:-}
+      - AEGIS_INGEST_TIMEOUT_S=${AEGIS_INGEST_TIMEOUT_S:-5}
+      - AEGIS_OUTBOX_POLL_INTERVAL_S=${AEGIS_OUTBOX_POLL_INTERVAL_S:-2}
+      - AEGIS_OUTBOX_BATCH_SIZE=${AEGIS_OUTBOX_BATCH_SIZE:-50}
+      - AEGIS_OUTBOX_MAX_ATTEMPTS=${AEGIS_OUTBOX_MAX_ATTEMPTS:-8}
+      - AEGIS_OUTBOX_BACKOFF_BASE_S=${AEGIS_OUTBOX_BACKOFF_BASE_S:-2}
+      - AEGIS_OUTBOX_BACKOFF_MAX_S=${AEGIS_OUTBOX_BACKOFF_MAX_S:-300}
+      - AEGIS_OUTBOX_STALE_AFTER_S=${AEGIS_OUTBOX_STALE_AFTER_S:-300}
+    volumes:
+      - ./data:/app/data
+      - ./data/malware:/app/data/malware
+      - ./data/logs:/app/data/logs
+    depends_on:
+      kraken_db:
+        condition: service_healthy
+      kraken_redis:
+        condition: service_healthy
+      kraken_sandbox_broker:
+        condition: service_healthy
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  kraken_sensors:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kraken_sensors
+    restart: unless-stopped
+    command: python honeypot/runner.py
+    ports:
+      - "2222:2222"
+      - "8080:8080"
+      - "2121:2121"
+      - "2323:2323"
+    environment:
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set}
+      - SSH_SENSOR_PORT=2222
+      - HTTP_SENSOR_PORT=8080
+      - FTP_SENSOR_PORT=2121
+      - TELNET_SENSOR_PORT=2323
+    depends_on:
+      kraken_app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://kraken_app:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - kraken_internal
+
+  kraken_db:
+    image: postgres:15-alpine
+    container_name: kraken_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kraken
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: krakendb
+    volumes:
+      - kraken_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kraken -d krakendb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - kraken_internal
+
+  kraken_redis:
+    image: redis:7-alpine
+    container_name: kraken_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - kraken_internal
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: kraken_prometheus
+    restart: unless-stopped
+    expose:
+      - "9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerting_rules.yml:/etc/prometheus/alerting_rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: kraken_alertmanager
+    restart: unless-stopped
+    expose:
+      - "9093"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: kraken_grafana
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  kraken_backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    container_name: kraken_backup
+    restart: unless-stopped
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
+      - BACKUP_PASSPHRASE_FILE=/run/secrets/backup_passphrase
+      - POSTGRES_HOST=kraken_db
+      - DB_HOST=kraken_db
+      - POSTGRES_USER=kraken
+      - POSTGRES_DB=krakendb
+      - DB_NAME=krakendb
+      - REDIS_HOST=kraken_redis
+    volumes:
+      - ./data:/app/data:ro
+      - ./secrets/backup_passphrase:/run/secrets/backup_passphrase:ro
+      - backup_data:/backups
+    networks:
+      - kraken_internal
+
+volumes:
+  kraken_pgdata:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
+  backup_data:
+
+networks:
+  kraken_internal:
+    driver: bridge
+  kraken_sandbox_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.20.0.0/24

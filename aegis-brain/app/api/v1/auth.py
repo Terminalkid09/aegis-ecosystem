@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete as sa_delete, or_
 from app.database.connection import get_db
-from app.database.models import User, RememberDevice
+from app.database.models import User, RememberDevice, APIKey
+from app.services.api_keys import generate_api_key, hash_api_key
 from app.core.security import hash_password, verify_password, needs_rehash, create_access_token, decode_access_token, blacklist_token
 from app.api.schemas.common import TokenResponse, UserOut
 from app.core.rate_limit import limiter
@@ -31,6 +32,12 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=128)
     remember: bool = False  # "Mantieni l'accesso su questo dispositivo"
 
+
+class APIKeyCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    source: Optional[str] = Field(None, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
+    scopes: list[str] = Field(default_factory=list, max_length=32)
+
 SESSION_COOKIE = "aegis_token"
 SESSION_COOKIE_PATH = "/api/"
 REMEMBER_COOKIE = "aegis_remember"
@@ -39,6 +46,17 @@ REMEMBER_COOKIE = "aegis_remember"
 REMEMBER_COOKIE_PATH = "/api/v1/auth"
 REMEMBER_DAYS = 30
 MAX_DEVICES_PER_USER = 10
+
+
+@router.get("/config")
+async def auth_config():
+    """Public login-page policy.
+
+    The SPA must not offer a Register tab when self-service registration is
+    disabled: the old UI always showed it and the only feedback was a 403
+    after submitting. Expose the boolean only, never any secret.
+    """
+    return {"open_registration": bool(settings.ALLOW_OPEN_REGISTRATION)}
 
 
 def _set_auth_cookie(response: Response, token: str):
@@ -354,3 +372,68 @@ async def revoke_remember_device(
     device.revoked = True
     await db.commit()
     return {"status": "revoked", "id": device_id}
+
+
+# ─── API key di ingestione (AEGIS-SEC-006) ─────────────────────────────────
+# Amministrazione riservata all'admin: una chiave limitata a una sorgente non
+# puo' essere creata da un analyst e usata per avvelenare un'altra sorgente.
+
+def _require_key_admin(user: User) -> None:
+    if (user.role or "").lower() != "admin":
+        raise HTTPException(status_code=403, detail="API key management requires admin role")
+
+
+def _key_out(key: APIKey) -> dict:
+    scopes = key.scopes if isinstance(key.scopes, dict) else {}
+    return {
+        "id": key.id,
+        "name": key.name,
+        "source": key.source,
+        "scopes": scopes.get("scopes", []),
+        "active": bool(key.active) and key.revoked_at is None,
+        "created_at": key.created_at.isoformat() if key.created_at else None,
+        "revoked_at": key.revoked_at.isoformat() if key.revoked_at else None,
+        "last_used": key.last_used.isoformat() if key.last_used else None,
+    }
+
+
+@router.get("/api-keys")
+async def list_api_keys(user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
+    _require_key_admin(user)
+    result = await db.execute(select(APIKey).order_by(APIKey.created_at.desc()))
+    return [_key_out(k) for k in result.scalars().all()]
+
+
+@router.post("/api-keys")
+async def create_api_key(payload: APIKeyCreate,
+                         user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    _require_key_admin(user)
+    raw = generate_api_key()
+    key = APIKey(
+        user_id=user.id,
+        name=payload.name,
+        hashed_key=hash_api_key(raw),
+        source=payload.source,
+        scopes={"scopes": payload.scopes},
+        active=True,
+    )
+    db.add(key)
+    await db.commit()
+    await db.refresh(key)
+    return {**_key_out(key), "api_key": raw, "warning": "shown only once"}
+
+
+@router.delete("/api-keys/{key_id}")
+async def revoke_api_key(key_id: int,
+                         user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    _require_key_admin(user)
+    key = await db.get(APIKey, key_id)
+    if not key:
+        raise HTTPException(status_code=404, detail="API key not found")
+    key.active = False
+    key.revoked_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "revoked", "id": key_id}

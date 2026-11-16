@@ -113,6 +113,29 @@ def parse_timestamp(value: Any, *, default: Optional[datetime] = None) -> dateti
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
     except ValueError:
         pass
+    # `%b` follows the process locale. On a Windows host with an Italian
+    # locale `Dec 31 23:59:00` fails to parse even though it is a valid RFC3164
+    # timestamp. Parse the English month explicitly, independent of locale.
+    month_match = re.match(
+        r"^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})$", text
+    )
+    if month_match:
+        months = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+                  "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+        month = months.get(month_match.group(1).lower())
+        if month:
+            try:
+                dt = datetime(1900, month, int(month_match.group(2)),
+                              int(month_match.group(3)), int(month_match.group(4)),
+                              int(month_match.group(5)), tzinfo=timezone.utc)
+                anchor = fallback if fallback.tzinfo else fallback.replace(tzinfo=timezone.utc)
+                dt = dt.replace(year=anchor.year)
+                if dt - anchor > timedelta(days=1):
+                    dt = dt.replace(year=anchor.year - 1)
+                return dt
+            except ValueError:
+                pass
+
     for fmt in ("%Y-%m-%d %H:%M:%S", "%b %d %H:%M:%S", "%Y/%m/%d %H:%M:%S",
                 "%d/%b/%Y:%H:%M:%S %z"):
         try:

@@ -69,6 +69,7 @@ yarn-error.log*
 .pnp.js
 venv/
 .venv/
+.venv*/
 env/
 .tox/
 
@@ -138,6 +139,12 @@ aegis-guard/install/windows/install_log.txt
 
 # Docker / PID
 *.pid
+
+# Local agent state (Perch) — never part of the repository
+.perch/
+
+# Generated release bundles (AP-50)
+release/
 
 # Docs suggestions / scratch
 *.suggestion.*

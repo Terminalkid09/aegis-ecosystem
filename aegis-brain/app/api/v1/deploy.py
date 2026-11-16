@@ -6,6 +6,7 @@ in discovery.py) with:
   - one-liner install scripts (ps1/sh) served by the brain
   - server-side DeployJob with per-target status (no password persistence)
 """
+import base64
 import hashlib
 import hmac
 import ipaddress
@@ -82,6 +83,10 @@ class EnrollTokenRequest(BaseModel):
     ttl_minutes: int = Field(default=15, ge=5, le=1440)
     dashboard_remote: bool = True
     dashboard_local: bool = False
+    # Re-enroll: il token è valido solo per questo host. Un token senza
+    # target_hostname resta utilizzabile per il primo enrollment, mai per
+    # sostituire un agente già registrato.
+    target_hostname: Optional[str] = Field(default=None, max_length=255)
 
 
 @router.post("/token")
@@ -94,19 +99,24 @@ async def create_enroll_token(
     _require_deploy_operator(user)
     if payload.dashboard_local:
         raise HTTPException(status_code=422, detail="Local dashboard packaging is not available yet")
+    target_hostname = (payload.target_hostname or "").strip() or None
     raw = secrets.token_urlsafe(32)
+    install_config = {"dashboard_remote": payload.dashboard_remote}
+    if target_hostname:
+        install_config["target_hostname"] = target_hostname
     rec = EnrollToken(
         token_hash=_hash_token(raw),
         label=payload.label,
         agent_type=payload.agent_type,
         created_by=user.id,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=payload.ttl_minutes),
-        install_config={"dashboard_remote": payload.dashboard_remote},
+        install_config=install_config,
     )
     db.add(rec)
     await log_audit(
         db, action="deploy_token_create", resource="enroll_token",
-        details={"label": payload.label, "agent_type": payload.agent_type},
+        details={"label": payload.label, "agent_type": payload.agent_type,
+                 "target_hostname": target_hostname},
         user_id=user.id, username=user.username,
         ip_address=request.client.host if request else None,
     )
@@ -118,9 +128,10 @@ async def create_enroll_token(
     return {
         "token": raw,
         "expires_at": rec.expires_at.isoformat(),
-            "agent_type": payload.agent_type,
-            "dashboard_remote": payload.dashboard_remote,
-            "dashboard_local": payload.dashboard_local,
+        "agent_type": payload.agent_type,
+        "target_hostname": target_hostname,
+        "dashboard_remote": payload.dashboard_remote,
+        "dashboard_local": payload.dashboard_local,
         "oneline_windows": ps1,
         "oneline_linux": sh,
         "note": "Single-use, short-lived. Never commit it. Regenerate per rollout batch.",
@@ -132,8 +143,10 @@ async def list_enroll_tokens(db: AsyncSession = Depends(get_db), user=Depends(ge
     result = await db.execute(select(EnrollToken).order_by(EnrollToken.created_at.desc()).limit(50))
     out = []
     for t in result.scalars().all():
+        cfg = t.install_config if isinstance(t.install_config, dict) else {}
         out.append({
             "id": t.id, "label": t.label, "agent_type": t.agent_type,
+            "target_hostname": cfg.get("target_hostname"),
             "expires_at": t.expires_at.isoformat() if t.expires_at else None,
             "used_at": t.used_at.isoformat() if t.used_at else None,
             "revoked": t.revoked,
@@ -165,6 +178,7 @@ if (-not $Token -and $Request.Headers) { $Token = $Request.Headers["X-Enroll-Tok
 # Token is passed via -Headers @{'X-Enroll-Token'='...'} | iex
 $Base = "{BASE}/api/v1"
 $EnrollToken = "{ENROLL_TOKEN}"
+$ManifestPubkey = "{MANIFEST_PUBKEY}"
 $RemoteDashboard = {REMOTE_DASHBOARD}
 
 function Get-JavaMajor([string]$Exe) {
@@ -185,11 +199,11 @@ function Get-JavaMajor([string]$Exe) {
 
 function Resolve-Java([string]$Dir) {
     # Ordine di preferenza: runtime incluso nell'artefatto (host senza Java
-    # installato), poi java del PATH — ma solo se la versione e' >= 21.
+    # installato), poi java del PATH — ma solo se la versione e' >= 25.
     $candidates = @((Join-Path $Dir "jre\bin\java.exe"),
                     (Get-Command java -ErrorAction SilentlyContinue).Source)
     foreach ($candidate in $candidates) {
-        if ($candidate -and (Test-Path $candidate) -and (Get-JavaMajor $candidate) -ge 21) {
+        if ($candidate -and (Test-Path $candidate) -and (Get-JavaMajor $candidate) -ge 25) {
             return $candidate
         }
     }
@@ -207,10 +221,18 @@ function Install-AegisAgent($TargetAgent) {
         Expand-Archive -Path $pkg -DestinationPath $Dir -Force
         if ($RemoteDashboard) {
             [Environment]::SetEnvironmentVariable("AEGIS_BRAIN_URL", $Base, "Machine")
-            [Environment]::SetEnvironmentVariable("AEGIS_ENROLL_KEY", $EnrollToken, "Machine")
+            [Environment]::SetEnvironmentVariable("AEGIS_MANIFEST_PUBKEY", $ManifestPubkey, "Machine")
             [Environment]::SetEnvironmentVariable("NODETRACE_REGISTER_URL", "$Base/register", "Machine")
             [Environment]::SetEnvironmentVariable("NODETRACE_HEARTBEAT_URL", "$Base/heartbeat", "Machine")
             [Environment]::SetEnvironmentVariable("NODETRACE_UPDATE_URL", "$Base/update", "Machine")
+            # Token one-shot su file 0600, mai nell'env persistente. Il file
+            # condiviso va bene: un token "both" copre un tipo per agente.
+            $TokenDir = Join-Path $env:ProgramData "Aegis"
+            New-Item -ItemType Directory -Force -Path $TokenDir | Out-Null
+            $TokenFile = Join-Path $TokenDir "enroll.token"
+            Set-Content -Path $TokenFile -Value $EnrollToken -NoNewline -Encoding ascii
+            & icacls $TokenFile /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" | Out-Null
+            [Environment]::SetEnvironmentVariable("AEGIS_ENROLL_TOKEN_FILE", $TokenFile, "Machine")
             if ($TargetAgent -eq "aegis-guard") {
                 # Telemetria kernel: se l'artefatto include il collector, si
                 # punta AEGIS_ETW_PATH all'eseguibile ASSOLUTO e si dichiara
@@ -247,7 +269,7 @@ function Install-AegisService($TargetAgent) {
     if ($TargetAgent -eq "aegis-guard") {
         $java = Resolve-Java "C:\Aegis\Guard"
         if (-not $java) {
-            throw "Java 21+ is required for Aegis-Guard: bundle a runtime under jre\ in the artifact, or install it on the target."
+            throw "Java 25+ is required for Aegis-Guard: bundle a runtime under jre\ in the artifact, or install it on the target."
         }
         Write-Host "[aegis] using Java: $java (major $((Get-JavaMajor $java)))"
         $binPath = "`"$java`" -jar `"$($binary.FullName)`""
@@ -281,7 +303,7 @@ if (-not $RemoteDashboard) {
     Write-Host "[aegis] remote dashboard NOT selected: files extracted, no service registered."
     Write-Host "        Start the agent from its directory, or re-issue a token with remote dashboard enabled for a persistent service."
 }
-Write-Host "[aegis] Set AEGIS_BRAIN_URL=$Base and AEGIS_ENROLL_KEY before starting the agent."
+Write-Host "[aegis] Set AEGIS_BRAIN_URL=$Base and AEGIS_MANIFEST_PUBKEY before starting the agent."
 Write-Host "[aegis] For NodeTrace also set NODETRACE_REGISTER_URL=$Base/register,"
 Write-Host "        NODETRACE_HEARTBEAT_URL=$Base/heartbeat and NODETRACE_UPDATE_URL=$Base/update."
 Write-Host "[aegis] The agent will consume the single-use token during its first enrollment."
@@ -296,6 +318,7 @@ set -euo pipefail
 AGENT="{AGENT}"
 BASE="{BASE}/api/v1"
 ENROLL_TOKEN="{ENROLL_TOKEN}"
+MANIFEST_PUBKEY="{MANIFEST_PUBKEY}"
 REMOTE_DASHBOARD="{REMOTE_DASHBOARD}"
 
 install_agent() {
@@ -307,9 +330,12 @@ install_agent() {
         "$BASE/deploy/bootstrap-artifacts/${target_agent}-latest.tar.gz" -o /tmp/aegis-agent.pkg
     tar -xzf /tmp/aegis-agent.pkg -C "$dir"
     if [ "$REMOTE_DASHBOARD" = "1" ]; then
+        printf '%s' "$ENROLL_TOKEN" > "$dir/enroll.token"
+        chmod 600 "$dir/enroll.token"
         cat > "$dir/aegis.env" <<EOF
 AEGIS_BRAIN_URL=$BASE
-AEGIS_ENROLL_KEY=$ENROLL_TOKEN
+AEGIS_MANIFEST_PUBKEY=$MANIFEST_PUBKEY
+AEGIS_ENROLL_TOKEN_FILE=$dir/enroll.token
 NODETRACE_REGISTER_URL=$BASE/register
 NODETRACE_HEARTBEAT_URL=$BASE/heartbeat
 NODETRACE_UPDATE_URL=$BASE/update
@@ -328,7 +354,7 @@ install_service() {
         local jar
         jar=$(find "/opt/aegis/${target_agent}" -name 'aegis-guard.jar' -type f | head -n 1)
         [ -n "$jar" ] || { echo "[aegis] Guard JAR not found" >&2; return 1; }
-        command -v java >/dev/null 2>&1 || { echo "[aegis] Java 21+ is required for Guard" >&2; return 1; }
+        command -v java >/dev/null 2>&1 || { echo "[aegis] Java 25+ is required for Guard" >&2; return 1; }
         exec_start="/usr/bin/java -jar ${jar}"
     else
         local exe
@@ -370,11 +396,27 @@ else
     install_service "$AGENT"
     echo "[aegis] installed."
 fi
-echo "[aegis] Set AEGIS_BRAIN_URL=$BASE and AEGIS_ENROLL_KEY before starting the agent."
+echo "[aegis] Set AEGIS_BRAIN_URL=$BASE and AEGIS_MANIFEST_PUBKEY before starting the agent."
 echo "[aegis] For NodeTrace also set NODETRACE_REGISTER_URL=$BASE/register,"
 echo "        NODETRACE_HEARTBEAT_URL=$BASE/heartbeat and NODETRACE_UPDATE_URL=$BASE/update."
 echo "[aegis] The agent will consume the single-use token during its first enrollment."
 """
+
+
+def _manifest_pubkey_b64() -> str:
+    """Chiave pubblica Ed25519 del manifest, obbligatoria per l'OTA."""
+    from app.services import pki as _pki
+    pub_path = Path(settings.PKI_DIR) / _pki.MANIFEST_PUB
+    try:
+        raw = pub_path.read_bytes()
+    except OSError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Manifest Ed25519 public key unavailable: {exc}",
+        )
+    if len(raw) != 32:
+        raise HTTPException(status_code=503, detail="Manifest Ed25519 public key is invalid")
+    return base64.b64encode(raw).decode("ascii")
 
 
 async def _validate_install_token(x_enroll_token: str, db: AsyncSession):
@@ -399,8 +441,10 @@ async def install_ps1(
     if agent != "both" and token.agent_type not in (agent, "both"):
         raise HTTPException(status_code=403, detail="Token agent type does not match installer")
     config = token.install_config or {}
+    pubkey = _manifest_pubkey_b64()
     return INSTALL_PS1.replace("{BASE}", settings.PUBLIC_BASE_URL.rstrip("/")).replace(
-        "{ENROLL_TOKEN}", x_enroll_token.strip()).replace("{AGENT}", agent).replace(
+        "{ENROLL_TOKEN}", x_enroll_token.strip()).replace("{MANIFEST_PUBKEY}", pubkey).replace(
+        "{AGENT}", agent).replace(
         "{REMOTE_DASHBOARD}", "$true" if config.get("dashboard_remote", True) else "$false")
 
 
@@ -416,8 +460,10 @@ async def install_sh(
     if agent != "both" and token.agent_type not in (agent, "both"):
         raise HTTPException(status_code=403, detail="Token agent type does not match installer")
     config = token.install_config or {}
+    pubkey = _manifest_pubkey_b64()
     return INSTALL_SH.replace("{BASE}", settings.PUBLIC_BASE_URL.rstrip("/")).replace(
-        "{ENROLL_TOKEN}", x_enroll_token.strip()).replace("{AGENT}", agent).replace(
+        "{ENROLL_TOKEN}", x_enroll_token.strip()).replace("{MANIFEST_PUBKEY}", pubkey).replace(
+        "{AGENT}", agent).replace(
         "{REMOTE_DASHBOARD}", "1" if config.get("dashboard_remote", True) else "0")
 
 
@@ -438,9 +484,15 @@ async def list_artifacts(user=Depends(get_current_user)):
     }
 
 
-# ─── OTA firmata (staged update, alla CrowdStrike) ────────────────────
-# L'agente conosce AGENT_ENROLL_KEY (env) e verifica HMAC(sha256) prima di
-# mettere in stage. Niente firma valida → niente download applicato.
+# ─── OTA firmata (staged update) ──────────────────────────────────
+# Ed25519 obbligatorio: la chiave manifest è separata dalla enroll key e dal
+# device secret. L'HMAC OTA è stato rimosso in 4.1.0 (AEGIS-SEC-002): un
+# comando senza manifest firmato viene rifiutato dall'agente, in ogni profilo.
+
+
+class ManifestUnavailable(RuntimeError):
+    """La chiave privata Ed25519 del manifest non è disponibile."""
+
 
 def artifact_name_for(agent_type: str, version: str) -> str:
     v = (version or "latest").strip() or "latest"
@@ -455,16 +507,6 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
-
-
-def sign_artifact(sha256: str, key: Optional[str] = None) -> str:
-    k = (key if key is not None else (settings.AGENT_ENROLL_KEY or "")).encode()
-    return hmac.new(k, sha256.encode(), hashlib.sha256).hexdigest()
-
-
-def verify_artifact_signature(sha256: str, signature: str, key: Optional[str] = None) -> bool:
-    expected = sign_artifact(sha256, key)
-    return hmac.compare_digest(expected, (signature or "").strip())
 
 
 def is_newer_version(current: Optional[str], target: str) -> bool:
@@ -484,54 +526,54 @@ def is_newer_version(current: Optional[str], target: str) -> bool:
     return parts(target) > parts(current)
 
 
-def build_update_command(agent_type: str, version: str, base_url: str, sha256: str, signature: str) -> Dict[str, Any]:
+def build_update_command(agent_type: str, version: str, base_url: str, sha256: str,
+                         manifest: str, manifest_sig: str) -> Dict[str, Any]:
     return {
         "command": "UPDATE_AGENT",
         "agent_type": agent_type,
         "version": version,
         "url": f"{base_url.rstrip('/')}/api/v1/deploy/artifacts/{artifact_name_for(agent_type, version)}",
         "sha256": sha256,
-        "signature": signature,
+        "manifest": manifest,
+        "manifest_sig": manifest_sig,
     }
 
 
 def build_manifest(artifacts: List[Dict[str, str]]) -> Dict[str, Any]:
-    """Manifest repository versionato: ogni entry ha hmac di compatibilità."""
+    """Manifest repository versionato; la firma Ed25519 è esterna al manifest."""
     return {"key_id": "aegis-manifest-v1",
-            "artifacts": [
-                {"name": a["name"], "sha256": a["sha256"],
-                 "hmac": sign_artifact(a["sha256"])}
-                for a in artifacts
-            ]}
+            "artifacts": [{"name": a["name"], "sha256": a["sha256"]}
+                          for a in artifacts]}
 
 
 def sign_manifest_bundle(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    """Allega firma Ed25519 al manifest (chiave dedicata in PKI_DIR).
+    """Firma il manifest con la chiave Ed25519 dedicata in PKI_DIR.
 
-    Senza chiave manifest (setup incompleto): bundle non firmato, gli agenti
-    restano sull'HMAC e il report lo dichiara (mai downgrade silenzioso).
+    La enroll key non partecipa mai alla firma. Se la PKI non è inizializzata
+    l'operazione fallisce: non esiste un fallback HMAC silenzioso.
     """
     from app.services import pki as _pki
     import os as _os
-    bundle = {"manifest": manifest, "ed25519": None, "signed": False}
+    priv_path = _os.path.join(settings.PKI_DIR, _pki.MANIFEST_KEY)
+    if not _os.path.exists(priv_path):
+        raise ManifestUnavailable(
+            "Manifest Ed25519 private key missing: run PKI bootstrap "
+            "(python -m app.services.pki --dir ...)"
+        )
     try:
-        priv_path = _os.path.join(settings.PKI_DIR, _pki.MANIFEST_KEY)
-        if not _os.path.exists(priv_path):
-            return bundle
         key = _pki.load_manifest_private(priv_path)
-        bundle["ed25519"] = _pki.sign_manifest(key, manifest)
-        bundle["signed"] = True
-    except Exception:
-        pass
-    return bundle
+        signature = _pki.sign_manifest(key, manifest)
+    except Exception as exc:
+        raise ManifestUnavailable(f"Manifest Ed25519 signing failed: {exc}") from exc
+    return {"manifest": manifest, "ed25519": signature, "signed": True}
 
 
 @router.get("/manifest")
 async def get_manifest():
     """Manifest firmato degli artefatti pubblicati (materiale pubblico).
 
-    Gli agenti con AEGIS_MANIFEST_PUBKEY verificano Ed25519 + copertura;
-    gli altri restano sull'HMAC per-entry (dichiarato in `signed`).
+    Ed25519 è obbligatorio: senza chiave privata l'endpoint risponde 503,
+    invece di esporre un manifest non firmato o un fallback HMAC.
     """
     from app.services import pki as _pki
     root = Path(settings.ARTIFACT_DIR)
@@ -541,14 +583,16 @@ async def get_manifest():
             if p.is_file() and not p.name.startswith("."):
                 items.append({"name": p.name, "sha256": sha256_file(p)})
     manifest = build_manifest(items)
-    bundle = sign_manifest_bundle(manifest)
     try:
-        import base64 as _b64
+        bundle = sign_manifest_bundle(manifest)
+    except ManifestUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    try:
         pub_path = Path(settings.PKI_DIR) / _pki.MANIFEST_PUB
-        bundle["pubkey_b64"] = _b64.b64encode(pub_path.read_bytes()).decode("ascii") \
-            if pub_path.exists() else None
-    except OSError:
-        bundle["pubkey_b64"] = None
+        bundle["pubkey_b64"] = base64.b64encode(pub_path.read_bytes()).decode("ascii")
+    except OSError as exc:
+        raise HTTPException(status_code=503,
+                            detail=f"Manifest Ed25519 public key unavailable: {exc}")
     return bundle
 
 
@@ -601,11 +645,11 @@ async def push_update_command(
     user=Depends(get_current_user),
 ):
     _require_deploy_operator(user)
-    """Accoda UPDATE_AGENT firmato a un agente (o lo restituisce se la coda è giù).
+    """Accoda UPDATE_AGENT firmato Ed25519 a un agente (o lo restituisce se la coda è giù).
 
-    Il comando contiene url+sha256+HMAC così l'agente verifica prima di
-    mettere in stage. Se Redis è giù, ritorna comunque il payload firmato
-    (202) invece di 500 — l'operatore lo recapita via one-liner.
+    Il comando contiene url, sha256, manifest canonico e firma Ed25519: l'agente
+    verifica la firma e la copertura prima di mettere in stage. Se Redis è giù,
+    ritorna comunque il payload firmato (202) invece di 500.
     """
     import uuid as _uuid
     try:
@@ -625,23 +669,16 @@ async def push_update_command(
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"Artifact {fname} not published in ARTIFACT_DIR")
     digest = sha256_file(path)
-    sig = sign_artifact(digest)
-    cmd = build_update_command(atype, payload.version, settings.PUBLIC_BASE_URL, digest, sig)
-    # Manifest firmato (M6 Fase 7): l'agente con pubkey verifica Ed25519 +
-    # copertura; gli altri restano sull'HMAC (dichiarato, mai silenzioso).
-    # Fase 5: in pilot/enterprise Ed25519 è obbligatorio, HMAC solo per lab
-    # con warning esplicito, mai downgrade silenzioso.
-    bundle = sign_manifest_bundle(build_manifest([{"name": fname, "sha256": digest}]))
-    if settings.ENTERPRISE_STRICT and not bundle["signed"]:
-        raise HTTPException(status_code=500, detail="Manifest Ed25519 required in enterprise mode: run PKI bootstrap (pki --dir)")
-    if bundle["signed"]:
-        from app.services import pki as _pki2
-        cmd["manifest"] = _pki2.canonical_manifest_bytes(bundle["manifest"]).decode("utf-8")
-        cmd["manifest_sig"] = bundle["ed25519"]
-    elif settings.ENTERPRISE_STRICT:
-        # Già fallito sopra, ma per completezza logga il fallback
-        import logging as _logging
-        _logging.getLogger(__name__).warning("HMAC fallback in enterprise mode for %s — should not happen", fname)
+    try:
+        bundle = sign_manifest_bundle(build_manifest([{"name": fname, "sha256": digest}]))
+    except ManifestUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    from app.services import pki as _pki2
+    cmd = build_update_command(
+        atype, payload.version, settings.PUBLIC_BASE_URL, digest,
+        _pki2.canonical_manifest_bytes(bundle["manifest"]).decode("utf-8"),
+        bundle["ed25519"],
+    )
 
     try:
         from app.services.telemetry_service import send_command_to_agent
@@ -652,16 +689,16 @@ async def push_update_command(
     await log_audit(
         db, action="deploy_update_push", resource="agent", resource_id=str(agent.agent_id),
         details={"version": payload.version, "artifact": fname, "sha256": digest,
-                 "queued": queued, "manifest_signed": bundle["signed"]},
+                 "queued": queued, "manifest_signed": True},
         user_id=user.id, username=user.username,
         ip_address=request.client.host if request else None,
     )
     await db.commit()
     return {"queued": queued, "status": 200 if queued else 202, "command": cmd,
             "agent_id": str(agent.agent_id),
-            "note": "Agent verifies HMAC before staging. Restart applies (service wrapper)."} if queued else \
+            "note": "Agent verifies the Ed25519 manifest before staging. Restart applies (service wrapper)."} if queued else \
            {"queued": False, "status": 202, "command": cmd, "agent_id": str(agent.agent_id),
-            "note": "Queue unavailable — deliver command manually. Signature still valid."}
+            "note": "Queue unavailable — deliver command manually. The Ed25519 signature remains valid."}
 
 
 # ─── deploy jobs (mass rollout, server-side, no password storage) ──

@@ -11,6 +11,12 @@ from services import device_identity as di
 
 
 class TestDeviceIdentity(unittest.TestCase):
+    def test_machine_id_is_stable_and_never_raises(self):
+        first = di.machine_id()
+        second = di.machine_id()
+        self.assertIsInstance(first, str)
+        self.assertEqual(first, second)
+
     def test_csr_cn_and_signature(self):
         from cryptography import x509
         from cryptography.hazmat.primitives.asymmetric import ec

@@ -17,13 +17,13 @@ installato da remoto e uno installato a mano si comportano allo stesso modo:
                          (telemetria kernel), bin/yara64.exe (scansione FIM/YARA)
   nodetrace-<v>.zip      intero bundle PyInstaller (dist/nodetrace-agent/)
   aegis-guard-<v>.tar.gz solo runtime: un JRE Windows dentro un tar per Linux
-                         non servirebbe a nulla (li' Java 21+ deve esserci host)
+                         non servirebbe a nulla (li' Java 25+ deve esserci host)
 
 Un artefatto incompleto e' peggio di uno assente: se manca il runtime lo script
 fallisce; se manca un pezzo opzionale lo DICHIARA (nessun silenzio).
 
 Uso:
-  python scripts/pack-artifacts.py [--out DIR] [--version v4.0.0]
+  python scripts/pack-artifacts.py [--out DIR] [--version v4.1.0]
 """
 import argparse
 import os
@@ -87,7 +87,7 @@ def pack_guard(out_dir, version):
     jre_dir = _first_existing(GUARD_JRE_DIRS)
     notes = []
     if not jre_dir:
-        notes.append("nessun JRE incluso: il target deve avere Java 21+ "
+        notes.append("nessun JRE incluso: il target deve avere Java 25+ "
                      "(`build.bat` crea aegis-guard/jre con jlink)")
 
     zpath = os.path.join(out_dir, f"aegis-guard-{version}.zip")
@@ -149,7 +149,7 @@ def main():
     ap = argparse.ArgumentParser(description="Pack agent deploy artifacts")
     ap.add_argument("--out", default=DEFAULT_OUT,
                     help=f"cartella servita dal brain (default: {DEFAULT_OUT})")
-    ap.add_argument("--version", default="v4.0.0", help="versione nell'artefatto (default: v4.0.0)")
+    ap.add_argument("--version", default="v4.1.0", help="versione nell'artefatto (default: v4.1.0)")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)

@@ -26,10 +26,10 @@ Check 'Docker disponibile' { (Get-Command docker -ErrorAction Stop) -ne $null } 
 
 Check 'Docker daemon raggiungibile' { docker info 2>$null | Select-String 'Server Version' -Quiet } 'avviare Docker Desktop'
 
-Check 'Python 3.10+ disponibile' {
+Check 'Python 3.15+ disponibile' {
     $p = Get-Command python -ErrorAction Stop; $v = & python --version 2>&1
-    $v -match 'Python 3\.(1[0-9]|[2-9][0-9])'
-} 'installare Python 3.10+ e aggiungerlo al PATH'
+    $v -match 'Python 3\.(1[5-9]|[2-9][0-9])'
+} 'installare Python 3.15+ e aggiungerlo al PATH'
 
 Check 'Porte 5444/6388/8000/3000 libere o gia'' Aegis' {
     $busy = @(5444, 6388, 8000, 3000 | Where-Object {

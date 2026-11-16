@@ -1,8 +1,15 @@
 package com.aegis.guard;
 
+import com.google.gson.JsonObject;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
+import java.util.Arrays;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -71,5 +78,68 @@ class MainCommandValidationTest {
         assertFalse(Main.isDomainName(".example.com"));
         assertFalse(Main.isDomainName("example..com"));
         assertFalse(Main.isDomainName("http://example.com"));
+    }
+
+    // ─── REMOVE_PERSISTENCE ─────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("Il registry viene rimosso per nome valore, non con /va")
+    void registryDeleteTargetsTheNamedValueOnly() {
+        String[] command = Main.registryDeleteCommand(
+                "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", "Updater");
+        assertTrue(Arrays.asList(command).contains("/v"));
+        assertFalse(Arrays.asList(command).contains("/va"));
+        assertEquals("Updater", command[4]);
+    }
+
+    @Test
+    @DisplayName("Il parsing conserva chiave, nome e dato di ogni valore")
+    void parsesRegistryValuesWithTheirKey() {
+        String output = "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\r\n"
+                + "    Updater    REG_SZ    C:\\Temp\\evil.exe --run\r\n"
+                + "    (Default)    REG_SZ    C:\\Legit\\app.exe\r\n"
+                + "\r\n"
+                + "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\Sub\r\n"
+                + "    Other    REG_SZ    C:\\Temp\\other.exe\r\n";
+        var values = Main.parseRegistryValues(output);
+        assertEquals(3, values.size());
+        assertEquals("Updater", values.get(0).name());
+        assertEquals("C:\\Temp\\evil.exe --run", values.get(0).data());
+        assertTrue(values.get(0).key().endsWith("Run"));
+        assertEquals("Other", values.get(2).name());
+        assertTrue(values.get(2).key().endsWith("Run\\Sub"));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("REMOVE_PERSISTENCE cancella solo il valore che matcha")
+    void removePersistenceDeletesOnlyMatchingValue() throws Exception {
+        String key = "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
+        String needle = "AegisTest-" + UUID.randomUUID();
+        String legit = "AegisLegit-" + UUID.randomUUID();
+        try {
+            assertEquals(0, run("reg", "add", key, "/v", needle, "/t", "REG_SZ",
+                    "/d", "C:\\Temp\\" + needle + ".exe", "/f"));
+            assertEquals(0, run("reg", "add", key, "/v", legit, "/t", "REG_SZ",
+                    "/d", "C:\\Temp\\" + legit + ".exe", "/f"));
+
+            JsonObject cmd = new JsonObject();
+            cmd.addProperty("process_name", needle);
+            Main.handleRemovePersistence(cmd);
+
+            assertFalse(valueExists(key, needle));
+            assertTrue(valueExists(key, legit));
+        } finally {
+            run("reg", "delete", key, "/v", needle, "/f");
+            run("reg", "delete", key, "/v", legit, "/f");
+        }
+    }
+
+    private static int run(String... cmd) throws Exception {
+        return new ProcessBuilder(cmd).redirectErrorStream(true).start().waitFor();
+    }
+
+    private static boolean valueExists(String key, String value) throws Exception {
+        return run("reg", "query", key, "/v", value) == 0;
     }
 }

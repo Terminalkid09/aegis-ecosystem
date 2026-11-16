@@ -11,7 +11,8 @@ import hashlib
 import os
 from typing import Any, Dict, List, Optional
 
-import yaml
+from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from app.rules.sigma.compiler import compile_detection
 from app.rules.sigma.fields import get_values, has_field
@@ -67,14 +68,15 @@ def load_rules(directory: Optional[str] = None) -> List[SigmaRule]:
     base = directory or DEFAULT_RULES_DIR
     if not os.path.isdir(base):
         return rules
+    yaml = YAML(typ="safe")
     for name in sorted(os.listdir(base)):
         if not name.lower().endswith((".yml", ".yaml")):
             continue
         full = os.path.join(base, name)
         try:
             with open(full, encoding="utf-8") as fh:
-                documents = list(yaml.safe_load_all(fh))
-        except (OSError, yaml.YAMLError):
+                documents = list(yaml.load_all(fh))
+        except (OSError, YAMLError):
             continue
         for doc in documents:
             # Un file può contenere una lista di regole.

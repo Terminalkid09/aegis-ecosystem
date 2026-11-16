@@ -24,6 +24,25 @@ Il progetto deve rimanere indipendente: il confronto con prodotti o aziende este
 6. **Misurazione prima del marketing**: precision, recall, falsi positivi per host/giorno, latenza e overhead devono essere misurabili.
 7. **Riproducibilità**: ogni release deve poter essere installata, testata, aggiornata e rollbackata da zero.
 
+## Confini delle release (deciso il 2026-11-15)
+
+- **4.1 — verticale Kraken completa:** il servizio entra nel compose, il
+  contratto firmato ha outbox/retry, la UI Kraken è raggiungibile, la SPA Aegis
+  mostra la vista unificata in sola lettura e uno smoke test end-to-end parte
+  dal bundle di release. Non è una release “Kraken avviabile”.
+- **4.2+ — espansione:** nuovi sensori, campagne, sensori/nodi, Kraken Lab,
+  timeline unificata, ATT&CK e automazione. Nessuna di queste capacità può
+  essere usata per rinviare la verticale della 4.1.
+
+Il cambio di perimetro sposta lavoro tra release, non lo elimina: le stime
+vanno ricalcolate, non presentate come ridotte.
+
+**Stato al 2026-11-16:** la verticale 4.1.7–4.1.9 è implementata e verificata
+nel working tree — outbox con ripresa dopo un outage del Brain, SSO e UI dietro
+`/kraken/*`, vista Aegis in sola lettura, profilo compose `kraken` con broker
+sandbox, smoke live e browser offline. Non è ancora una release: mancano il tag
+`v4.1.0`, lo smoke dal bundle scaricato e i gate di release.
+
 ## Stato di partenza
 
 Componenti già presenti:
@@ -196,6 +215,47 @@ Standardizzare ogni evento con:
 - report automatico prima di ogni release;
 - nessuna risposta distruttiva automatica nella modalità demo.
 
+## Milestone 4.5 — OSINT e SentinelX
+
+### Obiettivo
+
+Portare SentinelX da lookup manuale a piano di intelligence unico per gli
+analisti: una sola API/UI per arricchire indicatori, conservare provenienza e
+confidence, e trasformare il risultato in contesto operativo senza inviare dati
+interni a provider esterni.
+
+### Capacità
+
+- provider registry con adapter espliciti (VirusTotal, Shodan, AbuseIPDB e
+  provider futuri) e capabilities dichiarate per tipo di indicatore;
+- normalizzazione di IP, dominio, URL, hash e ASN in un modello comune, con
+  deduplica degli indicatori equivalenti;
+- cache con TTL per provider, quota/rate limit, backoff e degradazione visibile
+  quando un provider è lento o indisponibile;
+- ogni risultato espone fonte, timestamp, TTL, confidence e dati grezzi
+  separati dalla sintesi, così l'analista può verificare il verdetto;
+- batch enrichment e pivot (IP → domini → hash → campagne) con limiti di
+  profondità e costo per evitare query a cascata incontrollate;
+- esclusione per default di IP privati, hostname interni e dati del tenant da
+  qualunque provider esterno; l'egress è opt-in e auditato;
+- UI SentinelX con storico investigazioni, stato provider, errori, quota
+  residua e confronto tra fonti discordanti;
+- export STIX/JSON e correlazione con alert, incidenti e regole Sigma;
+- modalità offline/air-gapped con provider locali o dataset importati.
+
+### Criteri di completamento
+
+- ogni provider ha test di successo, timeout, 429, risposta malformata e
+  cache hit/miss;
+- un IP privato non genera mai una chiamata esterna (test di rete);
+- la UI mostra “non arricchito” invece di un verdetto inventato quando il
+  provider fallisce;
+- cache hit p95 < 50 ms e batch di 100 indicatori entro un budget dichiarato;
+- audit di ogni chiamata esterna con provider, indicatore, esito e durata;
+- report di copertura per tipo di indicatore e provider, con quota e costi
+  prevedibili;
+- nessuna credenziale provider nel frontend o nei log.
+
 ## Milestone 5 — Correlazione e incident response
 
 - grafo host-process-user-network-file;
@@ -243,6 +303,44 @@ Ogni automazione deve avere precondizioni, livello di rischio, approvatore e rol
 - upgrade fallito con rollback;
 - device duplicato o reimaged gestito correttamente;
 - nessuna credenziale statica incorporata negli installer.
+
+## Milestone 6.5 — Deploy e fleet operations
+
+### Obiettivo
+
+Rendere il deploy una procedura ripetibile e reversibile, non un one-liner che
+funziona solo sulla macchina dello sviluppatore. Il one-liner resta il modo per
+enrollare un endpoint; non è il modello di rollout dell'intera flotta.
+
+### Capacità
+
+- artefatti firmati e riproducibili per Brain, frontend, Link, Guard, NodeTrace
+  e compose bundle, con checksum, SBOM e provenienza verificate dal client;
+- installer Windows (servizio/MSI o equivalente) e pacchetti Linux
+  (deb/rpm/systemd) con upgrade e uninstall testati;
+- rollout a fasi: canary su un sito, finestra di osservazione, promozione o
+  rollback automatico su errore di salute/versione;
+- inventario flotta con versione desiderata/applicata, deriva, ultimo
+  heartbeat, copertura e stato di aggiornamento per host;
+- job remoti SSH/WinRM solo con allowlist di comandi, credenziali dedicate e
+  audit; niente comandi arbitrari dal web;
+- modalità offline/air-gapped con mirror degli artefatti e verifica della
+  catena di firma senza Internet;
+- profili Compose production, health/readiness, backup/restore e migrazioni
+  con expand/contract;
+- test di installazione da zero usando solo gli artefatti scaricati dalla
+  release, non il repository;
+- metriche di successo: tempo di enroll, tempo di upgrade, rollback riusciti,
+  host in deriva e fallimenti per fase.
+
+### Criteri di completamento
+
+- installazione pulita Windows e Linux dall'artefatto di release;
+- upgrade e rollback di un agente e del backend senza perdita di eventi;
+- canary che si ferma da solo se la salute peggiora;
+- host con versione diversa da quella desiderata visibile in dashboard;
+- nessuna credenziale o chiave privata dentro installer, immagini o log;
+- prova di deploy in ambiente senza accesso Internet.
 
 ## Milestone 7 — Dashboard SOC e modello organizzativo
 

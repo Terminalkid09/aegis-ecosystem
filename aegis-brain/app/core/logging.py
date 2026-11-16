@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from contextvars import ContextVar
 from typing import Any, Dict, Optional
-from pythonjsonlogger import jsonlogger
+from pythonjsonlogger import json as jsonlogger
 
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")

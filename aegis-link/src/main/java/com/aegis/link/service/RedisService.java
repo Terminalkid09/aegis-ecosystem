@@ -1,7 +1,7 @@
 package com.aegis.link.service;
 
 import com.aegis.link.dto.EventRequest;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
