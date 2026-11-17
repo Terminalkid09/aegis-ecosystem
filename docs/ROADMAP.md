@@ -1,8 +1,8 @@
-# Aegis Enterprise Roadmap
+# Aegis Roadmap
 
 ## Obiettivo
 
-Portare Aegis da prototipo avanzato a piattaforma EDR/XDR dimostrabile in un contesto SOC aziendale, con:
+Portare Aegis da prototipo avanzato a piattaforma EDR/XDR dimostrabile in un contesto SOC reale, con:
 
 - sensori Windows e Linux affidabili;
 - pochi alert, correlati e spiegabili;
@@ -33,6 +33,11 @@ Il progetto deve rimanere indipendente: il confronto con prodotti o aziende este
 - **4.2+ — espansione:** nuovi sensori, campagne, sensori/nodi, Kraken Lab,
   timeline unificata, ATT&CK e automazione. Nessuna di queste capacità può
   essere usata per rinviare la verticale della 4.1.
+- **4.3 — agente unico Go:** Guard e NodeTrace confluiscono in un solo
+  agente, con un solo enrollment, updater e contratto eventi; `aegis-link`
+  resta Spring Boot. Il profilo router/OpenWrt è solo lab in questa fase.
+- **4.4 — response intelligence:** contenimento, catalogo azioni, canary e
+  verifica end-to-end sopra l'agente unico, non sopra i due agenti vecchi.
 
 Il cambio di perimetro sposta lavoro tra release, non lo elimina: le stime
 vanno ricalcolate, non presentate come ridotte.
@@ -64,7 +69,7 @@ Prima di ogni milestone bisogna creare una baseline con test, build, versione, h
 
 ### Obiettivi
 
-- congelare il perimetro della prima release enterprise;
+- congelare il perimetro della prima release pilota;
 - definire asset, attori, trust boundary e scenari d’attacco;
 - separare chiaramente demo, laboratorio e produzione;
 - scegliere le versioni OS supportate.
@@ -501,7 +506,7 @@ Problemi aperti: <elenco>
 
 Prompt consigliato:
 
-> Lavora nel repository `aegis-ecosystem` sulla milestone `<X>`. Leggi prima `docs/ENTERPRISE_ROADMAP.md` e lo stato Git. Non fare reset o checkout distruttivi e preserva le modifiche esistenti. Implementa solo il task indicato, aggiungi test, esegui i test pertinenti, controlla il diff e riporta file modificati, rischi residui e risultati esatti dei comandi.
+> Lavora nel repository `aegis-ecosystem` sulla milestone `<X>`. Leggi prima `docs/ROADMAP.md` e lo stato Git. Non fare reset o checkout distruttivi e preserva le modifiche esistenti. Implementa solo il task indicato, aggiungi test, esegui i test pertinenti, controlla il diff e riporta file modificati, rischi residui e risultati esatti dei comandi.
 
 ## Posizionamento del progetto
 
@@ -515,4 +520,4 @@ Aegis può diventare un ottimo progetto da mostrare a un SOC o a un’azienda di
 - documentazione chiara;
 - limiti dichiarati.
 
-Non bisogna promettere di essere già “migliore” di un prodotto enterprise maturo. L’obiettivo credibile è mostrare una piattaforma indipendente, misurabile e tecnicamente ambiziosa, con una roadmap concreta verso la produzione.
+Non bisogna promettere di essere già “migliore” di un prodotto commerciale maturo. L’obiettivo credibile è mostrare una piattaforma indipendente, misurabile e tecnicamente ambiziosa, con una roadmap concreta verso la produzione.

@@ -13,7 +13,7 @@ indicate come stime.
 - Corpus validation indipendente 16+9: precision/recall/F1 **1.0**, **0 FP/host/day**.
 - Corpus regression 7+6: precision/recall/F1 **1.0**, **0 FP/host/day**.
 - Gli split validation/regression sono sintetici e non sostituiscono dati reali:
-  non è corretto generalizzare questi valori a un ambiente enterprise.
+  non è corretto generalizzare questi valori a un ambiente di produzione ampio.
 - MTTD non misurabile in replay (solo live).
 
 ## Throughput per agent e profili

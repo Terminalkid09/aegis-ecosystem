@@ -1,7 +1,12 @@
 # AEGIS ECOSYSTEM + KRAKEN — specifica di lavoro (handoff)
 
-**Versione documento:** 2.7 — 2026-11-15 (D1–D16 chiuse in v2.3; v2.4: D16 portfolio-first senza data fissa, D2 chiarita agente vs sensore, flusso PR/merge/release in B.5; v2.5: tag pubblicati immutabili, audit release e import ticket; v2.6: scope 4.1 senza UI Kraken e release train unica 4.2.1+4.2.4; v2.7: la 4.1 include la verticale Kraken completa, l'espansione passa alla 4.2+)
+**Versione documento:** 2.8 — 2026-11-17 (v2.8: agente unico Go in 4.3.0, response intelligence in 4.4.0; la sezione 4.3.0 sotto è storica)
 **Destinatario:** sessione di sviluppo successiva (umana o agente)
+**Decisione 2026-11-17 — agente unico:** Guard e NodeTrace confluiscono in
+un solo agente Go nella 4.3.0; la response intelligence passa alla 4.4.0.
+`aegis-link` resta Spring Boot. La specifica eseguibile aggiornata è
+`docs/PLAN_V4.2.md` §Fase 3-4; la sezione 4.4.0 sotto descrive la response
+storica e i suoi numeri 4.4.x non sono più numeri di release.
 **Repo Aegis:** `Terminalkid09/aegis-ecosystem`, branch `dev` @ `ea57f08` (codice identico a `c9831c5`; dopo `c9831c5` solo commit documentali. `main` @ `38e245f`)
 **Repo Kraken:** `Terminalkid09/Kraken`, branch `main` locale @ `7fd50a9` (1 commit avanti a `origin/main` @ `d86c8d5`, **non pushato**). Il fix di avvio KRAKEN-SEC-000 è già in `7fd50a9`; su `origin/main` il servizio non parte ancora.
 **Report di analisi precedente:** `docs/ANALISI_AEGIS_KRAKEN_v4.md` (analisi del 2026-11-08; questo documento è la specifica operativa aggiornata)
@@ -249,7 +254,7 @@ I finding **AEGIS-SEC-002**, **AEGIS-REL-001** e **KRAKEN-SEC-001/002/003** bloc
 - **Impatto:** da admin di piattaforma a root del server che custodisce PKI, audit e credenziali di tutti gli agenti.
 - **Fix:** rimuovere l'azione e sostituirla con catalogo di azioni nominate; se deve restare, eseguire in container effimero senza rete e senza volumi.
 - **Test:** `script` → `blocked` con flag off; nessun path che raggiunga `subprocess` (grep test).
-- **Release:** 4.3.0 (rimozione), 4.1.0 se resta (hardening)
+- **Release:** 4.4.0 (rimozione), 4.1.0 se resta (hardening)
 
 #### AEGIS-SEC-004 — Decompressione non limitata in Aegis Total
 - **Severità:** Medium (DoS) · **Confidence:** Alta · **File:** `aegis-brain/app/api/v1/total.py:913-918`
@@ -327,11 +332,11 @@ I finding **AEGIS-SEC-002**, **AEGIS-REL-001** e **KRAKEN-SEC-001/002/003** bloc
 | AEGIS-OPS-005 | Vite con 3 advisory high (dev-only) | Medium (CI) | `frontend/package-lock.json` | `npm audit --audit-level=high` rosso | bump Vite; separare audit dev/prod | 4.1.0 |
 | AEGIS-OPS-006 | Discovery usa `create_subprocess_shell("arp -a")` | Low | `api/v1/discovery.py:84,97` | shell non necessaria su percorso privilegiato | `exec` con argv + parsing | 4.2.0 |
 | AEGIS-OPS-007 | Stato in-process (dedup, rate limit, cache) e un solo worker | Medium | `app/main.py`, `app/core/rate_limit.py` | `--workers N` rompe dedup e WebSocket; l'HA dichiarata non è provata | stato condiviso su Redis + test di concorrenza; worker multipli dietro Caddy | 4.2.0 |
-| AEGIS-OPS-008 | Nessun RBAC per sito/tenant | Medium | `app/services/fleet.py` (`site` in `Agent.meta`) | un analista vede tutti i siti; nessuna tabella Site/Tenant | tabella `sites`, scope su ogni query, ruolo per sito | 5.0.0 (4.3 per il solo filtro) |
+| AEGIS-OPS-008 | Nessun RBAC per sito/tenant | Medium | `app/services/fleet.py` (`site` in `Agent.meta`) | un analista vede tutti i siti; nessuna tabella Site/Tenant | tabella `sites`, scope su ogni query, ruolo per sito | 5.0.0 (4.4 per il solo filtro) |
 
 #### AEGIS-REL-001 — Nessuna licenza
 - **Severità:** High (legale/distribuzione) · **Confidence:** Alta · **File:** radice del repo
-- **Evidenza:** `ls LICENSE*` non trova nulla; README e documenti non dichiarano una licenza. Senza licenza il default è «tutti i diritti riservati»: nessuno può legalmente usare, modificare o ridistribuire il codice, e nessun procurement enterprise lo approva.
+- **Evidenza:** `ls LICENSE*` non trova nulla; README e documenti non dichiarano una licenza. Senza licenza il default è «tutti i diritti riservati»: nessuno può legalmente usare, modificare o ridistribuire il codice, e nessun procurement lo approva.
 - **Impatto:** blocca distribuzione, contributi esterni, pilot con clienti e qualunque affermazione «open source». La v2.1 assumeva Apache-2.0: era falso.
 - **Fix:** scegliere il modello (D1), aggiungere `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, intestazioni SPDX nei file nuovi; per un prodotto commerciale, EULA/contratto separato.
 - **Test:** check CI che fallisce se `LICENSE` manca; revisione legale prima del tag.
@@ -1239,77 +1244,82 @@ espansione, e nessuna può essere presentata come integrazione base.
 
 ---
 
-### 4.3.0 — "Containment & Deception" (settimane 17–30)
+### 4.4.0 — "Containment & Deception" (già 4.3.0)
+
+> **Nota 2026-11-17:** questa sezione descrive la response originariamente
+> pianificata per la 4.3.0. La 4.3.0 è ora l'agente unico Go; la response
+> passa alla 4.4.0. I numeri 4.4.x qui sotto sono quelli correnti; 4.3.0
+> resta il nome storico della response.
 
 **Tema:** dalla visibilità all'azione, e Kraken da honeypot a piattaforma di deception.
 
-#### 4.3.1 Contenimento di rete (§7.1)
+#### 4.4.1 Contenimento di rete (§7.1)
 - Costruire: connettori firewall/SG, `quarantine_host` con TTL, ripristino automatico, audit, kill switch.
 - Accettazione: host isolato in <3 s su target simulato; ripristino a scadenza; nessuna azione senza TTL; audit a due campi (chi, perché).
 - Effort: 5 gg · Dipendenze: 4.2.
 - Rischio: un bug qui spegne la rete di un cliente → serve approvazione esplicita, TTL breve, dry-run di default in `pilot`.
 
-#### 4.3.2 Contenimento credenziali (§7.2)
+#### 4.4.2 Contenimento credenziali (§7.2)
 - Accettazione: disabilitazione con doppia approvazione su AD di test; audit; nessuna credenziale salvata.
-- Effort: 4 gg · Dipendenze: 4.3.1 (stesso motore di azioni).
+- Effort: 4 gg · Dipendenze: 4.4.1 (stesso motore di azioni).
 
-#### 4.3.3 Playbook come catalogo di azioni nominate
+#### 4.4.3 Playbook come catalogo di azioni nominate
 - Costruire: sostituire `script` (AEGIS-SEC-003) con azioni tipizzate (`isolate_host`, `block_ip`, `disable_account`, `quarantine_file`, `collect_forensics`, `notify`), parametri validati, dry-run, idempotenza per `(action, target, revision)`.
 - Accettazione: nessun path raggiunge `subprocess` con input utente; grep test; dry-run non produce effetti.
-- Effort: 3 gg · Dipendenze: 4.3.1/4.3.2.
+- Effort: 3 gg · Dipendenze: 4.4.1/4.4.2.
 
-#### 4.3.4 Detonazione, YARA e analisi sample (§8.3)
+#### 4.4.4 Detonazione, YARA e analisi sample (§8.3)
 - Accettazione: ELF di test → hash, tipo, IOC, YARA; nessuna rete; timeout 120 s; sample mai eseguito dall'app.
 - Effort: 6 gg · Dipendenze: 4.1.2/4.1.3.
 - Rischio: alto (malware). Richiede container dedicato, `no-new-privileges`, seccomp, volume separato.
 
-#### 4.3.5 Canary token e file esca (§8.5)
+#### 4.4.5 Canary token e file esca (§8.5)
 - Accettazione: apertura PDF → evento con `canary_id`, IP, user-agent; nessuna macro; distribuzione via agente.
 - Effort: 3 gg · Dipendenze: 4.2.1.
 
-#### 4.3.6 Risposta automatica su deception (§8.6)
+#### 4.4.6 Risposta automatica su deception (§8.6)
 - Accettazione: attacco high → incidente + playbook proposto + IP bloccato (target simulato) + audit, in <10 s.
-- Effort: 2 gg · Dipendenze: 4.3.1, 4.3.5.
+- Effort: 2 gg · Dipendenze: 4.4.1, 4.4.5.
 
-#### 4.3.7 Blocklist e export operativo (§8.7)
+#### 4.4.7 Blocklist e export operativo (§8.7)
 - Accettazione: 10k IP in <2 s, formati firewall, nessun IP privato, firma e versione.
 - Effort: 2 gg · Dipendenze: 4.2.1.
 
-#### 4.3.8 Report PDF unificato (§7.6)
+#### 4.4.8 Report PDF unificato (§7.6)
 - Accettazione: <5 s per 500 eventi; nessun dato sensibile; testo estraibile e testato.
 - Effort: 3 gg · Dipendenze: 4.2.3.
 
-#### 4.3.9 Alert routing e turni (§7.8)
+#### 4.4.9 Alert routing e turni (§7.8)
 - Accettazione: escalazione a T+15; ack ferma; MTTA in dashboard; canali Slack/Teams/webhook/PagerDuty-compat.
 - Effort: 4 gg · Dipendenze: nessuna.
 
-#### 4.3.10 Threat intel feed (§7.7)
+#### 4.4.10 Threat intel feed (§7.7)
 - Accettazione: MISP/OTX/abuse.ch; cache 24 h; nessuna query per IP privati; degradazione silenziosa ma misurata.
 - Effort: 4 gg · Dipendenze: 4.2.1.
 
-#### 4.3.11 Dollhouse (§8.9)
+#### 4.4.11 Dollhouse (§8.9)
 - Accettazione: avvio <2 s, nessun file reale, watcher su file esca.
-- Effort: 4 gg · Dipendenze: 4.3.4.
+- Effort: 4 gg · Dipendenze: 4.4.4.
 
-#### 4.3.12 Kraken Lab: scenari di verifica detection end-to-end (§8.12)
+#### 4.4.12 Kraken Lab: scenari di verifica detection end-to-end (§8.12)
 - Costruire: libreria di scenari riproducibili mappati a regole/tecniche Aegis, runner di run con asserzioni (alert/correlazione/risposta attesa entro T), correlazione con esiti Aegis via contratto, report evidenze in UI Kraken; modalità shadow di default.
 - Accettazione: suite di scenari base eseguibile → report pass/fail/missed per asserzione con riferimenti a eventi/alert; nessuna azione distruttiva automatica in shadow; esecuzione confinata a reti lab isolate; risultati visibili in UI Kraken e riassunti nella vista unificata Aegis.
-- Effort: 8 gg · Dipendenze: 4.2.1, 4.2.4, 4.3.4 (per scenari con sample).
+- Effort: 8 gg · Dipendenze: 4.2.1, 4.2.4, 4.4.4 (per scenari con sample).
 
-**Definition of done 4.3.0**
+**Definition of done 4.4.0**
 - [ ] Una catena completa: scanner → brute force → login esca → comandi → download malware → canary → blocco IP + incidente + report PDF.
 - [ ] Una suite Lab shadow produce evidenze pass/fail/missed sulla detection/risposta Aegis (senza fondere Kraken nel Brain).
 - [ ] Ogni azione distruttiva ha TTL, dry-run e audit a due identità.
 - [ ] Nessuna azione esegue comandi arbitrari sul server.
-- [ ] Tag `v4.3.0`.
+- [ ] Tag `v4.4.0`.
 
 ---
 
-### 5.0.0 — "Platform + Range" (settimane 31–52)
+### 5.0.0 — "Platform + Range" (dopo la 4.4)
 
 **Tema:** ciò che serve a un design partner o a un pilota che ha requisiti, non per convincere un tecnico. Da fare solo con almeno un design partner che lo chiede; senza trazione, si taglia lo scope, non la sicurezza.
 
-#### 5.0.1 Identità e accesso enterprise
+#### 5.0.1 Identità e accesso aziendale
 - OIDC/SAML (Entra ID, Okta, Keycloak), mapping gruppi→ruoli, SCIM per provisioning, MFA obbligatoria, sessioni con timeout e "termina tutte".
 - Accettazione: login con Entra ID di test, mapping corretto, deprovisioning entro 1 min, audit di ogni cambio ruolo.
 - Effort: 8–10 gg.
@@ -1341,7 +1351,7 @@ espansione, e nessuna può essere presentata come integrazione base.
 #### 5.0.7 Kraken Lab — Range v1 (D9)
 - Costruire: host Windows/Linux reali o VM, segmenti DMZ/corp/OT, scoring, after-action report, isolamento da VLAN/cloud; sopra il Lab 4.2/4.3.
 - Accettazione: scenario multi-host con 2 segmenti e 4 host; verdetto per asserzione; nessuna azione fuori dal lab; export del report.
-- Effort: 25–35 gg · Dipendenze: 4.2.1, 4.2.4, 4.3.4, 4.3.12.
+- Effort: 25–35 gg · Dipendenze: 4.2.1, 4.2.4, 4.4.4, 4.4.12.
 - Rischio: è un prodotto nel prodotto; se il tempo non c'è, si riduce lo scenario, non l'isolamento.
 
 **Definition of done 5.0.0**
@@ -1359,21 +1369,22 @@ espansione, e nessuna può essere presentata come integrazione base.
 | Gate 0 | 1 | licenza, `SECURITY.md`, release completa, privacy | nessuna (in parallelo) |
 | 4.1.0 | 1–8 | fix bloccanti, CI verde, verticale Kraken completa (compose, outbox, UI, vista Aegis, smoke test) | nessuna |
 | 4.2.0 | 9–16 | espansione Kraken (campagne, sensori, Lab), timeline, ATT&CK, soppressioni, flotta, SMB/RDP, base Lab shadow | 4.1 completa |
-| 4.3.0 | 17–30 | contenimento rete/credenziali, catalogo azioni, YARA/detonazione, canary, blocklist, PDF, routing, scenari Lab e verifica detection | 4.2 completa |
-| 5.0.0 | 31–52 | IdP enterprise, HA, audit/compliance, intel, performance, SDK, range v1 | un design partner o un pilota |
+| 4.3.0 | 17–? | agente unico Go: parità Guard/NodeTrace, migrazione, installer, profilo router lab | 4.2 completa |
+| 4.4.0 | ? | contenimento rete/credenziali, catalogo azioni, YARA/detonazione, canary, blocklist, PDF, routing, scenari Lab | 4.3 completa |
+| 5.0.0 | ? | IdP aziendale, HA, audit/compliance, intel, performance, SDK, range v1 | un design partner o un pilota |
 
-**Lettura onesta:** 52 settimane di lavoro stimate a 30 h/settimana (D16), già con un buffer per release; non sono 52 settimane di calendario né una scadenza. A 40 h/settimana il realistico è **37–43 settimane**; a 30 h/settimana **49–55**. Il totale delle voci è **187 giornate uomo (182–192)**: Gate 0 5 + 4.1 27 + 4.2 27 + 4.3 48 + 5.0 75–85. Sono ~37 settimane di lavoro puro a 5 giorni/settimana: ogni settimana in meno è una promessa non mantenuta, e con una data fissa sarebbe un debito.
+**Lettura onesta:** 52 settimane di lavoro stimate a 30 h/settimana (D16), già con un buffer per release; non sono 52 settimane di calendario né una scadenza. A 40 h/settimana il realistico è **37–43 settimane**; a 30 h/settimana **49–55**. Il totale delle voci è **187 giornate uomo (182–192)**: Gate 0 5 + 4.1 27 + 4.2 27 + 4.3 48 + 5.0 75–85. Sono ~37 settimane di lavoro puro a 5 giorni/settimana: ogni settimana in meno è una promessa non mantenuta, e con una data fissa sarebbe un debito. **La stima della 4.3 va rifatta:** il rewrite Go dell'agente unico non è compreso nelle 48 giornate della vecchia 4.3; il totale di 187 giornate non è più valido finché non viene ricalcolato.
 
 ### 10.2 Cosa può slittare senza rompere nulla
 - 5.0.4 (federation) e 5.0.6 (SDK): utili, non urgenti.
 - 5.0.7 (range): si può partire con 2 segmenti e 4 host; non si taglia l'isolamento.
-- 4.3.11 (dollhouse) e 4.3.10 (feed): valore alto ma non bloccano il contenimento.
-- 4.2.5 (ATT&CK) può andare in 4.3.
+- 4.4.11 (dollhouse) e 4.4.10 (feed): valore alto ma non bloccano il contenimento.
+- 4.2.5 (ATT&CK) può andare in 4.4.
 
 ### 10.3 Cosa non può slittare
 - Tutto 4.1.0, senza eccezioni: è il debito che rende falso ogni altro numero del prodotto.
 - 4.2.1 (ingestione/contratto) e 4.2.4 (UI Kraken dedicata + vista unificata) se si vuole l'ecosistema a microservizi: senza, Kraken resta scollegato e la verifica detection via Lab non è dimostrabile end-to-end.
-- 4.3.3 (catalogo azioni): finché `script` esiste, un admin può eseguire comandi sul server che custodisce la PKI.
+- 4.4.3 (catalogo azioni): finché `script` esiste, un admin può eseguire comandi sul server che custodisce la PKI.
 
 ---
 ## 11. Piano di test
@@ -1551,7 +1562,7 @@ Regole:
 | 7 | La roadmap si allarga e la 4.1 non esce | Alta | Alto | 4.1 = solo fix; nessuna feature ammessa |
 | 8 | Il cliente chiede multi-tenant e si accetta | Media | Alto | risposta scritta: 5.0+, con stima |
 | 9 | Si vende senza licenza o senza privacy/DPA | Alta | Critico | Gate 0 prima di ogni pilot; revisione legale |
-| 10 | Si svende il prodotto come SIEM enterprise e si perde la nicchia | Alta | Alto | posizionamento SOC-in-a-box + deception/Lab; nessun confronto con vendor esterni |
+| 10 | Si svende il prodotto come SIEM generalista e si perde la nicchia | Alta | Alto | posizionamento SOC-in-a-box + deception/Lab; nessun confronto con vendor esterni |
 | 11 | Bus factor 1: una persona, 187 giornate (182–192), nessun margine | Alta | Alto | buffer 20%, documentazione operativa, primo collaboratore su frontend/QA |
 
 **Decisioni chiuse (v2.3, D16 aggiornata in v2.4, D17 in v2.7):** D1 AGPL-3.0-only; D2 mid-market multi-superficie; D3/D4 visibilità, non vendita; D5 Compose + K8s-ready; D6 Aegis root + `services/kraken`, push/subtree solo su autorizzazione; D7 `script` rimosso; D9 Lab a fasi; D10 Helm 5.1; D11 soglie; D12 AI locale; D13 single deployment; D14 ISO dopo 4.1; D15 nessun vendor nominato; D16 30 h/settimana, portfolio-first, nessuna data fissa; D17 verticale Kraken completa in 4.1, espansione in 4.2+.
@@ -1699,7 +1710,7 @@ Regola finale: **nessuna feature, nessun refactor estetico, nessuna nuova dipend
 | D2 | **Mid-market e ambienti grandi**; Windows/Linux ora, macOS 5.x, router OpenWrt 4.3 lab, sensori di rete 4.2 | il valore è coprire endpoint e rete, non solo PC | matrice §2.4; Android/iOS solo 5.x via MDM |
 | D3 | **Visibilità, non vendita diretta**: community, demo, contenuti | a 17 anni il ritorno utile è reputazione e adozione | README/demo; canali community |
 | D4 | **Niente prezzo, listino o billing**; sponsorship solo dopo trazione | il prodotto non è in vendita e non deve sembrare un'offerta commerciale | nessuna pagina prezzi; niente fatturazione nel codice |
-| D5 | **Compose 4.x** è il deployment supportato; architettura K8s-ready da subito | semplicità oggi, senza chiudere la porta all'enterprise | §9.3; niente manifest K8s nella 4.x |
+| D5 | **Compose 4.x** è il deployment supportato; architettura K8s-ready da subito | semplicità oggi, senza chiudere la porta ai clienti grandi | §9.3; niente manifest K8s nella 4.x |
 | D6 | **Aegis alla root + `services/kraken`**; move in `aegis/` solo dopo Gate A; push/subtree solo su autorizzazione | evitare 400+ path rotti e storia riscritta | §6.1; il subtree crea un commit |
 | D7 | **Rimuovere `script`** in 4.1; catalogo di azioni nominate in 4.3 | elimina l'esecuzione arbitraria sul Brain | AEGIS-SEC-003; grep test su `subprocess` |
 | D8 | **Nessuna priorità**: ordine del piano | tutte le feature della 4.2 servono | §10.2 |
@@ -1708,7 +1719,7 @@ Regola finale: **nessuna feature, nessun refactor estetico, nessuna nuova dipend
 | D11 | **Soglie + Redpanda/NATS prima di Kafka** | Kafka a 10³–10⁵ eventi/giorno è costo senza beneficio | §5.4 |
 | D12 | **Ollama locale default**, cloud opt-in con chiave del cliente | dati in sede, air-gap; nessun dato che esce da solo | §7.11; AI mai nel contenimento |
 | D13 | **Un deployment per cliente**, `tenant_id` predisposto | isolamento e backup semplici; MSSP non è il target iniziale | §5.4; multi-tenant solo 5.0 |
-| D14 | **ISO 27001 dopo la 4.1**, DPA e registro subito | credibilità enterprise senza bruciare 6–12 mesi ora | Gate 0 privacy; niente SOC 2/ACN senza partner |
+| D14 | **ISO 27001 dopo la 4.1**, DPA e registro subito | credibilità presso i clienti senza bruciare 6–12 mesi ora | Gate 0 privacy; niente SOC 2/ACN senza partner |
 | D15 | **Flank mid-market** con SOC-in-a-box + deception/Lab; nessun vendor nominato | si vince sul tempo al valore, non sulla scala SIEM | nessun confronto in codice, doc, commit o marketing |
 | D16 | **30 h/settimana**, portfolio-first, nessuna data fissa; 4.1 ~9 settimane di lavoro, roadmap 49–55 stimate | il progetto è un biglietto da visita, non una consegna contrattuale; sostenibilità e qualità | §6.4, §10; 40 h solo in vacanza; stime aggiornate quando la realtà cambia |
 | D17 | **4.1 = verticale Kraken completa** (compose, outbox, UI, vista Aegis, smoke test); espansione in 4.2+ | evita una release “Kraken avviabile” e una UI promessa alla release dopo | §4.1.7–4.1.9, §10.1, `docs/RELEASES.md`; le stime si spostano, non si riducono |
@@ -1722,7 +1733,7 @@ Regola finale: **nessuna feature, nessun refactor estetico, nessuna nuova dipend
 5. Niente attribuzione ad AI e niente co-autore nei commit.
 6. Android/iOS non sono supportati nella 4.x; senza MDM ed entitlement sarebbero una promessa falsa.
 7. Kubernetes/Helm non entrano nella 4.x; l'architettura è K8s-ready, il deployment no.
-8. Il range multi-host non inizia prima che il Lab 4.2 sia verde e che il containment 4.3 abbia TTL, dry-run e audit.
+8. Il range multi-host non inizia prima che il Lab 4.2 sia verde e che il containment 4.4 abbia TTL, dry-run e audit.
 
 ---
 

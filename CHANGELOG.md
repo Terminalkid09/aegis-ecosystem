@@ -30,7 +30,7 @@ mounted UI, read-only Aegis view and the isolated compose profile.
   the release-integrity gate: no user-visible capability is called integrated
   until API, UI, docs and tests ship together. The gate now names the complete
   Kraken vertical as a 4.1 requirement.
-- `docs/ENTERPRISE_ROADMAP.md`: explicit OSINT/SentinelX and deploy/fleet
+- `docs/ROADMAP.md`: explicit OSINT/SentinelX and deploy/fleet
   workstreams, separate from the release hardening checklist.
 - `docs/youtrack_tickets.csv` and `scripts/youtrack_import.py`: import path for
   the findings and roadmap work packages.

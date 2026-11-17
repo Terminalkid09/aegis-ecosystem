@@ -479,7 +479,7 @@ Key environment variables (full list in `.env.example`):
 | `AEGIS_ETW_ALLOW_UNSIGNED` | `true` for locally built collectors | Allows an unsigned helper. Keep `false` if you sign `aegis-etw.exe` and want signature enforcement |
 | `AEGIS_NO_ELEVATE` | unset | `1` stops `aegis.bat agents` from requesting the UAC prompt for kernel telemetry (the agents then run without ETW and say so) |
 | `NODETRACE_IDENTITY_DIR` | agent directory | Where `token.json` and the device key/certificate live. Resolved as an **absolute** path on purpose: with a relative path the same device used a different identity per launch directory, and the brain answered 401 to every authenticated call |
-| `PLAYBOOK_SCRIPT_ENABLED` | `false` | Shell `script` SOAR actions (keep off unless enterprise-approved) |
+| `PLAYBOOK_SCRIPT_ENABLED` | `false` | Shell `script` SOAR actions (keep off unless explicitly approved) |
 | `RATE_LIMIT_STORAGE_URI` | memory | `redis://…` for multi-worker/HA rate limiting |
 
 ---
@@ -489,8 +489,8 @@ Key environment variables (full list in `.env.example`):
 This project is designed for local security labs and development. Before production use:
 
 - Replace every default secret in `.env`.
-- Set `DEBUG=false` and `ALLOW_OPEN_REGISTRATION=false` (the brain refuses to start otherwise); for enterprise also `ENTERPRISE_STRICT=true` with `MTLS_MODE=required` (refused at startup if missing).
-- Keep playbook `script` actions disabled (`PLAYBOOK_SCRIPT_ENABLED=false`, default) unless enterprise-approved: they execute shell on the server.
+- Set `DEBUG=false` and `ALLOW_OPEN_REGISTRATION=false` (the brain refuses to start otherwise); for production also `ENTERPRISE_STRICT=true` with `MTLS_MODE=required` (refused at startup if missing).
+- Keep playbook `script` actions disabled (`PLAYBOOK_SCRIPT_ENABLED=false`, default) unless explicitly approved: they execute shell on the server.
 - For production, use `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` to avoid exposing Postgres/Redis ports.
 - Replace Caddy `tls internal` with proper TLS certificates (Let's Encrypt).
 - Use incremental Alembic migrations for all schema changes (migrations are idempotent).
@@ -501,7 +501,7 @@ Use this software only on systems where you have explicit permission.
 
 ---
 
-## Pilot & Enterprise Readiness
+## Pilot & Production Readiness
 
 ```bash
 # OS preflight (Windows) / sh scripts/os-preflight.sh (Linux)
