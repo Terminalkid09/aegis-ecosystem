@@ -1,13 +1,37 @@
 # Piano d'azione 4.2+
 
-Data: 2026-11-16. Base rilasciata: `v4.1.0`, tag annotato `17c499f`.
+Data: 2026-11-17. Base rilasciata: `v4.1.0`, tag annotato `17c499f`.
 
 Questo documento è l'ordine di esecuzione della prossima fase. Il perimetro
-funzionale resta quello già deciso in
-[`PLAN_AEGIS_KRAKEN_HANDOFF.md`](PLAN_AEGIS_KRAKEN_HANDOFF.md) §4.2.0 e §4.3;
-qui si stabilisce cosa fare prima, cosa non può slittare e come si misura il
+funzionale della 4.2 resta quello già deciso in
+[`PLAN_AEGIS_KRAKEN_HANDOFF.md`](PLAN_AEGIS_KRAKEN_HANDOFF.md) §4.2.0; qui si
+stabilisce cosa fare prima, cosa non può slittare e come si misura il
 risultato. Non è un nuovo scope e non anticipa Kafka, Kubernetes o
 multi-tenancy.
+
+## Decisione corrente — agente unico Go
+
+Data: 2026-11-17.
+
+Guard e NodeTrace confluiscono in un solo agente Go nella **4.3.0**. La
+response intelligence slitta alla **4.4.0**. `aegis-link` resta Spring Boot:
+è un gateway server-side per ambienti ad alto traffico, non un endpoint, e
+riscriverlo in Go non ridurrebbe il costo operativo del prodotto.
+
+Questa decisione **non cambia la 4.2.0**. La 4.2 è quasi tutta lato
+server/Kraken (canale outbox, timeline, detection, UI, flotta, SMB/RDP, mTLS);
+non sta aggiungendo nuove capacità a Guard o NodeTrace. Quindi non c'è quasi
+nulla da convertire due volte. Durante la 4.2 i due agenti ricevono solo fix di
+sicurezza, compatibilità, CI e release; nessuna nuova feature endpoint.
+
+Perché non alla fine della roadmap: rimandare l'unificazione dopo la response
+significherebbe costruire il contenimento su due agenti che poi verranno
+riscritti. La 4.3.0 è il punto più precoce in cui il rewrite può partire senza
+fermare la release già pianificata.
+
+La specifica di dettaglio 4.1/4.2 resta nell'handoff. Per la 4.3/4.4 vale
+questo documento; le sezioni 4.3.x dell'handoff descrivono la response storica
+e vanno lette come 4.4.x.
 
 ## Regole
 
@@ -17,6 +41,9 @@ multi-tenancy.
 3. Nessuna feature nuova prima di aver chiuso i debiti di release della fase 0.
 4. Le misure si rifanno sul commit candidato; non si citano numeri vecchi.
 5. Ogni release si costruisce dal tag e si verifica da un download pulito.
+6. Durante la 4.2 non si aggiungono capacità a Guard/NodeTrace: solo fix di
+   sicurezza, compatibilità, CI e release. Le nuove capacità endpoint vanno
+   direttamente nell'agente unico 4.3.
 
 ## Fase 0 — debito di release (prima di 4.2)
 
@@ -99,7 +126,63 @@ davvero Aegis da un EDR/SIEM generico:
 e una regola candidata; la cancellazione del sample è verificata da un test e
 l’oggetto non è più recuperabile.
 
-## Fase 3 — 4.3: response intelligence
+## Fase 3 — 4.3.0: agente unico Go
+
+**Tema:** un solo agente endpoint al posto di Guard (Java) e NodeTrace
+(Python), con un solo enrollment, un solo updater, un solo contratto eventi e
+un solo servizio da installare.
+
+Il codice attuale è circa 6.800 righe Java in Guard e 3.800 righe Python in
+NodeTrace, più test, installer Windows/Linux, servizio NSSM/systemd, ETW,
+FIM, YARA, eBPF/auditd, OTA e identità device. Non è un “port” meccanico: è un
+rewrite con parità funzionale e migrazione degli host già installati.
+
+**Perimetro 4.3.0**
+
+- un repository e un binario `aegis-agent`, con profili di build:
+  - `endpoint`: parità Guard (processi, FIM, registry/ETW su Windows, YARA,
+    remediation, OTA) più la telemetria NodeTrace;
+  - `sensor`: telemetria leggera NodeTrace per host dove la remediation non
+    serve;
+  - `router`: build OpenWrt per il lab, senza YARA/FIM/remediation e senza
+    pretesa di supporto produzione;
+- Windows: servizio, ETW, registry, code signing, MSI/installer e rollback;
+- Linux: eBPF/auditd, processi, file, rete, systemd e rollback;
+- macOS resta fuori dalla 4.x: senza EndpointSecurity non è parità, è una
+  promessa non mantenibile;
+- `aegis-link` resta Spring Boot e non entra nel rewrite.
+
+**Migrazione**
+
+- rilevare `AegisGuard` e `AegisNodeTrace`, preservare l'identità/device secret
+  e installare un solo servizio;
+- evitare che vecchio e nuovo agente girino insieme sullo stesso `agent_id`;
+- supportare il rollback ai pacchetti 4.2 per una minor release;
+- provare upgrade da 4.2 a 4.3 su Windows 11/Server e Ubuntu 22.04/24.04
+  puliti, non solo su una macchina di sviluppo.
+
+**Accettazione**
+
+- matrice di parità completa: ogni capacità di Guard e NodeTrace o è nel nuovo
+  agente, o è dichiarata fuori perimetro con motivazione;
+- nessun evento duplicato durante la migrazione;
+- installazione, upgrade, disinstallazione e rollback provati su OS reali;
+- OTA Ed25519 e riavvio del servizio provati;
+- ETW, FIM, YARA e remediation Windows coperti da test;
+- eBPF/auditd e telemetria Linux coperti da test;
+- budget di RAM, CPU e dimensione del binario misurato contro i due agenti
+  attuali e approvato prima del rewrite, non dopo;
+- soak test di almeno 7 giorni su un host di lab;
+- profilo router costruito e avviato su OpenWrt di lab, dichiarato non
+  supportato in produzione.
+
+**Stima:** la stima precedente della 4.3 (48 giornate) non copre questo rewrite. La stima va
+rifatta prima di aprire la release; non è una feature da due settimane e non
+si promette una data.
+
+## Fase 4 — 4.4.0: response intelligence
+
+Solo dopo la parità dell'agente unico. Le capacità restano quelle già decise:
 
 - policy DNS e firewall con TTL, dry-run, approvazione e rollback;
 - playbook nominati con approvazione a due livelli per azioni distruttive;
@@ -110,7 +193,7 @@ l’oggetto non è più recuperabile.
 **Uscita:** una catena completa scanner → brute force → login esca → comandi →
 download → canary → blocco IP + incidente + report, con rollback provato.
 
-## Fase 4 — 5.0: solo soglie misurate
+## Fase 5 — 5.0: solo soglie misurate
 
 Non è una release automatica. Si apre solo se un pilot reale mostra il bisogno:
 
@@ -131,6 +214,8 @@ Se le soglie non sono raggiunte, la 5.0 non si fa: si continua a migliorare la
 - pipeline: p95 ingestione, lag outbox, eventi persi/duplicati, error rate;
 - Kraken: tempo di detonazione, sample eliminati/verificati, alert per
   sessione, falsi positivi da scanner;
+- endpoint: RSS/CPU per profilo, dimensione del binario, tempo di
+  installazione/upgrade, eventi duplicati e parità funzionale;
 - risposta: tempo di contenimento, rollback riusciti, azioni senza TTL;
 - release: tempo dal tag al download verificato, asset mancanti, firma.
 
@@ -146,6 +231,14 @@ Se le soglie non sono raggiunte, la 5.0 non si fa: si continua a migliorare la
    opzionali.
 5. **Firma assente:** fino a cosign, la release è integra rispetto al download,
    non autentica rispetto al publisher. Va detto, non nascosto.
+6. **Rewrite senza parità:** un agente Go che perde ETW, FIM, YARA o
+   remediation non è un miglioramento; la matrice di parità è un gate.
+7. **Doppio agente in migrazione:** due servizi sullo stesso host possono
+   duplicare eventi e confondere la revoca; la migrazione va provata prima
+   del pilot.
+8. **CGO e sicurezza:** YARA e parte delle API native possono reintrodurre
+   codice C; vanno isolati, scansionati e testati, non considerati “Go quindi
+   sicuro”.
 
 ## Primi 10 giorni di lavoro
 
@@ -155,3 +248,7 @@ Se le soglie non sono raggiunte, la 5.0 non si fa: si continua a migliorare la
 3. Implementare 4.2.1 e la metrica `outbox_lag_seconds`.
 4. Aprire la PR della timeline 4.2.3 con il benchmark 10k eventi.
 5. Solo dopo: iniziare le regole Sigma 4.2.2.
+6. Congelare le nuove feature su Guard/NodeTrace; aprire solo fix di sicurezza,
+   compatibilità, CI e release.
+7. Scrivere la matrice di parità e l'ADR dell'agente unico, senza codice di
+   prodotto: serve a stimare la 4.3, non a iniziarla dentro la 4.2.
