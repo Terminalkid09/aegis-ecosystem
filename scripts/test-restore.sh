@@ -55,7 +55,7 @@ DB_PORT="$DB_PORT" \
 DB_USER="$DB_USER" \
 PGPASSWORD="$PGPASSWORD" \
 BACKUP_PASSPHRASE="${BACKUP_PASSPHRASE:-}" \
-  "$ROOT_DIR/scripts/backup-db.sh"
+  bash "$ROOT_DIR/scripts/backup-db.sh"
 
 BACKUP_FILE="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'aegis_db_*.sql.gz*' | sort | tail -1)"
 if [ -z "$BACKUP_FILE" ] || [ ! -f "$BACKUP_FILE" ]; then
@@ -71,7 +71,7 @@ DB_PORT="$DB_PORT" \
 DB_USER="$DB_USER" \
 PGPASSWORD="$PGPASSWORD" \
 BACKUP_PASSPHRASE="${BACKUP_PASSPHRASE:-}" \
-  "$ROOT_DIR/scripts/restore-db.sh" "$BACKUP_FILE" "$TARGET_DB"
+  bash "$ROOT_DIR/scripts/restore-db.sh" "$BACKUP_FILE" "$TARGET_DB"
 
 VALUE="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$TARGET_DB" \
   -v ON_ERROR_STOP=1 -tAc "SELECT value FROM restore_probe WHERE id = 1")"
