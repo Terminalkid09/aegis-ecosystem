@@ -1,5 +1,9 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Shell scripts: LF obbligatorio anche su Windows. Bash su Linux tratta
+# `pipefail\r` come opzione invalida e il restore check fallisce.
+*.sh text eol=lf
+
 # Corpus detection: manifest sha256 calcolati su LF; checkout sempre LF
 # altrimenti ogni verifica hash fallisce su Windows (CRLF).
 aegis-brain/tests/corpus/** text eol=lf

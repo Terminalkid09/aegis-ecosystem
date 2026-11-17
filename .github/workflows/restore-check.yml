@@ -30,16 +30,18 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Install PostgreSQL client and GnuPG
+      # ubuntu-latest now ships pg_dump 18, which emits `SET transaction_timeout`;
+      # PostgreSQL 16 rejects that. Run the test with the same pinned major as
+      # the service so a version skew cannot mask (or break) the round-trip.
+      - name: Backup and restore a probe database (PostgreSQL 16 client)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client gpg
-
-      - name: Backup and restore a probe database
-        env:
-          DB_HOST: 127.0.0.1
-          DB_PORT: 5432
-          DB_USER: postgres
-          PGPASSWORD: password
-          BACKUP_PASSPHRASE: ci_restore_passphrase
-        run: bash scripts/test-restore.sh
+          docker run --rm --network host \
+            -v "$GITHUB_WORKSPACE:/repo" \
+            -w /repo \
+            -e DB_HOST=127.0.0.1 \
+            -e DB_PORT=5432 \
+            -e DB_USER=postgres \
+            -e PGPASSWORD=password \
+            -e BACKUP_PASSPHRASE=ci_restore_passphrase \
+            postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 \
+            sh -c 'apk add --no-cache bash gnupg >/dev/null && bash scripts/test-restore.sh'
