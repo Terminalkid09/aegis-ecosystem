@@ -45,6 +45,7 @@ jre_temp/
 *.ear
 *.exe
 *.spec
+!NodeTrace/agents/python/nodetrace-agent.spec
 
 # PyInstaller intermediate files
 **/__pycache__/

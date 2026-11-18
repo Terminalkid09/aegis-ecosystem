@@ -12,9 +12,15 @@ the tag audit and the release policy.
 > after the batch tags: the full Kraken vertical ships with the hardening
 > fixes, and expansion moves to 4.2+.
 
-## [Unreleased]
+## [4.2.1] - 2026-11-18
 
-### 4.2.0 — Kraken expansion and unified SOC (candidate, not tagged)
+The `v4.2.0` tag was created but produced no GitHub Release: its release
+workflow stopped in the NodeTrace Windows package because
+`nodetrace-agent.spec` was ignored and absent from the tag. `v4.2.1` tracks the
+spec, runs that package job on pull requests, and is the first complete 4.2
+release.
+
+### Kraken expansion and unified SOC
 
 - Kraken outbox batches 500 deliveries, retries only rejected events, isolates
   poison events and exposes lag metrics; lab context remains `shadow` end to
@@ -57,6 +63,9 @@ the tag audit and the release policy.
 
 ### Release engineering
 
+- The NodeTrace Windows package is built and uploaded on pull requests as well
+  as tags, so the release-only path is tested before an immutable tag. The
+  PyInstaller spec is tracked in the repository instead of being ignored.
 - The release bundle uses `env.example`, the portable name GitHub does not
   rewrite, and the installers accept either `env.example` or `.env.example`.
 - The tag workflow builds the Windows NodeTrace package and includes it in the

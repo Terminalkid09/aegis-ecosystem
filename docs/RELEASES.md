@@ -172,7 +172,7 @@ Measured on commit `4ac83b5` before the release merge:
 
 ## 4.2 release candidate verification (2026-11-18)
 
-Status: PR #13 (`release/4.2.0` → `main`) is open, mergeable and CLEAN; no `v4.2.0` tag exists. Hosted CI run `44342912879` on code candidate `00eb030` succeeded on every required job, including `Compose E2E Gate`: the ephemeral Compose stack was healthy, bootstrap admin and the deterministic Kraken seed passed, authenticated API smoke passed, and Playwright passed **13/13** in 18.1 s. A documentation-only follow-up (`12fec17`) also passed run `44346081464` with Playwright **13/13**. Local verification on 2026-11-18: Brain **853 passed, 3 skipped** against a disposable PostgreSQL test database, Kraken **150 passed**, Playwright **13/13**, `api_smoke.py` **ALL PASS** (21 checks), frontend lint **0 errors / 26 warnings**, `npm audit --omit=dev` **0 vulnerabilities**, build **OK**, root and Kraken Compose stack **OK**, **aegis-kraken-sensors healthy**. Merge, tag and release still require explicit approval.
+Status: PR #13 was merged into `main` at `5c89d41`. The `v4.2.0` tag was created there, but its tag workflow (`44351348039`) failed before publishing: `nodetrace-agent.spec` was ignored by `*.spec` and absent from the tag, so the Windows package job could not build. **No GitHub Release exists for `v4.2.0`.** `v4.2.1` tracks the spec, runs the NodeTrace Windows package job on pull requests, and is the first complete 4.2 release. The 4.2.0 code passed hosted run `44342912879`, including `Compose E2E Gate` (Playwright **13/13**), and the merge commit passed main run `44349513947`. Local verification on 2026-11-18: Brain **853 passed, 3 skipped** against a disposable PostgreSQL test database, Kraken **150 passed**, Playwright **13/13**, `api_smoke.py` **ALL PASS** (21 checks), frontend lint **0 errors / 26 warnings**, `npm audit --omit=dev` **0 vulnerabilities**, build **OK**, root and Kraken Compose stack **OK**, **aegis-kraken-sensors healthy**. The v4.2.1 tag and release are the remaining gate.
 
 **Load gate — met locally; hosted CI does not measure throughput.** On the default **2-worker**
 stack, `/telemetry/report` with unique, committed events reached **289.35 rps
@@ -215,9 +215,10 @@ superseded; `synchronous_commit` remains `on`. Hosted CI/E2E passed on
 - The `aegis-kraken-sensors` container now has a localhost-only HTTP health
   listener on port 8000. It reports `healthy` without probing a honeypot port,
   so the healthcheck cannot create fake attacks or SIEM events.
-- Implemented in the working tree: the E2E/`api_smoke` CI job, five operational
-  runbooks and build provenance. The tag workflow now contains the gate, but the
-  hosted job has not run from this workspace; do not tag 4.2 until it is green.
+- Hosted CI run `44342912879` and the Compose E2E gate passed on the 4.2 code;
+  PR #13 merged at `5c89d41`. The first `v4.2.0` tag stopped in the NodeTrace
+  Windows package because `nodetrace-agent.spec` was ignored; `v4.2.1` tracks
+  the spec and runs that package job on pull requests.
 - Added after the pipeline work: timeline, deception rules/correlation,
   campaigns/fleet/topology/Lab UI, SMB/RDP sensors, ATT&CK coverage, governed
   suppressions, mTLS fingerprint enforcement and asynchronous static file
@@ -225,13 +226,13 @@ superseded; `synchronous_commit` remains `on`. Hosted CI/E2E passed on
 
 ## Current version fields
 
-These are the release version fields for the `v4.2.0` candidate.
+These are the release version fields for the `v4.2.1` release.
 
 | Component | File | Current |
 |---|---|---|
-| Brain API | `aegis-brain/app/core/config.py` | `4.2.0` |
-| Frontend | `frontend/package.json` | `4.2.0` |
-| Guard | `aegis-guard/pom.xml` | `4.2.0` |
-| NodeTrace | `NodeTrace/agents/python/agent.py` | `4.2.0` |
-| OCSF agent metadata | `aegis-brain/app/services/ocsf.py` | `4.2.0` |
-| Artifact packer | `scripts/pack-artifacts.py` | `v4.2.0` |
+| Brain API | `aegis-brain/app/core/config.py` | `4.2.1` |
+| Frontend | `frontend/package.json` | `4.2.1` |
+| Guard | `aegis-guard/pom.xml` | `4.2.1` |
+| NodeTrace | `NodeTrace/agents/python/agent.py` | `4.2.1` |
+| OCSF agent metadata | `aegis-brain/app/services/ocsf.py` | `4.2.1` |
+| Artifact packer | `scripts/pack-artifacts.py` | `v4.2.1` |
