@@ -23,7 +23,7 @@ Un artefatto incompleto e' peggio di uno assente: se manca il runtime lo script
 fallisce; se manca un pezzo opzionale lo DICHIARA (nessun silenzio).
 
 Uso:
-  python scripts/pack-artifacts.py [--out DIR] [--version v4.1.0]
+  python scripts/pack-artifacts.py [--out DIR] [--version v4.2.0]
 """
 import argparse
 import os
@@ -149,7 +149,7 @@ def main():
     ap = argparse.ArgumentParser(description="Pack agent deploy artifacts")
     ap.add_argument("--out", default=DEFAULT_OUT,
                     help=f"cartella servita dal brain (default: {DEFAULT_OUT})")
-    ap.add_argument("--version", default="v4.1.0", help="versione nell'artefatto (default: v4.1.0)")
+    ap.add_argument("--version", default="v4.2.0", help="versione nell'artefatto (default: v4.2.0)")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)

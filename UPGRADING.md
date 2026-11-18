@@ -1,7 +1,7 @@
-# Upgrading to Aegis Ecosystem 4.1.0
+# Upgrading to Aegis Ecosystem 4.2.0 (candidate)
 
-This is the upgrade guide for the **4.1.0 hardening minor**, the first
-complete release after the batch tags.
+This is the upgrade guide for the **4.2.0 expansion minor**. The version is a
+candidate in the working tree until the release PR and tag are approved.
 
 ## Before upgrading
 
@@ -27,6 +27,11 @@ complete release after the batch tags.
 - OTA requires an Ed25519-signed manifest. The legacy HMAC fallback is gone.
 - Re-enrollment of an existing host requires a token issued for that hostname;
   the static enrollment key only creates new agents.
+- Brain now defaults to two uvicorn workers. Keep `RATE_LIMIT_STORAGE_URI`
+  shared (Redis) when scaling workers; in-memory limits would be per worker.
+- The legacy `X-Client-Cert` header is rejected. Guard and NodeTrace send the
+  device certificate fingerprint in `X-Client-Cert-Hash`; a proxy that still
+  forwards the full certificate must be updated.
 
 ### Kraken (separate service, now in `services/kraken`)
 
@@ -43,13 +48,19 @@ complete release after the batch tags.
   checksum and a tested restore.
 - Existing plaintext credential attempts must be removed by the migration;
   only HMAC values remain.
+- Set `SENSOR_CONFIG_SIGNING_KEY` to enable signed sensor configuration. SMB
+  and RDP listeners are opt-in through their compose ports; they never relay
+  authentication.
+- File analysis is asynchronous and static-only. Set `FILE_ANALYSIS_ENABLED`
+  and a persistent `FILE_ANALYSIS_STORAGE_DIR`; samples never enter the Brain
+  and deletion is verified. Object storage/S3 is not part of this candidate.
 
 ## Upgrade
 
 ```bash
 git fetch --tags
-git checkout v4.1.0
-cp .env.example .env                 # merge, do not overwrite secrets
+git checkout <v4.2.0 tag>
+cp env.example .env 2>/dev/null || cp .env.example .env  # merge, do not overwrite secrets
 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 docker compose ps
@@ -80,8 +91,12 @@ and the SBOM. Verify before installing:
 
 ```bash
 sha256sum -c SHA256SUMS.txt
-python scripts/release-smoke.py release
+python scripts/release-smoke.py release --require-nodetrace --require-image-sboms
 ```
+
+Starting with the 4.2 release pipeline, the bundle ships `env.example` rather
+than `.env.example`: GitHub rewrites asset names that begin with a dot. The
+installers accept either name; the smoke test requires `env.example`.
 
 The release job attaches the checksummed bundle. Cosign signing is a separate
 step: verify `SHA256SUMS.txt.sig` when it is present, and do not describe a

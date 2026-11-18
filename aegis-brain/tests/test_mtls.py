@@ -274,3 +274,8 @@ def test_enterprise_strict_guard(monkeypatch):
         raise AssertionError("prod senza mTLS deve rifiutare l'avvio")
     except RuntimeError as e:
         assert "MTLS_MODE" in str(e)
+
+
+def test_legacy_full_cert_header_is_recognised_and_can_be_rejected():
+    assert mtls.legacy_header_present({"x-client-cert": "anything"}) is True
+    assert mtls.legacy_header_present({"x-client-cert-hash": "0" * 64}) is False

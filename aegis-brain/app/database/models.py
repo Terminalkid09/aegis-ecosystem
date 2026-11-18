@@ -566,6 +566,33 @@ class SiemEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class DeceptionSession(Base):
+    """Stato aggregato di una sessione deception ricevuta da Kraken.
+
+    Il Brain non legge il DB Kraken: questa tabella è la sua copia dei metadati
+    necessari alla timeline e alla correlazione multi-sensore. Non contiene
+    credenziali, sample o comandi eseguibili.
+    """
+    __tablename__ = "deception_sessions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    sensor: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    context: Mapped[str] = mapped_column(String(16), default="sensor", nullable=False, index=True)
+    src_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    event_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    run_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    scenario_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    topology_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    incident_id: Mapped[Optional[int]] = mapped_column(ForeignKey("incidents.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class LogSource(Base):
     """Sorgente di log configurata: nome, parser e statistiche di ingestione."""
     __tablename__ = "log_sources"
@@ -580,3 +607,22 @@ class LogSource(Base):
     last_event_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Suppression(Base):
+    """Governed rule suppression: mandatory TTL, reason and audit fields.
+
+    A suppression is deliberately narrower than disabling a rule: the rule
+    keeps running, the count of hidden alerts is visible, and the row expires.
+    """
+    __tablename__ = "suppressions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rule_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    scope: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    suppressed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_suppressed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

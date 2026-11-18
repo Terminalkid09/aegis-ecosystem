@@ -268,6 +268,26 @@ export const siemAPI = {
   getEventStats: (hours = 24) => apiClient.get('/search/stats', { params: { hours } }),
 }
 
+// ─── Detection coverage and governed suppressions ───────────────────────────
+export const detectionsAPI = {
+  coverage: (platform?: string) =>
+    apiClient.get('/detections/coverage', { params: platform ? { platform } : {} }),
+}
+
+export const suppressionsAPI = {
+  list: (includeExpired = false) =>
+    apiClient.get('/suppressions', { params: { include_expired: includeExpired } }),
+  create: (payload: { rule_id: string; reason: string; expires_at: string; scope: Record<string, unknown> }) =>
+    apiClient.post('/suppressions', payload),
+  revoke: (id: number) => apiClient.delete(`/suppressions/${id}`),
+}
+
+// ─── Unified SOC timeline ────────────────────────────────────────────────────
+export const timelineAPI = {
+  query: (params: { hours?: number; limit?: number; sources?: string } = {}) =>
+    apiClient.get('/timeline', { params }),
+}
+
 // ─── Kraken (separate service; read-only view + delegated SSO) ──────────────
 export const deceptionAPI = {
   overview: (hours = 24) => apiClient.get('/deception/overview', { params: { hours } }),

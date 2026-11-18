@@ -13,8 +13,15 @@ if [[ "$MODE" == "pilot" && "$OBS" == "--observability" ]]; then
   echo "        Le metriche pilot si raccolgono via scripts/benchmark.py e /metrics (solo brain)."; exit 2
 fi
 if [[ ! -f .env ]]; then
-  echo "[INFO] .env mancante -> copio .env.example"
-  cp .env.example .env
+  if [[ -f .env.example ]]; then
+    TEMPLATE=".env.example"
+  elif [[ -f env.example ]]; then
+    TEMPLATE="env.example"
+  else
+    echo "[ERROR] .env.example/env.example assente: bundle incompleto."; exit 1
+  fi
+  echo "[INFO] .env mancante -> copio $TEMPLATE"
+  cp "$TEMPLATE" .env
   echo "[WARN] Modifica .env con segreti reali prima del pilot."
 fi
 # Verifica segreti non placeholder in pilot

@@ -10,12 +10,13 @@ from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 from app.core.logging import get_logger, set_request_id, get_request_id
 from app.core.rate_limit import limiter
-from app.database.connection import init_db
+from app.database.connection import init_db, engine
 from app.api.v1.router import api_router
 from app.core.health import readiness_check, startup_check, liveness_check
 from app.core.circuit_breaker import get_breaker_status
 from app.core.metrics import inc, observe_hist, render_prometheus, fmt_labels, normalize_path_label
 from fastapi import Response as FastAPIResponse
+from sqlalchemy import text
 
 from app.services.redis_consumer import RedisConsumer
 from app.services.alert_enrichment import auto_enrich_new_alerts
@@ -47,35 +48,62 @@ def enforce_enterprise_strict() -> None:
                 "disable ENTERPRISE_STRICT for lab/dev")
 
 
-async def lifespan(app: FastAPI):
-    global _consumer
-    logger.info("Starting up Aegis-Brain...")
-    enforce_enterprise_strict()
+async def _apply_migrations() -> None:
+    """Apply Alembic once per database, even with two uvicorn workers.
+
+    Brain runs two workers and each executes lifespan. Without a cross-process
+    lock both run `upgrade head` against the same revision and one dies on a
+    duplicate `pg_class` entry. The advisory lock is session-scoped and is held
+    while the Alembic subprocess runs; a crashed process releases it in
+    PostgreSQL automatically.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    project_dir = str(Path(__file__).resolve().parent.parent)
+    lock_conn = None
     try:
-        # Run Alembic migrations asynchronously.
-        # `cwd` è la cartella che contiene alembic.ini (in container: /app), non
-        # un path assoluto hardcoded: senza questo il brain non parte fuori dal
-        # container, e un'immagine con workdir diverso rompe all'avvio.
-        import subprocess
-        import sys
-        from pathlib import Path
-        project_dir = str(Path(__file__).resolve().parent.parent)
+        if engine.dialect.name == "postgresql":
+            lock_conn = await engine.connect()
+            await lock_conn.execute(
+                text("SELECT pg_advisory_lock(:key)"),
+                {"key": 0x41454749534D},
+            )
+            await lock_conn.commit()
         try:
             result = await asyncio.to_thread(
                 subprocess.run, ["alembic", "upgrade", "head"],
-                capture_output=True, text=True, cwd=project_dir
+                capture_output=True, text=True, cwd=project_dir, timeout=600,
             )
         except FileNotFoundError:
             # CLI `alembic` non nel PATH (venv minimale): stessa migrazione via modulo.
             result = await asyncio.to_thread(
                 subprocess.run, [sys.executable, "-m", "alembic", "upgrade", "head"],
-                capture_output=True, text=True, cwd=project_dir
+                capture_output=True, text=True, cwd=project_dir, timeout=600,
             )
         if result.returncode != 0:
             logger.error(f"Alembic migration failed: {result.stderr or result.stdout}")
             raise RuntimeError("Database migration failed; refusing to start with an incomplete schema")
         logger.info("Alembic migrations applied successfully")
-        
+    finally:
+        if lock_conn is not None:
+            try:
+                await lock_conn.execute(
+                    text("SELECT pg_advisory_unlock(:key)"),
+                    {"key": 0x41454749534D},
+                )
+                await lock_conn.commit()
+            finally:
+                await lock_conn.close()
+
+
+async def lifespan(app: FastAPI):
+    global _consumer
+    logger.info("Starting up Aegis-Brain...")
+    enforce_enterprise_strict()
+    try:
+        await _apply_migrations()
         await init_db()
         # Riconciliazione revoche (Fase 4): DB autorevole → file cache
         try:
@@ -386,6 +414,20 @@ def _origin_allowed(origin: str) -> bool:
     except Exception:
         pass
     return False
+
+
+@app.middleware("http")
+async def reject_legacy_client_cert_middleware(request: Request, call_next):
+    # AEGIS-SEC-009 / 4.2.9: the full certificate in a header is portable and
+    # is not proof that the caller owns the private key. Only the proxy-bound
+    # fingerprint header is accepted; a direct legacy header is a 401.
+    from app.services.mtls import legacy_header_present
+    if getattr(settings, "MTLS_REJECT_LEGACY_HEADER", True) and legacy_header_present(request.headers):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "X-Client-Cert is not accepted; terminate mTLS at the trusted proxy"},
+        )
+    return await call_next(request)
 
 
 @app.middleware("http")

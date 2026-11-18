@@ -139,6 +139,7 @@
 
 | Module | Description |
 |--------|-------------|
+| **Unified SOC (4.2)** | Five-source timeline, ATT&CK coverage, governed TTL suppressions, Kraken campaigns/fleet/topology/Lab UI, SMB/RDP deception sensors and asynchronous static file analysis |
 | **Realtime overview** | `/api/v1/ws/overview` pushes counters every 30s; agents push telemetry over HTTPS with an encrypted local spool and bounded retry |
 | **Audit log** | Every API action (login, resolve, rule change, deploy) recorded with user, IP and details; non-blocking by design; dashboard viewer |
 | **Bulk triage** | Resolve-all / delete-all with confirmation dialog, audit-logged |
@@ -212,7 +213,7 @@ Equivalent installers: `./install.sh lab|pilot [--observability]` and `.\install
 ### Quality gates
 
 ```bash
-# Brain tests (823 passed, 3 YARA skips, DB-backed)
+# Brain tests (853 passed, 3 YARA skips, DB-backed)
 python scripts/run_integration_tests.py --import-mode=importlib
 
 # Guard tests (140 JUnit)
@@ -232,7 +233,9 @@ python scripts/live_battery.py
 python scripts/hard_battery.py
 ```
 
-Verification layers: 823 Brain pytest, 130 Kraken pytest, 140 Guard JUnit, 17 Link JUnit, 12 Playwright e2e and 2 live detection batteries. CI gates pytest, Guard/Link, NodeTrace, frontend lint/build, pip-audit, Trivy and SBOM; Playwright and the live batteries are manual in 4.1. The Playwright CI runner is planned for 4.2.
+Verification layers include Brain pytest, Kraken pytest, Guard/Link JUnit, NodeTrace unit tests, Playwright e2e and live detection batteries. CI gates pytest, Guard/Link, NodeTrace, frontend lint/build, pip-audit, Trivy and SBOM. The 4.2 workflow adds an ephemeral Compose E2E job for Playwright and `api_smoke.py`; hosted execution still needs to be verified before tagging.
+
+The 4.2 load gate is **met locally on the default 2-worker stack**: **289.35 events/s through Caddy/TLS**, 1.500/1.500 `200`, p95 **159.9 ms**; **247.76 events/s direct**, 3.000/3.000 `200`, 3.008 DB rows, p95 194.4 ms. A 20-agent cold proof burst reaches **341.16 rps** (p95 52.3 ms), 100 warm events reach **301.16 rps** (p95 91.5 ms), and legacy agents drop from 79.4 ms to 38.7 ms after the proof backfill. Hosted CI/E2E remains the gate before tagging.
 
 ---
 
@@ -328,7 +331,7 @@ One preparative step is yours — **publish the artifacts the brain serves** (th
 
 ```bash
 python scripts/pack-artifacts.py            # -> aegis-brain/artifacts/*-latest.{zip,tar.gz}
-python scripts/pack-artifacts.py --version v4.1.0
+python scripts/pack-artifacts.py --version v4.2.0
 ```
 
 It packs exactly what a local install copies: `aegis-guard.jar`, a bundled `jre/` when `build.bat` produced one, `aegis-etw.exe` (kernel telemetry) and `bin/yara64.exe` for Guard; the full PyInstaller bundle for NodeTrace. Missing runtime = hard failure; missing optional piece = declared in the output (`python -m ...`-style honesty, no silent gaps). What the target needs: **Administrator** (service registration + ETW trace session), and a **Java 25+** runtime — either bundled in the artifact or installed there (`Get-JavaMajor` verifies the version, because a Java 8 on `PATH` installs a service that starts and dies with `UnsupportedClassVersionError`).
@@ -571,7 +574,7 @@ aegis-ecosystem/
 
 ### CI/CD
 
-GitHub Actions runs on every push: lint (flake8 + oxlint), secret scanning, event-contract checks, Windows installer checks, OS-compat matrix (ubuntu + windows), brain + guard + link tests, frontend lint/build, pip-audit, Trivy image scanning (strict on images we build, informational on upstream images), and SBOM generation. Playwright and the live detection batteries are manual in 4.1; the Playwright CI job is planned for 4.2. Release jobs run on tags.
+GitHub Actions runs on every push: lint (flake8 + oxlint), secret scanning, event-contract checks, Windows installer checks, OS-compat matrix (ubuntu + windows), brain + guard + link tests, frontend lint/build, pip-audit, Trivy image scanning (strict on images we build, informational on upstream images), and SBOM generation. The 4.2 workflow includes an ephemeral Compose E2E job; its first hosted run is still pending. Release jobs run on tags.
 
 ---
 

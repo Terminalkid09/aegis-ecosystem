@@ -158,6 +158,106 @@ async def test_outbox_success_marks_sent(db_session, test_session_factory):
 
 
 @pytest.mark.asyncio
+async def test_outbox_batches_500_events_in_one_request(db_session, test_session_factory):
+    now = datetime.now(UTC)
+    rows = []
+    for index in range(2):
+        session_id = f"batch-{uuid.uuid4().hex[:12]}-{index}"
+        row = _due_row(session_id, now=now)
+        row.event_id = f"kraken:ssh:{session_id}:0"
+        row.payload = {"events": [{"event_id": row.event_id}]}
+        db_session.add(row)
+        rows.append(row)
+    await db_session.commit()
+
+    calls = []
+
+    async def sender(payload):
+        calls.append(payload)
+        return DeliveryResult(True, False, status_code=200)
+
+    summary = await process_outbox_once(
+        test_session_factory, sender, now=now, batch_size=500
+    )
+
+    assert summary["batches"] == 1
+    assert summary["events"] == 2
+    assert summary["sent"] == 2
+    assert len(calls) == 1
+    assert len(calls[0]["events"]) == 2
+    for row in rows:
+        await db_session.refresh(row)
+        assert row.status == "sent"
+
+
+@pytest.mark.asyncio
+async def test_poison_batch_is_split_without_losing_valid_events(
+    db_session, test_session_factory
+):
+    now = datetime.now(UTC)
+    rows = []
+    for index in range(2):
+        session_id = f"poison-batch-{uuid.uuid4().hex[:12]}-{index}"
+        row = _due_row(session_id, now=now)
+        row.event_id = f"kraken:ssh:{session_id}:0"
+        row.payload = {"events": [{"event_id": row.event_id}]}
+        db_session.add(row)
+        rows.append(row)
+    await db_session.commit()
+
+    calls = []
+
+    async def sender(payload):
+        calls.append(payload)
+        if len(payload["events"]) > 1:
+            return DeliveryResult(False, False, status_code=422, error="one bad event")
+        return DeliveryResult(True, False, status_code=200)
+
+    summary = await process_outbox_once(
+        test_session_factory, sender, now=now, batch_size=500
+    )
+
+    assert summary["batches"] == 1
+    assert summary["sent"] == 2
+    assert summary["failed"] == 0
+    assert len(calls) == 3  # one rejected batch + one valid retry per event
+    for row in rows:
+        await db_session.refresh(row)
+        assert row.status == "sent"
+
+
+@pytest.mark.asyncio
+async def test_poison_event_fails_alone_when_retry_rejects_it(db_session, test_session_factory):
+    now = datetime.now(UTC)
+    good = _due_row(f"good-{uuid.uuid4().hex[:12]}", now=now)
+    bad = _due_row(f"bad-{uuid.uuid4().hex[:12]}", now=now)
+    for row in (good, bad):
+        row.payload = {"events": [{"event_id": row.event_id}]}
+        db_session.add(row)
+    await db_session.commit()
+
+    async def sender(payload):
+        if len(payload["events"]) > 1:
+            return DeliveryResult(False, False, status_code=422, error="bad event")
+        event_id = payload["events"][0]["event_id"]
+        if event_id == bad.event_id:
+            return DeliveryResult(False, False, status_code=422, error="poison")
+        return DeliveryResult(True, False, status_code=200)
+
+    summary = await process_outbox_once(
+        test_session_factory, sender, now=now, batch_size=500
+    )
+
+    assert summary["sent"] == 1
+    assert summary["failed"] == 1
+    await db_session.refresh(good)
+    await db_session.refresh(bad)
+    assert good.status == "sent"
+    assert bad.status == "failed"
+    assert "poison" in (bad.last_error or "")
+
+
+@pytest.mark.asyncio
 async def test_outbox_recovers_stale_processing_row(db_session, test_session_factory):
     now = datetime.now(UTC)
     session_id = f"stale-{uuid.uuid4().hex[:12]}"

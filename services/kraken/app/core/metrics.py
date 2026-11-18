@@ -85,6 +85,12 @@ outbox_pending = Gauge(
     registry=registry
 )
 
+outbox_lag_seconds = Gauge(
+    "kraken_outbox_lag_seconds",
+    "Age in seconds of the oldest event waiting for delivery to Aegis",
+    registry=registry
+)
+
 outbox_sent_total = Counter(
     "kraken_outbox_sent_total",
     "Events delivered to Aegis",
@@ -102,6 +108,13 @@ outbox_attempts_total = Counter(
     "kraken_outbox_attempts_total",
     "Delivery attempts by outcome",
     ["outcome"],
+    registry=registry
+)
+
+sensor_connections_total = Counter(
+    "kraken_sensor_connections_total",
+    "Inbound connections accepted by each deception sensor",
+    ["sensor"],
     registry=registry
 )
 
@@ -147,6 +160,9 @@ def record_export(format_type: str, success: bool):
 def set_outbox_pending(count: int):
     outbox_pending.set(count)
 
+def set_outbox_lag(seconds: float):
+    outbox_lag_seconds.set(max(0.0, float(seconds)))
+
 def record_outbox_sent():
     outbox_sent_total.inc()
 
@@ -155,6 +171,9 @@ def record_outbox_failed(reason: str):
 
 def record_outbox_attempt(outcome: str):
     outbox_attempts_total.labels(outcome=outcome).inc()
+
+def record_sensor_connection(sensor: str):
+    sensor_connections_total.labels(sensor=sensor).inc()
 
 async def metrics_endpoint():
     return Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)

@@ -71,11 +71,17 @@ class TestSensorTypeValidation:
         assert p.sensor_type == "ssh"
 
     def test_accepts_all_valid_sensors(self):
-        for sensor in ["ssh", "http", "ftp", "telnet", "smtp", "rdp"]:
+        for sensor in ["ssh", "http", "ftp", "telnet", "smtp", "rdp", "smb"]:
             p = SensorEventIn(sensor_type=sensor, attacker_ip="1.2.3.4",
                               attacker_port=22, sensor_port=2222,
                               session_id=f"test-valid-{sensor}")
             assert p.sensor_type == sensor
+
+    def test_rejects_unknown_context(self):
+        with pytest.raises(ValidationError):
+            SensorEventIn(sensor_type="ssh", attacker_ip="1.2.3.4",
+                          attacker_port=22, sensor_port=2222,
+                          session_id="test-context-001", context="production")
 
 
 # ── SensorEventIn — porta ─────────────────────────────────────────────────────

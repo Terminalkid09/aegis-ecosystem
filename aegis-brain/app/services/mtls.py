@@ -111,6 +111,15 @@ def verify_agent_cert(agent_id: str, cert_pem: bytes) -> Tuple[bool, str]:
     return ok, reason
 
 
+def legacy_header_present(headers) -> bool:
+    """True when a request carries the legacy full-certificate header.
+
+    The value may be well-formed and still must be rejected: possession of a
+    certificate is not possession of its private key.
+    """
+    return _raw_header(headers, HEADER) is not None
+
+
 def _header_present(headers) -> bool:
     """True se un header di prova esiste (anche malformato)."""
     return (_raw_header(headers, HEADER) is not None

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Operations — Kraken{% endblock %}
+{% block header %}Campaigns, sensors and Lab{% endblock %}
+{% set active_page = 'operations' %}
+
+{% block content %}
+<div class="flex flex-wrap items-center justify-between gap-3 mb-5">
+    <div class="flex flex-wrap gap-2" id="ops-tabs">
+        <button data-tab="campaigns" class="ops-tab px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 text-white">Campaigns</button>
+        <button data-tab="sensors" class="ops-tab px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-200 dark:bg-slate-700">Sensors</button>
+        <button data-tab="topologies" class="ops-tab px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-200 dark:bg-slate-700">Topologies</button>
+        <button data-tab="lab" class="ops-tab px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-200 dark:bg-slate-700">Lab runs</button>
+        <button data-tab="samples" class="ops-tab px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-200 dark:bg-slate-700">Samples</button>
+        <button data-tab="analysis" class="ops-tab px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-200 dark:bg-slate-700">File analysis</button>
+    </div>
+    <button id="ops-refresh" class="text-sm bg-slate-200 dark:bg-slate-700 px-3 py-1.5 rounded-lg">Refresh</button>
+</div>
+
+<div id="ops-error" class="hidden mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300"></div>
+<div id="ops-key" class="hidden mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+    <strong>Sensor key (shown once):</strong> <code id="ops-key-value" class="break-all"></code>
+</div>
+
+<section data-panel="campaigns">
+    <div class="card mb-4">
+        <h2 class="font-semibold mb-3">New campaign</h2>
+        <form id="campaign-form" class="grid md:grid-cols-3 gap-3">
+            <input name="name" required maxlength="128" placeholder="Campaign name" class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2" />
+            <input name="description" maxlength="4000" placeholder="Description" class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2" />
+            <button class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg px-4 py-2">Create</button>
+        </form>
+    </div>
+    <div class="card p-0 overflow-hidden"><table class="w-full text-sm"><thead class="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase text-slate-400"><tr><th class="px-4 py-3 text-left">Name</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-left">Fingerprint</th><th class="px-4 py-3 text-left">Created</th></tr></thead><tbody id="campaigns-body"></tbody></table></div>
+</section>
+
+<section data-panel="sensors" class="hidden">
+    <div class="card mb-4">
+        <h2 class="font-semibold mb-3">Enrol sensor node</h2>
+        <form id="sensor-form" class="grid md:grid-cols-4 gap-3">
+            <input name="name" required maxlength="128" placeholder="Node name" class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2" />
+            <input name="site" value="default" pattern="[a-z0-9][a-z0-9-]{0,63}" placeholder="Site" class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2" />
+            <input name="smb_port" type="number" value="445" min="1" max="65535" title="SMB sensor port" class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2" />
+            <button class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg px-4 py-2">Enrol</button>
+        </form>
+        <p class="text-xs text-slate-400 mt-2">The key is displayed once. Revocation is immediate and does not affect other nodes.</p>
+    </div>
+    <div class="card p-0 overflow-hidden"><table class="w-full text-sm"><thead class="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase text-slate-400"><tr><th class="px-4 py-3 text-left">Node</th><th class="px-4 py-3 text-left">Site</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-left">Desired / applied</th><th class="px-4 py-3 text-left">Last seen</th><th class="px-4 py-3"></th></tr></thead><tbody id="sensors-body"></tbody></table></div>
+</section>
+
+<section data-panel="topologies" class="hidden">
+    <div class="card mb-4">
+        <h2 class="font-semibold mb-3">New topology</h2>
+        <form id="topology-form" class="grid md:grid-cols-3 gap-3">
+            <input name="name" required maxlength="128" placeholder="Topology name" class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2" />
+            <input name="description" maxlength="4000" placeholder="Description" class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2" />
+            <button class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg px-4 py-2">Create</button>
+        </form>
+    </div>
+    <div class="card p-0 overflow-hidden"><table class="w-full text-sm"><thead class="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase text-slate-400"><tr><th class="px-4 py-3 text-left">Name</th><th class="px-4 py-3 text-left">Description</th><th class="px-4 py-3 text-left">Active</th><th class="px-4 py-3 text-left">Spec</th></tr></thead><tbody id="topologies-body"></tbody></table></div>
+</section>
+
+<section data-panel="lab" class="hidden">
+    <div class="card mb-4">
+        <h2 class="font-semibold mb-3">Start shadow Lab run</h2>
+        <form id="lab-form" class="grid md:grid-cols-3 gap-3">
+            <input name="scenario_id" required maxlength="64" placeholder="Scenario ID" class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2" />
+            <select name="topology_id" class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2"><option value="">No topology</option></select>
+            <button class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg px-4 py-2">Start shadow run</button>
+        </form>
+        <p class="text-xs text-slate-400 mt-2">4.2 records evidence only in shadow mode. No destructive action can be launched from this page.</p>
+    </div>
+    <div class="card p-0 overflow-hidden"><table class="w-full text-sm"><thead class="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase text-slate-400"><tr><th class="px-4 py-3 text-left">Run</th><th class="px-4 py-3 text-left">Scenario</th><th class="px-4 py-3 text-left">Mode</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-left">Started</th></tr></thead><tbody id="lab-body"></tbody></table></div>
+</section>
+
+<section data-panel="samples" class="hidden">
+    <div class="flex flex-wrap gap-3 mb-4">
+        <input id="sample-sha" maxlength="64" placeholder="Filter SHA-256" class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 w-72" />
+        <select id="sample-sensor" class="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2">
+            <option value="">All sensors</option><option>ssh</option><option>http</option><option>ftp</option><option>telnet</option><option>smb</option><option>rdp</option>
+        </select>
+        <button id="sample-filter" class="bg-indigo-600 text-white text-sm rounded-lg px-4 py-2">Filter</button>
+    </div>
+    <div class="card p-0 overflow-hidden"><table class="w-full text-sm"><thead class="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase text-slate-400"><tr><th class="px-4 py-3 text-left">File</th><th class="px-4 py-3 text-left">SHA-256</th><th class="px-4 py-3 text-left">Size</th><th class="px-4 py-3 text-left">Sensor</th><th class="px-4 py-3 text-left">Time</th></tr></thead><tbody id="samples-body"></tbody></table></div>
+</section>
+
+<section data-panel="analysis" class="hidden">
+    <div class="card mb-4">
+        <h2 class="font-semibold mb-3">Static file / ZIP analysis</h2>
+        <form id="analysis-form" class="flex flex-wrap items-center gap-3">
+            <input id="analysis-file" name="file" type="file" required class="text-sm text-slate-300" />
+            <button class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg px-4 py-2">Upload and analyse</button>
+        </form>
+        <p class="text-xs text-slate-400 mt-2">Bounded, asynchronous and static-only: no execution, no network. The sample stays in Kraken's storage; delete removes it and verifies absence.</p>
+    </div>
+    <div class="card p-0 overflow-hidden"><table class="w-full text-sm"><thead class="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase text-slate-400"><tr><th class="px-4 py-3 text-left">File</th><th class="px-4 py-3 text-left">SHA-256</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-left">Result</th><th class="px-4 py-3"></th></tr></thead><tbody id="analysis-body"></tbody></table></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="static/js/operations.js"></script>
+{% endblock %}

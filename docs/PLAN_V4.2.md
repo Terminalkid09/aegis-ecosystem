@@ -50,27 +50,38 @@ e vanno lette come 4.4.x.
 Questa fase non aggiunge capacità al prodotto, ma elimina i tre punti in cui
 la 4.1 ha richiesto un intervento manuale dopo il tag.
 
-- [ ] **Nome asset portabile:** il bundle deve produrre `env.example`, non
+- [x] **Nome asset portabile:** il bundle deve produrre `env.example`, non
       `.env.example`, perché GitHub normalizza i nomi che iniziano con un punto.
       Aggiungere un test che verifichi il nome finale degli asset e aggiornare
       `release-smoke.py` di conseguenza.
-- [ ] **NodeTrace nel job di release:** job Windows che costruisce il pacchetto
+- [x] **NodeTrace nel job di release:** job Windows che costruisce il pacchetto
       PyInstaller e lo carica come artifact; il job `release` lo scarica e lo
       include nel bundle. Niente più upload manuale.
-- [ ] **Firma e provenienza:** cosign keyless con OIDC (`id-token: write`) per
-      `SHA256SUMS.txt`, oppure una decisione scritta che dichiari la release
-      non firmata. Aggiungere anche la provenienza del build.
-- [ ] **SBOM per artifact:** oltre al CycloneDX del repository, generare gli
+- [x] **Firma e provenienza:** release **checksummed, not signed**
+      (`docs/RELEASE_SIGNING.md`); il job di release produce l'attestazione di
+      provenienza GitHub (`attest-build-provenance`). Cosign keyless resta
+      esplicitamente fuori dalla 4.2.
+- [x] **SBOM per artifact:** oltre al CycloneDX del repository, generare gli
       SBOM delle immagini rilasciate e collegarli agli asset.
-- [ ] **Smoke nel tag:** eseguire `release-smoke.py` e `sha256sum -c` nel job
+- [x] **Smoke nel tag:** eseguire `release-smoke.py` e `sha256sum -c` nel job
       di release, non solo in locale.
-- [ ] **E2E nel gate:** portare Playwright pagine + verticale Kraken e
-      `scripts/api_smoke.py` su un runner con Docker; oggi sono gate manuali.
-- [ ] **Runbook:** chiudere i cinque runbook operativi (agente compromesso,
-      Brain compromesso, Kraken compromesso, malware fuori sandbox, backup).
+- [x] **E2E nel gate:** il job `e2e` avvia lo stack Compose effimero,
+      inizializza l'admin, semina un evento Kraken, esegue `api_smoke.py` e
+      Playwright pagine/sessione/verticale Kraken.
+- [x] **Runbook:** cinque runbook operativi in `docs/runbooks/` (agente
+      compromesso, Brain compromesso, Kraken compromesso, malware fuori
+      sandbox, backup e ripristino), collegati da `docs/OPERATIONS.md`.
 
 **Uscita:** un tag di patch successivo viene pubblicato interamente dalla CI,
 senza rinominare o aggiungere asset a mano.
+
+Stato fase 0 al 2026-11-17: **7/7 implementate nel working tree**. Nome
+asset, NodeTrace nel job di release, SBOM per immagine, smoke nel tag,
+provenienza del build, gate E2E Compose e cinque runbook sono presenti. Il job
+`e2e` è definito e Playwright/`api_smoke.py` sono i suoi passi; la release
+resta **checksummed, not signed** per decisione esplicita. L'esecuzione del
+job sulla CI ospitata non è ancora stata verificata da questo workspace:
+non dichiarare chiusa la fase 0 finché quel job non è verde.
 
 ## Fase 1 — 4.2.0: Kraken expansion & Unified SOC
 
@@ -107,6 +118,25 @@ accettazione sono nell'handoff §4.2.0.
 - Lab shadow produce evidenze correlate, senza azioni distruttive.
 - Sei regole con replay e load test 200 rps / 2 worker documentato.
 - Tag `v4.2.0` costruito dalla CI e verificato dal download.
+
+**Stato implementazione 4.2 nel working tree (2026-11-18).** 4.2.1 outbox/lab,
+4.2.2 Sigma/correlazione, 4.2.3 timeline, 4.2.4 UI Kraken estesa, 4.2.5/4.2.6
+coverage e soppressioni, 4.2.7 flotta, 4.2.8 SMB/RDP e 4.2.9 mTLS/multi-worker
+sono implementati. Verifica locale: Brain **853 passed / 3 skipped**, Kraken
+**150 passed**, Playwright **13/13**, `api_smoke.py` **ALL PASS**, frontend
+lint **0 errori / 26 warning**, build e audit runtime **OK**, sensori Kraken
+`healthy`. La fase 2 ha un primo job statico locale (analisi, ZIP, IoC,
+candidato Sigma e cancellazione verificata); object storage S3/MinIO, process
+tree e DNS history restano da completare.
+
+Il load test supera il gate sul default Compose a **2 worker**: **289.35 rps**
+via Caddy/TLS (1.500/1.500 `200`, p95 159.9 ms) e **247.76 rps** diretto
+(3.000/3.000 `200`, 3.008 righe DB). La flotta di 20 agenti con proof fa
+**341.16 rps** al primo burst (p95 52.3 ms) e **301.16 rps** su 100 eventi
+caldi; zero read timeout. Gli agenti legacy pagano 79.4 ms al primo contatto e
+38.7 ms dopo il backfill. La CI ospitata non è stata eseguita da questo
+workspace: il 4.2 è candidato per una PR, non ancora per il tag fino a CI/E2E
+ospitati verdi.
 
 ## Fase 2 — 4.2.x: file intelligence
 

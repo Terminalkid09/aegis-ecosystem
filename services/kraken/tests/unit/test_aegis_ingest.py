@@ -36,6 +36,21 @@ def test_wire_payload_has_no_password():
     assert wire["events"][0]["network"]["src_ip"] == "45.9.20.7"
 
 
+def test_lab_context_is_not_flattened_to_sensor():
+    payload = SensorEventIn(
+        sensor_type="ssh", attacker_ip="45.9.20.7",
+        attacker_port=51244, sensor_port=22, session_id="sess-lab-001",
+        context="lab", run_id="run-4.2", scenario_id="scn-ssh",
+        topology_id="topo-lab",
+    )
+    wire = build_attack_payload(_event(), payload)
+    raw = wire["events"][0]["raw"]
+    assert raw["context"] == "lab"
+    assert raw["run_id"] == "run-4.2"
+    assert raw["scenario_id"] == "scn-ssh"
+    assert raw["topology_id"] == "topo-lab"
+
+
 def test_wire_event_id_is_stable():
     payload = SensorEventIn(
         sensor_type="ssh", attacker_ip="45.9.20.7",

@@ -35,7 +35,18 @@ jobs:
           npm ci
           npm run lint
 
-      - name: Audit Frontend (npm audit, fail on high+)
+      - name: Audit Frontend runtime dependencies (fail on high+)
+        # Tailwind is a build-only toolchain and lives in devDependencies. The
+        # dev tree still reports GHSA-fc5q-39xc-vjpf (picomatch <= 4.0.7) with
+        # no patched release; it cannot be fixed from this repository and is
+        # not shipped in the runtime image. The runtime audit is the blocking
+        # gate; the full audit is visible below without blocking a release.
+        run: |
+          cd frontend
+          npm audit --omit=dev --audit-level=high
+
+      - name: Report Frontend build-tool advisories (non-blocking)
+        continue-on-error: true
         run: |
           cd frontend
           npm audit --audit-level=high
@@ -451,18 +462,54 @@ jobs:
           name: aegis-trivy-image
           path: trivy-image.sarif
 
-  release:
-    name: Release Artifacts
-    needs: [build_and_test, supply_chain]
+  nodetrace_windows:
+    name: NodeTrace Windows Package
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    # Il minimo indispensabile per creare la release e caricare i file: i
-    # GITHUB_TOKEN sono read-only a meno che il job non dichiari cosa gli serve
-    # (least privilege, non "write-all" a livello di workflow).
-    permissions:
-      contents: write
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.15'
+          cache: pip
+
+      - name: Build NodeTrace Windows bundle
+        working-directory: NodeTrace/agents/python
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller==6.22.3
+          python -m PyInstaller --clean --noconfirm nodetrace-agent.spec
+
+      - name: Upload NodeTrace Windows bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nodetrace-windows
+          path: NodeTrace/agents/python/dist/nodetrace-agent
+          if-no-files-found: error
+
+  release:
+    name: Release Artifacts
+    needs: [build_and_test, supply_chain, nodetrace_windows, e2e]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    # Il minimo indispensabile per creare la release, caricare i file e
+    # produrre l'attestazione di provenienza. GITHUB_TOKEN resta read-only
+    # finché il job non dichiara esattamente questi permessi.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Download NodeTrace Windows bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nodetrace-windows
+          path: NodeTrace/agents/python/dist/nodetrace-agent
 
       - name: Setup Java
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
@@ -484,7 +531,6 @@ jobs:
           # perche' in target resta anche original-aegis-guard.jar (intermedio
           # pre-shade, non e' un artefatto da spedire).
           cp aegis-guard/target/aegis-guard.jar release/
-          sha256sum release/* > release/SHA256SUMS.txt
 
       - name: Setup Node.js for release frontend
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -496,19 +542,7 @@ jobs:
           npm ci
           npm run build
 
-      - name: Download SBOM
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: aegis-sbom
-          path: release/
-
-      - name: Build release bundle
-        run: |
-          cp release/sbom.spdx.json sbom.spdx.json 2>/dev/null || true
-          cp release/sbom.cyclonedx.json sbom.cyclonedx.json 2>/dev/null || true
-          python scripts/release-bundle.py --version "${GITHUB_REF_NAME}" --out release --force
-
-      - name: Build and save release images
+      - name: Build release images
         run: |
           set -euo pipefail
           docker build -t "aegis-brain:${GITHUB_REF_NAME}" aegis-brain
@@ -518,6 +552,42 @@ jobs:
           docker build -t "aegis-nodetrace:${GITHUB_REF_NAME}" NodeTrace/agents/python
           docker build -t "kraken:${GITHUB_REF_NAME}" services/kraken
           docker build -f services/kraken/Dockerfile.broker -t "kraken-broker:${GITHUB_REF_NAME}" services/kraken
+
+      - name: Download repository SBOM
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aegis-sbom
+          path: release-sbom
+
+      - name: Generate per-image SBOMs
+        run: |
+          set -euo pipefail
+          mkdir -p release-image-sboms
+          for name in aegis-brain aegis-link aegis-frontend aegis-guard aegis-nodetrace kraken kraken-broker; do
+            echo "SBOM $name..."
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$PWD/release-image-sboms:/out" \
+              anchore/syft:v1.42.3@sha256:5999d209a342e55e9edf70bf8930fb5b86d8f2a783fa401178372c50e21b1d36 \
+              "${name}:${GITHUB_REF_NAME}" \
+              -o "cyclonedx-json=/out/sbom-${name}.cyclonedx.json"
+            test -s "release-image-sboms/sbom-${name}.cyclonedx.json"
+          done
+
+      - name: Build release bundle
+        run: |
+          cp release-sbom/sbom.spdx.json sbom.spdx.json 2>/dev/null || true
+          cp release-sbom/sbom.cyclonedx.json sbom.cyclonedx.json 2>/dev/null || true
+          python scripts/release-bundle.py \
+            --version "${GITHUB_REF_NAME}" \
+            --out release \
+            --force \
+            --sbom-dir release-image-sboms \
+            --require-nodetrace
+
+      - name: Save release images
+        run: |
+          set -euo pipefail
           # GitHub Releases limita ogni singolo asset a 2 GiB. Il tar non
           # compresso delle sette immagini supera quel limite; gzip lo riduce
           # e, se ancora troppo grande, lo dividiamo in parti riassemblabili.
@@ -539,6 +609,22 @@ jobs:
             ls -lh release/aegis-images.tar.gz
           fi
           sha256sum release/aegis-images.tar.gz* >> release/SHA256SUMS.txt
+
+      - name: Smoke test downloaded bundle
+        run: |
+          python scripts/release-smoke.py release \
+            --require-nodetrace \
+            --require-image-sboms
+
+      # Provenance, non firma: l'attestazione lega gli asset al repository e
+      # al workflow che li ha costruiti. Non sostituisce cosign e non prova
+      # l'identità del publisher; per questo la release resta "checksummed,
+      # not signed" finché non arriva la firma keyless.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            release/*
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
@@ -583,3 +669,130 @@ jobs:
         run: |
           docker build -t kraken-ci:${{ github.sha }} .
           docker build -f Dockerfile.broker -t kraken-broker-ci:${{ github.sha }} .
+
+  e2e:
+    name: Compose E2E Gate
+    # Il gate parte solo se il codice Kraken e Brain e' gia' passato dai test
+    # unitari: un fallimento qui deve dire "integrazione rotta", non confondere
+    # un errore di compilazione con un errore di stack.
+    needs: [kraken]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Valori CI, non segreti: l'intero stack e' effimero e viene distrutto
+      # nel cleanup. Non usare questi valori in un deployment.
+      POSTGRES_DB: aegis
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ci-postgres-password
+      DATABASE_URL: postgresql+asyncpg://postgres:ci-postgres-password@aegis-postgres:5432/aegis
+      REDIS_PASSWORD: ci-redis-password
+      AEGIS_API_KEY: ci-aegis-api-key-32-characters-minimum
+      AGENT_ENROLL_KEY: ci-agent-enroll-key-32-characters
+      JWT_SECRET: ci-jwt-secret-32-characters-minimum
+      MASTER_KEY_B64: Q/wCZ5reU82bQpZppUc6Qq80sybBPz4Q276NbMBF97Q=
+      ALLOWED_ORIGINS: https://aegis.local,http://localhost:3000
+      AEGIS_COOKIE_SECURE: "true"
+      AEGIS_DEBUG: "false"
+      AEGIS_ALLOW_OPEN_REGISTRATION: "false"
+      MTLS_MODE: "off"
+      KRAKEN_DB_PASSWORD: ci-kraken-db-password
+      KRAKEN_REDIS_PASSWORD: ci-kraken-redis-password
+      KRAKEN_SECRET_KEY: ci-kraken-secret-key-32-characters
+      KRAKEN_INTERNAL_API_KEY: ci-kraken-internal-key-32-characters
+      KRAKEN_SSO_ENABLED: "true"
+      KRAKEN_SSO_SECRET: ci-kraken-sso-secret-32-characters
+      KRAKEN_INGEST_ENABLED: "true"
+      KRAKEN_INGEST_KEY: ci-aegis-api-key-32-characters-minimum
+      KRAKEN_INGEST_SECRET: ci-kraken-ingest-secret-32-characters
+      KRAKEN_INGEST_URL: http://aegis-brain:8000
+      SANDBOX_BROKER_TOKEN: ci-sandbox-broker-token-32-characters
+      E2E_EMAIL: e2e@aegis.local
+      E2E_PASSWORD: Aegis-E2E-CI-4.2!
+      E2E_BASE_URL: https://aegis.local
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26'
+
+      - name: Install frontend and Playwright
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Start ephemeral Compose stack
+        run: |
+          set -euo pipefail
+          docker compose --profile kraken up -d --build \
+            aegis-postgres aegis-redis aegis-brain aegis-frontend aegis-caddy \
+            aegis-kraken-db aegis-kraken-redis aegis-kraken-init \
+            aegis-kraken-broker aegis-kraken aegis-kraken-sensors
+
+      - name: Wait for Brain, Caddy and Kraken
+        run: |
+          set -euo pipefail
+          code=000
+          for i in $(seq 1 90); do
+            code=$(curl -k -s -o /dev/null -w '%{http_code}' \
+              --resolve aegis.local:443:127.0.0.1 \
+              https://aegis.local/api/v1/health || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          if [ "$code" != "200" ]; then
+            echo "::error::Brain/Caddy did not become healthy (last HTTP $code)"
+            docker compose --profile kraken ps
+            docker compose --profile kraken logs --no-color --tail=120
+            exit 1
+          fi
+          kcode=000
+          for i in $(seq 1 60); do
+            kcode=$(curl -k -s -o /dev/null -w '%{http_code}' \
+              --resolve aegis.local:443:127.0.0.1 \
+              https://aegis.local/kraken/api/v1/health || true)
+            [ "$kcode" = "200" ] && break
+            sleep 2
+          done
+          if [ "$kcode" != "200" ]; then
+            echo "::error::Kraken did not become healthy through Caddy (last HTTP $kcode)"
+            docker compose --profile kraken ps
+            docker compose --profile kraken logs --no-color --tail=120 aegis-kraken aegis-caddy
+            exit 1
+          fi
+
+      - name: Bootstrap E2E admin
+        run: |
+          set -euo pipefail
+          docker compose exec -T aegis-brain \
+            python -m app.admin bootstrap "$E2E_EMAIL" "$E2E_PASSWORD"
+
+      - name: Seed deterministic Kraken event
+        run: |
+          set -euo pipefail
+          docker compose exec -T aegis-kraken python scripts/seed_e2e.py
+
+      - name: API smoke (authenticated end-to-end)
+        run: |
+          python scripts/api_smoke.py \
+            --base http://127.0.0.1:8000 \
+            --email "$E2E_EMAIL" --password "$E2E_PASSWORD"
+
+      - name: Playwright pages, session and Kraken vertical
+        working-directory: frontend
+        env:
+          E2E_NO_SERVER: "1"
+          E2E_IGNORE_HTTPS: "1"
+          E2E_RESOLVE_AEGIS: "1"
+          E2E_KRAKEN: "1"
+        run: npx playwright test
+
+      - name: Dump Compose logs on failure
+        if: failure()
+        run: docker compose --profile kraken logs --no-color --tail=300
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose --profile kraken down -v --remove-orphans || true

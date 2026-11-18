@@ -105,7 +105,7 @@ public class AegisClient {
                 this.httpClient = next;
                 log.info("mTLS attivo: certificato device + CA server pinnata");
             } catch (Exception e) {
-                log.warn("mTLS non attivabile ({}): solo header X-Client-Cert", e.getMessage());
+                log.warn("mTLS non attivabile ({}): nessuna identità device", e.getMessage());
             }
         }
     }

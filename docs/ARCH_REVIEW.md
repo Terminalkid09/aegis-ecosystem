@@ -9,7 +9,7 @@ lo giustifichi per pilot ≤100 agent (vedi `docs/BENCHMARK.md`).
 - Ingestione: **<10 ev/s** picco, 0.01 ev/s medio → single worker `uvicorn --workers 1` ok.
 - DB: **~185 MB** a 90gg per 100 host (90k telemetry + alert, con indici e overhead PG; metodo in `docs/BENCHMARK.md`) → singolo PG 16-alpine ok.
 - Redis: code comandi + dedup + alert suppression (TTL 1h) → singolo Redis 7 ok.
-- Detection: replay **5–6k ev/s**, latenza **<0.1 ms** → in-process, no worker separato.
+- Detection: replay in-process **5–6k ev/s**, latenza **<0.1 ms** → in-process, no worker separato. Non è il throughput dell'endpoint HTTP: l'ingestione reale e durevole misura **289.35 rps via Caddy/TLS** e **247.76 rps diretta** con 2 worker (`docs/BENCHMARK.md`).
 - Correlazione: grouping e beacon in Redis, <1 ms per batch.
 
 ## Colli potenziali verso 1 000 host

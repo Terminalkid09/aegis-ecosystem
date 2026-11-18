@@ -18,6 +18,24 @@ from app.services.anomaly_engine import anomaly_engine
 logger = get_logger(__name__)
 redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
+# `last_seen` e' un heartbeat, non un contatore: scriverlo a ogni evento
+# serializza tutte le POST dello stesso agente su un lock di riga (misurato:
+# 40 richieste concorrenti ferme a ~44 rps anche con 8 worker). Il refresh
+# periodico mantiene la UI corretta senza trasformare l'ingest in una coda.
+_LAST_SEEN_REFRESH_SECONDS = 30.0
+
+
+def _last_seen_needs_refresh(value: Any, now: datetime) -> bool:
+    if value is None:
+        return True
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    try:
+        return (now - value).total_seconds() >= _LAST_SEEN_REFRESH_SECONDS
+    except (TypeError, ValueError):
+        return True
+
+
 # Dedup alert: stessa (agent, regola, processo) una volta ogni ora.
 # Senza, ogni batch di telemetria ricrea gli stessi alert (FP storm che
 # seppellisce il SOC). Fail-open se Redis è giù.
@@ -125,7 +143,9 @@ def _proc_str(entry: Any, *keys: str, default: str = "unknown") -> str:
     return default
 
 
-async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any]):
+async def process_telemetry(
+    db: AsyncSession, agent_id: Any, data: Dict[str, Any], agent: Any = None
+):
     # Audit L1: solo gli alert creati DA QUESTO evento alimentano i playbook.
     # Prima si ripescavano i 5 alert più recenti dell'agente a ogni telemetria:
     # un alert non risolto ri-attivava il playbook ogni 60s (cooldown scaduto),
@@ -152,13 +172,18 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
     )
     db.add(telemetry)
 
-    # 1.b Update or create Agent record so UI list and stats remain consistent
+    # 1.b Update or create Agent record so UI list and stats remain consistent.
+    # L'endpoint ha già autenticato l'Agent nella stessa sessione: riusarlo
+    # evita una SELECT per ogni evento. Gli altri chiamanti restano invariati.
     try:
-        result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
-        agent = result.scalars().first()
+        if agent is None:
+            result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
+            agent = result.scalars().first()
         now = datetime.now(timezone.utc)
         if agent:
-            agent.last_seen = now
+            # Solo il refresh periodico evita il lock di riga per ogni evento.
+            if _last_seen_needs_refresh(agent.last_seen, now):
+                agent.last_seen = now
             if data.get("ip_address"):
                 agent.ip_address = data.get("ip_address")
             try:
@@ -168,6 +193,9 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                     agent.agent_version = str(data.get("agent_version"))[:50]
                 if isinstance(data.get("capabilities"), (dict, list)):
                     agent.capabilities = data.get("capabilities")
+                # Flush esplicito: inserisce la telemetria prima del commit e
+                # mantiene il gruppo di commit PostgreSQL prevedibile. Deferirlo
+                # al commit ha peggiorato il p50 da ~23 ms a ~96 ms sotto carico.
                 await db.flush()
             except IntegrityError:
                 await db.rollback()
@@ -175,7 +203,8 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                 result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
                 agent = result.scalars().first()
                 if agent:
-                    agent.last_seen = now
+                    if _last_seen_needs_refresh(agent.last_seen, now):
+                        agent.last_seen = now
                     if data.get("ip_address"):
                         agent.ip_address = data.get("ip_address")
         else:
@@ -279,16 +308,20 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
             created_alerts.append(alert)
 
     # 3. Custom Rule Matching
-    try:
-        rules_result = await db.execute(
-            select(CustomRule).where(CustomRule.is_active == True)
-        )
-        custom_rules = rules_result.scalars().all()
-    except Exception:
-        custom_rules = []
+    # Le custom rule operano solo sulla lista `processes`: senza lista non
+    # possono matchare, quindi non serve una query per ogni evento.
+    processes = data.get("processes", [])
+    custom_rules = []
+    if isinstance(processes, list) and processes:
+        try:
+            rules_result = await db.execute(
+                select(CustomRule).where(CustomRule.is_active == True)
+            )
+            custom_rules = rules_result.scalars().all()
+        except Exception:
+            custom_rules = []
 
     if custom_rules:
-        processes = data.get("processes", [])
         if isinstance(processes, list):
             for rule in custom_rules:
                 field = rule.target_field
@@ -360,15 +393,9 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
         try:
             event = EventSchema(**data)
             triggered_rules = []
-            # Contesto arricchente (signature, prevalence, first_seen) prima di pesare i trigger.
-            # Best-effort: mai blocca la detection se il DB è down.
             from app.services.detection_context import fetch_context, is_signed_verified
 
             ctx = {}
-            try:
-                ctx = await fetch_context(db, event)
-            except Exception:
-                ctx = {}
 
             from app.services.alert_policy import (
                 TRUSTED_SUPPRESS_RULE_IDS,
@@ -405,6 +432,12 @@ async def process_telemetry(db: AsyncSession, agent_id: Any, data: Dict[str, Any
                     logger.error("Error in static rule '%s': %s", rule.__name__, str(e))
 
             if triggered_rules:
+                # Il contesto (3 query su alerts) serve solo all'evidenza di un
+                # alert: non paghiamo quel costo per ogni evento benigno.
+                try:
+                    ctx = await fetch_context(db, event)
+                except Exception:
+                    ctx = {}
                 score_map = {"CRITICAL": 100, "HIGH": 50, "MEDIUM": 25, "LOW": 10}
                 # Le regole a bassa confidenza (rumore noto: interpreti di script,
                 # LOLBin, beacon) contano come LOW nel punteggio cumulativo:

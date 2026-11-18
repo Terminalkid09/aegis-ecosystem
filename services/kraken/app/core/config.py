@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     # Transactional outbox worker. The defaults drain quickly without hammering
     # Aegis; max attempts prevents a poison event from looping forever.
     AEGIS_OUTBOX_POLL_INTERVAL_S: float = 2.0
-    AEGIS_OUTBOX_BATCH_SIZE: int = 50
+    AEGIS_OUTBOX_BATCH_SIZE: int = 500
     AEGIS_OUTBOX_MAX_ATTEMPTS: int = 8
     AEGIS_OUTBOX_BACKOFF_BASE_S: float = 2.0
     AEGIS_OUTBOX_BACKOFF_MAX_S: float = 300.0
@@ -81,6 +81,19 @@ class Settings(BaseSettings):
     HTTP_SENSOR_PORT: int = 8080
     FTP_SENSOR_PORT: int = 2121
     TELNET_SENSOR_PORT: int = 2323
+    SMB_SENSOR_PORT: int = 445
+    RDP_SENSOR_PORT: int = 3389
+    # Key used to sign the desired configuration returned to a sensor node.
+    # Empty falls back to SECRET_KEY; set a dedicated value in production.
+    SENSOR_CONFIG_SIGNING_KEY: str = ""
+
+    # File intelligence (4.2.x): asynchronous static analysis only; no
+    # detonation and no network access. The local directory is the default
+    # object store, replaceable by an S3/MinIO-backed implementation.
+    FILE_ANALYSIS_ENABLED: bool = True
+    FILE_ANALYSIS_MAX_BYTES: int = 64 * 1024 * 1024
+    FILE_ANALYSIS_TIMEOUT_S: int = 30
+    FILE_ANALYSIS_STORAGE_DIR: str = ""
 
     # Rate limiting
     RATE_LIMIT_LOGIN: str = "10/minute"

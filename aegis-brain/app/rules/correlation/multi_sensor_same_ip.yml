@@ -1,0 +1,23 @@
+title: Multi-Sensor Activity From Same Source
+id: corr-kraken-multi-sensor-same-ip
+type: threshold
+description: |
+  Lo stesso indirizzo visto su due sensori deception diversi non è rumore di
+  scansione su un solo servizio: indica un attore che sta enumerando la
+  superficie. La soglia conta sensori distinti, non eventi.
+severity: HIGH
+window_seconds: 600
+threshold: 2
+group_by:
+  - src_ip
+distinct_by:
+  - signature
+match:
+  source_type: kraken
+source_types:
+  - kraken
+mitre:
+  - T1046
+  - T1595
+tags:
+  - attack.discovery
