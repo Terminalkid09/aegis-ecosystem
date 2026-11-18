@@ -48,8 +48,11 @@ test.describe('session', () => {
 
     // E le pagine devono caricare i dati, non solo la shell: un 401 che svuota
     // l'interfaccia e' indistinguibile da "serve riaccedere".
+    // Non usare un host demo: il DB CI e' fresco e puo' non contenere MSI.
+    // La testata e l'intestazione della tabella sono rese anche con zero agenti.
     await page.locator('#nav-agents').click();
-    await expect(page.locator('main')).toContainText('MSI', { timeout: 20000 });
+    await expect(page.getByRole('heading', { name: /Fleet/ })).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('main')).toContainText('Hostname', { timeout: 20000 });
     expect(failures, `richieste fallite dopo il reload: ${failures.join('; ')}`).toEqual([]);
   });
 
