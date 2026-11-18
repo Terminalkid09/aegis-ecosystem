@@ -172,9 +172,9 @@ Measured on commit `4ac83b5` before the release merge:
 
 ## 4.2 release candidate verification (2026-11-18)
 
-Status: 4.2.0 implementation candidate in the working tree; no `v4.2.0` tag exists. Hosted CI/E2E has not been run from this workspace. Local verification on 2026-11-18: Brain **853 passed, 3 skipped** against a disposable PostgreSQL test database, Kraken **150 passed**, Playwright **13/13**, `api_smoke.py` **ALL PASS** (21 checks), frontend lint **0 errors / 26 warnings**, `npm audit --omit=dev` **0 vulnerabilities**, build **OK**, root and Kraken Compose stack **OK**, **aegis-kraken-sensors healthy**. These are local checks, not a hosted release gate.
+Status: PR #13 (`release/4.2.0` → `main`) is open, mergeable and CLEAN at `00eb030`; no `v4.2.0` tag exists. Hosted CI run `44342912879` succeeded on every required job, including `Compose E2E Gate`: the ephemeral Compose stack was healthy, bootstrap admin and the deterministic Kraken seed passed, authenticated API smoke passed, and Playwright passed **13/13** in 18.1 s. Local verification on 2026-11-18: Brain **853 passed, 3 skipped** against a disposable PostgreSQL test database, Kraken **150 passed**, Playwright **13/13**, `api_smoke.py` **ALL PASS** (21 checks), frontend lint **0 errors / 26 warnings**, `npm audit --omit=dev` **0 vulnerabilities**, build **OK**, root and Kraken Compose stack **OK**, **aegis-kraken-sensors healthy**. Merge, tag and release still require explicit approval.
 
-**Load gate — met locally, still not a tag gate.** On the default **2-worker**
+**Load gate — met locally; hosted CI does not measure throughput.** On the default **2-worker**
 stack, `/telemetry/report` with unique, committed events reached **289.35 rps
 through Caddy/TLS** (1.500/1.500 `200`, p95 159.9 ms, p99 188.8 ms) and
 **247.76 rps direct** (3.000/3.000 `200`, 3.008 DB rows, p95 194.4 ms). The
@@ -182,8 +182,8 @@ through Caddy/TLS** (1.500/1.500 `200`, p95 159.9 ms, p99 188.8 ms) and
 events reached **301.16 rps** (p95 91.5 ms); no read timeouts. Legacy agents
 take 79.4 ms on first contact and 38.7 ms after backfill. The old **96–111.58
 rps** was an 8-worker measurement, not the default Compose path, and is
-superseded; `synchronous_commit` remains `on`. Run hosted CI/E2E before
-tagging.
+superseded; `synchronous_commit` remains `on`. Hosted CI/E2E passed on
+`00eb030`; merge, tag and release await explicit approval.
 
 - `npm audit --omit=dev` is clean (**0**), and CI blocks the runtime tree. The
   development tree still reports **5 high `picomatch` advisories** through
