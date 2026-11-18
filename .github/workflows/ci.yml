@@ -685,7 +685,7 @@ jobs:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ci-postgres-password
       DATABASE_URL: postgresql+asyncpg://postgres:ci-postgres-password@aegis-postgres:5432/aegis
-      REDIS_PASSWORD: ci-redis-password
+      REDIS_PASSWORD: 7f1c9a4e2d8b6f0a3c5e7d9b1a4f6c8e
       AEGIS_API_KEY: ci-aegis-api-key-32-characters-minimum
       AGENT_ENROLL_KEY: ci-agent-enroll-key-32-characters
       JWT_SECRET: ci-jwt-secret-32-characters-minimum
