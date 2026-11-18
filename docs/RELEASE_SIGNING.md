@@ -1,10 +1,10 @@
-# Release signing decision — 4.2
+# Release signing decision — 4.2.1
 
-Status: 2026-11-17.
+Status: 2026-11-18.
 
 ## Decision
 
-`v4.2.0` remains **checksummed, not cosign-signed**. This is an explicit
+`v4.2.1` remains **checksummed, not cosign-signed**. This is an explicit
 limitation, not a claim that the release is signed. `SHA256SUMS.txt` and
 `RELEASE_MANIFEST.json` protect against corruption in transit and let a
 downloader verify the exact bytes; they do not authenticate the publisher.

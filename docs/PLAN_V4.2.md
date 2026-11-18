@@ -117,7 +117,7 @@ accettazione sono nell'handoff §4.2.0.
 - UI Kraken estesa e SSO delegato funzionante senza doppia autenticazione.
 - Lab shadow produce evidenze correlate, senza azioni distruttive.
 - Sei regole con replay e load test 200 rps / 2 worker documentato.
-- Tag `v4.2.0` costruito dalla CI e verificato dal download.
+- Tag `v4.2.1` costruito dalla CI e verificato dal download (la patch contiene il perimetro 4.2.0).
 
 **Stato implementazione 4.2 nel working tree (2026-11-18).** 4.2.1 outbox/lab,
 4.2.2 Sigma/correlazione, 4.2.3 timeline, 4.2.4 UI Kraken estesa, 4.2.5/4.2.6
@@ -134,9 +134,10 @@ via Caddy/TLS (1.500/1.500 `200`, p95 159.9 ms) e **247.76 rps** diretto
 (3.000/3.000 `200`, 3.008 righe DB). La flotta di 20 agenti con proof fa
 **341.16 rps** al primo burst (p95 52.3 ms) e **301.16 rps** su 100 eventi
 caldi; zero read timeout. Gli agenti legacy pagano 79.4 ms al primo contatto e
-38.7 ms dopo il backfill. La CI ospitata non è stata eseguita da questo
-workspace: il 4.2 è candidato per una PR, non ancora per il tag fino a CI/E2E
-ospitati verdi.
+38.7 ms dopo il backfill. La CI ospitata e il gate E2E sono verdi; la PR #13 è stata mergiata in
+`5c89d41`. Il primo tag `v4.2.0` si è fermato prima della release perché lo
+spec NodeTrace era ignorato; `v4.2.1` lo traccia e verifica il pacchetto
+Windows già nelle PR.
 
 ## Fase 2 — 4.2.x: file intelligence
 

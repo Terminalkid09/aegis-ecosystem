@@ -1,7 +1,8 @@
-# Upgrading to Aegis Ecosystem 4.2.0 (candidate)
+# Upgrading to Aegis Ecosystem 4.2.1
 
-This is the upgrade guide for the **4.2.0 expansion minor**. The version is a
-candidate in the working tree until the release PR and tag are approved.
+This is the upgrade guide for the **4.2.1 maintenance release**. It contains
+the 4.2 expansion plus the release-packaging fix. The `v4.2.0` tag was created
+but did not publish a GitHub Release; use `v4.2.1`.
 
 ## Before upgrading
 
@@ -59,7 +60,7 @@ candidate in the working tree until the release PR and tag are approved.
 
 ```bash
 git fetch --tags
-git checkout <v4.2.0 tag>
+git checkout <v4.2.1 tag>
 cp env.example .env 2>/dev/null || cp .env.example .env  # merge, do not overwrite secrets
 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
