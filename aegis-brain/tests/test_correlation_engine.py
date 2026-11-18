@@ -27,6 +27,15 @@ class FakeRedis:
         self.data[key] = int(self.data.get(key, 0)) + 1
         return self.data[key]
 
+    async def sadd(self, key, value):
+        bucket = self.data.setdefault(key, set())
+        before = len(bucket)
+        bucket.add(value)
+        return 1 if len(bucket) > before else 0
+
+    async def scard(self, key):
+        return len(self.data.get(key, set()))
+
     async def expire(self, key, seconds):
         self.ttl[key] = seconds
         return True
@@ -133,6 +142,25 @@ async def test_threshold_fires_at_n_and_only_once(fake_redis):
 async def test_threshold_below_n_does_not_fire(fake_redis):
     engine = CorrelationEngine()
     assert await engine.evaluate(_auth_failures(4)) == []
+
+
+async def test_multi_sensor_counts_distinct_sensors_not_events(fake_redis):
+    engine = CorrelationEngine()
+    first = _auth_failures(1, "198.51.100.8")[0]
+    first.source_type = "kraken"
+    first.signature = "ssh"
+    second = _auth_failures(1, "198.51.100.8")[0]
+    second.source_type = "kraken"
+    second.signature = "http"
+    third = _auth_failures(1, "198.51.100.8")[0]
+    third.source_type = "kraken"
+    third.signature = "http"
+
+    matches = await engine.evaluate([first, second, third])
+    ids = [m.rule_id for m in matches]
+    assert "corr-kraken-multi-sensor-same-ip" in ids
+    match = next(m for m in matches if m.rule_id == "corr-kraken-multi-sensor-same-ip")
+    assert match.observed == 2
 
 
 async def test_threshold_groups_are_independent(fake_redis):

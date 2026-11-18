@@ -12,6 +12,66 @@ the tag audit and the release policy.
 > after the batch tags: the full Kraken vertical ships with the hardening
 > fixes, and expansion moves to 4.2+.
 
+## [Unreleased]
+
+### 4.2.0 — Kraken expansion and unified SOC (candidate, not tagged)
+
+- Kraken outbox batches 500 deliveries, retries only rejected events, isolates
+  poison events and exposes lag metrics; lab context remains `shadow` end to
+  end. Brain migration `0021` and the replay script cover deception sessions.
+- Six deception Sigma rules plus `multi_sensor_same_ip` correlation, and a
+  unified timeline over SIEM, deception, alert, incident and telemetry sources.
+- Kraken operations UI for campaigns, sensors/fleet, topologies and Lab runs;
+  Brain remains read-only. SMB and RDP sensors capture NetNTLMv2/decoy access
+  and negotiation banners without relaying credentials.
+- ATT&CK coverage and governed suppressions: TTL is mandatory, capped at 90
+  days, and hidden-alert counts remain visible.
+- Real mTLS fingerprint enforcement rejects the legacy full-certificate header;
+  Guard and NodeTrace send only `X-Client-Cert-Hash`. Brain runs two workers
+  with Redis-backed rate limiting.
+- File intelligence is an opt-in asynchronous static-analysis job: bounded
+  upload, ZIP manifest, IOC extraction and a Sigma candidate with low
+  confidence and explicit provenance. The sample stays in Kraken's storage and
+  deletion is verified; no detonation or network execution is implemented.
+
+### Performance and operational hardening
+
+- Telemetry ingestion reuses the authenticated Agent, caches the Argon2 secret
+  check for 60 seconds, throttles `last_seen` writes to 30 seconds, and fetches
+  context/custom rules only when a rule actually fires. Device tokens also carry
+  a SHA-256 proof bound to the current Argon2 hash: a restarted worker verifies
+  them without the expensive KDF, while re-enrollment/revocation invalidate the
+  proof automatically and the DB revocation check still runs on every request.
+- The durable, unique-event path now meets the 200 rps gate on the default
+  **2-worker** stack: **289.35 rps through Caddy/TLS** (1.500/1.500 `200`,
+  p50 99.1 ms, p95 159.9 ms, p99 188.8 ms) and **247.76 rps direct**
+  (3.000/3.000 `200`, 3.008 DB rows, p95 194.4 ms). A 20-agent cold proof
+  burst reaches **341.16 rps** (p95 52.3 ms); 100 warm events reach
+  **301.16 rps** (p95 91.5 ms). Legacy agents take 79.4 ms on first contact
+  and 38.7 ms after the proof backfill, with no read timeouts. The earlier
+  **96–111.58 rps** figure came from the non-default 8-worker setup and is
+  superseded; `synchronous_commit` remains `on`.
+- The Kraken sensors container now exposes a localhost-only health listener on
+  port 8000. The Docker healthcheck no longer probes a honeypot port, so it
+  cannot create fake attack events; the container reports `healthy`.
+
+### Release engineering
+
+- The release bundle uses `env.example`, the portable name GitHub does not
+  rewrite, and the installers accept either `env.example` or `.env.example`.
+- The tag workflow builds the Windows NodeTrace package and includes it in the
+  bundle; no manual upload is required.
+- The tag workflow generates one CycloneDX SBOM per release image, records them
+  in `RELEASE_MANIFEST.json`, and runs `release-smoke.py` before publishing.
+- The tag workflow produces a GitHub build-provenance attestation for the
+  release assets. `docs/RELEASE_SIGNING.md` records the 4.2 decision:
+  checksummed, not signed; provenance is verifiable but does not authenticate
+  the publisher.
+- The `e2e` CI job starts an ephemeral Compose stack, seeds a deterministic
+  Kraken event and runs `api_smoke.py` plus Playwright pages/session/Kraken.
+- Five operational runbooks cover compromised agents, Brain, Kraken, malware
+  escape and backup/restore.
+
 ## [4.1.0] - 2026-11-16
 
 The complete Kraken vertical: transactional outbox and retry, delegated SSO,
@@ -30,7 +90,7 @@ mounted UI, read-only Aegis view and the isolated compose profile.
   the release-integrity gate: no user-visible capability is called integrated
   until API, UI, docs and tests ship together. The gate now names the complete
   Kraken vertical as a 4.1 requirement.
-- `docs/ENTERPRISE_ROADMAP.md`: explicit OSINT/SentinelX and deploy/fleet
+- `docs/ROADMAP.md`: explicit OSINT/SentinelX and deploy/fleet
   workstreams, separate from the release hardening checklist.
 - `docs/youtrack_tickets.csv` and `scripts/youtrack_import.py`: import path for
   the findings and roadmap work packages.

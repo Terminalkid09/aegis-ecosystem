@@ -4,6 +4,11 @@ Runbook operatore: installazione pulita, backup/restore, upgrade/rollback,
 PKI bootstrap, retention. Comandi per Docker Compose (profilo `backup` per
 il servizio di backup). Mai segreti in repo: solo `.env` esterno.
 
+Per gli incidenti usare i runbook dedicati in [`runbooks/`](runbooks/):
+agente compromesso, Brain compromesso, Kraken compromesso, malware fuori
+dalla sandbox, backup e ripristino. Sono parte del gate di release, non
+appendici.
+
 ## 1. Installazione pulita
 
 ```bash
@@ -19,7 +24,10 @@ Prerequisiti: Docker + Compose v2, Python 3.15+ per `scripts/run_integration_tes
 (`TEST_DATABASE_URL`/`REQUIRE_INTEGRATION=1` per CI fail-closed).
 
 Verifiche: `GET /health/live|ready|startup` sul brain; Caddy con certificato
-reale in prod (sostituire `tls internal` nel Caddyfile con email ACME).
+reale in prod (sostituire `tls internal` nel Caddyfile con email ACME). Con il
+profilo Kraken, `docker compose ps` deve mostrare `aegis-kraken-sensors`
+`healthy`: il healthcheck usa il listener locale `127.0.0.1:8000`, non le porte
+esca, quindi non genera eventi di attacco finti.
 
 ## 1b. Enrollment token e servizi host
 

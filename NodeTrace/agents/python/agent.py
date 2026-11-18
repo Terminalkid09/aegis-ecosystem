@@ -91,7 +91,7 @@ class PidLock:
 # ---------- Agent Class ----------
 
 class Agent:
-    AGENT_VERSION = os.getenv("NODETRACE_VERSION", "4.1.0")
+    AGENT_VERSION = os.getenv("NODETRACE_VERSION", "4.2.0")
     CAPABILITIES = {"telemetry": True, "network_scan": True, "update": True}
 
     def __init__(self):
@@ -142,6 +142,7 @@ class Agent:
         token_dir = os.path.dirname(os.path.abspath(TokenService.FILE)) or "."
         self.identity_dir = os.getenv("NODETRACE_IDENTITY_DIR", token_dir)
         self._identity_b64 = None
+        self._identity_hash = None
         self._last_identity_check = 0.0
         self._last_cert_warn = 0.0
         if self.ebpf_enabled:
@@ -207,6 +208,7 @@ class Agent:
             _http.set_client_cert(os.path.join(self.identity_dir, "device.crt"),
                                   os.path.join(self.identity_dir, "device.key"))
             self._identity_b64 = _di.cert_b64der(cert_pem)
+            self._identity_hash = _di.fingerprint_sha256(cert_pem)
             return True
         except Exception as e:
             Logger.warn(f"Identità device non disponibile ({e}): senza mTLS")

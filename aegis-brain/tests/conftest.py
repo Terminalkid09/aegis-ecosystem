@@ -192,6 +192,12 @@ try:
         expire_on_commit=False,
         autocommit=False,
         autoflush=False,
+        # The fixtures wrap each test in an outer transaction.  An endpoint
+        # that deliberately calls rollback() after a failed write (batch
+        # ingestion) must roll back its own savepoint, not the fixture's
+        # committed agent.  Without this, the test harness deletes the agent
+        # and the *next* event fails with a foreign-key error.
+        join_transaction_mode="create_savepoint",
     )
     async def _probe_database():
         async with test_engine.connect():

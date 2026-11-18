@@ -191,4 +191,8 @@ async def plugins_page(request: Request, _=Depends(verify_web_session)):
 async def reports_page(request: Request, _=Depends(verify_web_session)):
     return _page("reports.html", request)
 
+@app.get("/operations", include_in_schema=False)
+async def operations_page(request: Request, _=Depends(verify_web_session)):
+    return _page("operations.html", request)
+
 # Health endpoints are served via /api/v1/health (router)

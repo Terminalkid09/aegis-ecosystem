@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     # Versione della piattaforma: una sola fonte per OpenAPI, endpoint root e
     # dashboard (prima era scritta a mano in due punti e la UI mostrava una
     # versione diversa da quella vera). Si alza qui, in un posto solo.
-    APP_VERSION: str = "4.1.0"
+    APP_VERSION: str = "4.2.0"
     OLLAMA_URL: Optional[str] = None
     OLLAMA_DEFAULT_MODEL: str = "aegis-default"
     # Audit: allowlist modelli caricabili via API (niente pull arbitrari).
@@ -137,6 +137,10 @@ class Settings(BaseSettings):
     PKI_DEVICE_TTL_DAYS: int = 825
     # Mutual auth agent (post-audit): off | optional | required.
     MTLS_MODE: str = "off"
+    # 4.2.9: the legacy full-certificate header is not proof of possession.
+    # Reject it at the HTTP boundary; proxy-injected fingerprint headers remain
+    # the supported path. Can be disabled only for a documented migration.
+    MTLS_REJECT_LEGACY_HEADER: bool = True
     # Profilo di deployment esplicito: lab (compat), pilot (mTLS optional),
     # prod (mTLS required + strict). Evita di dedurre la postura da flag
     # sparsi e rende riconoscibile un deploy "prod" ancora senza mTLS.

@@ -1,9 +1,10 @@
 # Benchmark Aegis (Fase 6)
 
-Misure su host di sviluppo (Windows 11, Python 3.10, i7, 16 GB) del 2026-09-12.
-Tutti i numeri sono **CPU-bound deterministici** (replay, dedup) quindi
-ripetibili; le misure su DB/rete richiedono stack Docker reale e sono
-indicate come stime.
+Le misure CPU-bound (replay, dedup) sono del 2026-09-12 su Windows 11,
+Python 3.10, i7, 16 GB. Le misure HTTP sono del 2026-11-18 sullo stesso host
+di sviluppo con 8 CPU e Python 3.15. I **5–6k ev/s** della sezione replay sono
+il motore in-process: non sono il throughput di un endpoint HTTP con commit su
+PostgreSQL. Per quello vale la sezione «Ingestione HTTP reale» qui sotto.
 
 ## Replay engine (senza DB)
 
@@ -13,8 +14,44 @@ indicate come stime.
 - Corpus validation indipendente 16+9: precision/recall/F1 **1.0**, **0 FP/host/day**.
 - Corpus regression 7+6: precision/recall/F1 **1.0**, **0 FP/host/day**.
 - Gli split validation/regression sono sintetici e non sostituiscono dati reali:
-  non è corretto generalizzare questi valori a un ambiente enterprise.
+  non è corretto generalizzare questi valori a un ambiente di produzione ampio.
 - MTTD non misurabile in replay (solo live).
+
+## Ingestione HTTP reale — 4.2 (2026-11-18)
+
+Stack Compose locale, Brain con **2 worker** uvicorn (default Compose),
+PostgreSQL 16-alpine, Redis 7, client HTTP a 30 connessioni. Tutte le richieste
+sono autenticate; il percorso «unico e durevole» usa `event_id` distinti e
+attende il commit. La misura Caddy usa TLS e il nome `aegis.local`.
+
+| Percorso | Throughput | Esito |
+|----------|------------|-------|
+| `/telemetry/report`, unici e durevoli, diretto | **247.76 rps** | 2 worker, 3.000/3.000 `200`; 3.008 righe DB; p50 108.7 ms, p95 194.4 ms, p99 279.0 ms |
+| `/telemetry/report`, unici e durevoli, Caddy/TLS | **289.35 rps** | 2 worker, 1.500/1.500 `200`; p50 99.1 ms, p95 159.9 ms, p99 188.8 ms |
+| `/telemetry/report`, eventi duplicati (storico) | **200.29 rps** | misura 8-worker precedente, solo confronto |
+| flotta 20 agenti, primo burst con proof | **341.16 rps** | 20/20 `200`; p50 42.3 ms, p95 52.3 ms |
+| flotta 20 agenti, 100 eventi caldi | **301.16 rps** | 100/100 `200`; p50 54.2 ms, p95 91.5 ms |
+| agente legacy, primo/secondo report | 79.4 / 38.7 ms | Argon2 una volta, poi proof persistita; 200/200 |
+
+Dettagli onesti:
+
+- Il gate «200 rps / 2 worker» è superato. Il vecchio dato **96–111.58 rps**
+  proveniva da un setup a 8 worker, non dal default Compose; con 8 worker la
+  contesa aumenta e non è il riferimento di capacità.
+- `synchronous_commit` resta **on**: nessun trade-off sulla durabilità. Il
+  percorso duplicato resta sopra 200 rps, ma non è la prova del percorso
+  durevole.
+- Il cold-start non usa più Argon2 per i token emessi da questa versione: la
+  proof SHA-256 è legata all'hash Argon2 e viene salvata in `agents.meta`.
+  Re-enroll e revoca cambiano l'hash, quindi la proof vecchia non combacia; la
+  revoca continua a essere verificata su PostgreSQL a ogni richiesta.
+- Per i token legacy il primo contatto paga Argon2 e poi fa backfill della
+  proof; il secondo scende a 38.7 ms. Questo è il comportamento accettato per
+  agenti già installati.
+- Riproduzione: `AGENT_ENROLL_KEY=... python scripts/bench_ingest.py --events
+  3000 --concurrency 30`. Per Caddy/TLS il client va eseguito nella rete Compose
+  con `aegis.local` risolto al container Caddy e certificato locale non
+  verificato (`--insecure`).
 
 ## Throughput per agent e profili
 

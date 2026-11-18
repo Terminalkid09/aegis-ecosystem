@@ -22,7 +22,7 @@ Verificato sul codice (non su descrizioni): `aegis-brain/app/main.py`,
 | A2 | Alert, threat report, incidenti | PG `alerts`, `threat_reports`, `incidents`, `incident_alerts` | Retention target 90gg (da implementare Fase 8/9) |
 | A3 | Credenziali VaultX | PG `notes` (cifrate, `encrypted_dek` su `users`) | Envelope `MASTER_KEY_B64` |
 | A4 | Enroll token monouso | PG `enroll_tokens` (solo hash sha256) | TTL default 15 min, single-use, revocabili; un token con `target_hostname` è l'unica prova accettata per il re-enroll |
-| A5 | Segreti agent (device token) | PG `agents.device_token_hash` (argon2), Redis `auth:agent:{sha256}` best-effort | Mai plaintext su Redis; `machine_id_hash` è solo un hash, non un segreto |
+| A5 | Segreti agent (device token) | PG `agents.device_token_hash` (argon2) + `meta.device_token_proof` (SHA-256 legato all'hash), cache locale 60s | Mai plaintext; la proof è legata all'hash, quindi re-enroll/revoca la invalidano; revoca verificata su DB a ogni richiesta |
 | A6 | Artefatti agent / OTA | `ARTIFACT_DIR` (`/app/artifacts`) | Manifest Ed25519 obbligatorio; HMAC OTA rimosso in 4.1.0 |
 | A7 | Comandi agent (incl. `UPDATE_AGENT`, isolate) | Redis queue via `telemetry_service.send_command_to_agent` | Coda con fallback 202 se Redis giù |
 | A8 | Audit log | PG `audit_logs` | Retention target 365gg (da implementare) |

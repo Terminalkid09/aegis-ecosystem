@@ -1,6 +1,6 @@
 # Release audit — Aegis Ecosystem
 
-Status: 2026-11-16. This document audits the tags that already exist, including
+Status: 2026-11-17. This document audits the tags that already exist, including
 the completed `v4.1.0` release. It does not move history.
 
 ## Published tags are immutable
@@ -170,15 +170,68 @@ Measured on commit `4ac83b5` before the release merge:
   locally and attached to the release because the Linux release job cannot
   produce it; Playwright and live detection batteries remain manual gates.
 
+## 4.2 release candidate verification (2026-11-18)
+
+Status: PR #13 (`release/4.2.0` → `main`) is open, mergeable and CLEAN; no `v4.2.0` tag exists. Hosted CI run `44342912879` on code candidate `00eb030` succeeded on every required job, including `Compose E2E Gate`: the ephemeral Compose stack was healthy, bootstrap admin and the deterministic Kraken seed passed, authenticated API smoke passed, and Playwright passed **13/13** in 18.1 s. A documentation-only follow-up (`12fec17`) also passed run `44346081464` with Playwright **13/13**. Local verification on 2026-11-18: Brain **853 passed, 3 skipped** against a disposable PostgreSQL test database, Kraken **150 passed**, Playwright **13/13**, `api_smoke.py` **ALL PASS** (21 checks), frontend lint **0 errors / 26 warnings**, `npm audit --omit=dev` **0 vulnerabilities**, build **OK**, root and Kraken Compose stack **OK**, **aegis-kraken-sensors healthy**. Merge, tag and release still require explicit approval.
+
+**Load gate — met locally; hosted CI does not measure throughput.** On the default **2-worker**
+stack, `/telemetry/report` with unique, committed events reached **289.35 rps
+through Caddy/TLS** (1.500/1.500 `200`, p95 159.9 ms, p99 188.8 ms) and
+**247.76 rps direct** (3.000/3.000 `200`, 3.008 DB rows, p95 194.4 ms). The
+20-agent cold proof burst reached **341.16 rps** (p95 52.3 ms) and 100 warm
+events reached **301.16 rps** (p95 91.5 ms); no read timeouts. Legacy agents
+take 79.4 ms on first contact and 38.7 ms after backfill. The old **96–111.58
+rps** was an 8-worker measurement, not the default Compose path, and is
+superseded; `synchronous_commit` remains `on`. Hosted CI/E2E passed on
+`00eb030`; merge, tag and release await explicit approval.
+
+- `npm audit --omit=dev` is clean (**0**), and CI blocks the runtime tree. The
+  development tree still reports **5 high `picomatch` advisories** through
+  Vite/fdir/tinyglobby; no patched release exists, and these tools are not
+  shipped in the runtime image. CI reports the dev audit without blocking.
+- `release-bundle.py` emits `env.example`, not `.env.example`, and has a focused
+  contract test for the final asset name and the NodeTrace identity exclusion.
+- The tag workflow has a Windows `nodetrace_windows` job that builds the
+  PyInstaller package and uploads it as an artifact; `release` consumes it.
+- The tag workflow builds all seven release images, generates a CycloneDX SBOM
+  for each with pinned Syft, records the names in `RELEASE_MANIFEST.json`, and
+  includes them in the bundle.
+- `release-smoke.py` now requires `env.example`, `frontend.zip`,
+  `RELEASE_SIGNING.md`, the source archive and the core assets; the tag job
+  runs it with `--require-nodetrace --require-image-sboms` before publishing.
+- `docs/RELEASE_SIGNING.md` records that 4.2 remains **checksummed, not
+  signed**, and that a GitHub build-provenance attestation is produced for the
+  release assets. Provenance is verifiable; it is not a cosign signature.
+- Local bundle verification: `v4.2.0-rc1` produced **29 files**;
+  `release-smoke.py` **OK**; `env.example` present and no `.env.example`;
+  seven fixture image SBOMs recorded; `nodetrace.zip` **39 entries**, no
+  `token.json`, `device.key`, `device.crt` or `nodetrace.pid`.
+- Real Compose E2E on the running stack: Playwright **13/13 passed**
+  (including setup, pages, session and the Kraken vertical) after a fresh seeded
+  event; `scripts/api_smoke.py` **ALL PASS** (21 checks). The first Kraken run
+  failed because the existing `203.0.113.77` event was outside the 24-hour
+  window; the fix is the deterministic `services/kraken/scripts/seed_e2e.py`,
+  not a product change.
+- The `aegis-kraken-sensors` container now has a localhost-only HTTP health
+  listener on port 8000. It reports `healthy` without probing a honeypot port,
+  so the healthcheck cannot create fake attacks or SIEM events.
+- Implemented in the working tree: the E2E/`api_smoke` CI job, five operational
+  runbooks and build provenance. The tag workflow now contains the gate, but the
+  hosted job has not run from this workspace; do not tag 4.2 until it is green.
+- Added after the pipeline work: timeline, deception rules/correlation,
+  campaigns/fleet/topology/Lab UI, SMB/RDP sensors, ATT&CK coverage, governed
+  suppressions, mTLS fingerprint enforcement and asynchronous static file
+  analysis. These are implementation candidates, not release verification.
+
 ## Current version fields
 
-These are the release version fields for `v4.1.0`.
+These are the release version fields for the `v4.2.0` candidate.
 
 | Component | File | Current |
 |---|---|---|
-| Brain API | `aegis-brain/app/core/config.py` | `4.1.0` |
-| Frontend | `frontend/package.json` | `4.1.0` |
-| Guard | `aegis-guard/pom.xml` | `4.1.0` |
-| NodeTrace | `NodeTrace/agents/python/agent.py` | `4.1.0` |
-| OCSF agent metadata | `aegis-brain/app/services/ocsf.py` | `4.1.0` |
-| Artifact packer | `scripts/pack-artifacts.py` | `v4.1.0` |
+| Brain API | `aegis-brain/app/core/config.py` | `4.2.0` |
+| Frontend | `frontend/package.json` | `4.2.0` |
+| Guard | `aegis-guard/pom.xml` | `4.2.0` |
+| NodeTrace | `NodeTrace/agents/python/agent.py` | `4.2.0` |
+| OCSF agent metadata | `aegis-brain/app/services/ocsf.py` | `4.2.0` |
+| Artifact packer | `scripts/pack-artifacts.py` | `v4.2.0` |

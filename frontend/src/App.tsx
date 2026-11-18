@@ -25,6 +25,9 @@ const AuditLogViewer = lazy(() => import('@/components/pages/AuditLogViewer'))
 const SyslogViewer   = lazy(() => import('@/components/pages/SyslogViewer'))
 const LogSources     = lazy(() => import('@/components/pages/LogSources'))
 const Search       = lazy(() => import('@/components/pages/Search'))
+const Timeline     = lazy(() => import('@/components/pages/Timeline'))
+const AttackCoverage = lazy(() => import('@/components/pages/AttackCoverage'))
+const Suppressions = lazy(() => import('@/components/pages/Suppressions'))
 const Kraken       = lazy(() => import('@/components/pages/Kraken'))
 const YaraManager   = lazy(() => import('@/components/pages/YaraManager'))
 const SettingsPage   = lazy(() => import('@/components/pages/SettingsPage'))
@@ -123,6 +126,9 @@ function AppShell() {
     syslog:     <SyslogViewer />,
     logsources: <LogSources />,
     search:     <Search />,
+    timeline:   <Timeline />,
+    coverage:   <AttackCoverage />,
+    suppressions: <Suppressions />,
     kraken:     <Kraken />,
     yara:       <YaraManager />,
     settings:   <SettingsPage />,

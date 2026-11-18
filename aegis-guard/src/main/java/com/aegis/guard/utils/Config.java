@@ -59,7 +59,7 @@ public class Config {
     );
 
     public static final String AGENT_VERSION = getEnv(
-            "AEGIS_AGENT_VERSION", "4.1.0"
+            "AEGIS_AGENT_VERSION", "4.2.0"
     );
 
     /** Spool persistente outbox (M1 Fase 2): dir locale per eventi non recapitati. */

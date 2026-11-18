@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -47,6 +49,30 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         except Exception:
             pass  # fall through to legacy verify
     return _pwd_context.verify(plain_password, hashed_password)
+
+
+def device_token_proof(token: str, stored_hash: str) -> str:
+    """Prova veloce per un device token ad alta entropia, legata all'hash Argon2.
+
+    I device token sono generati con `secrets.token_urlsafe(32)` (256 bit),
+    non sono password scelte da un umano: Argon2 protegge da un attacco offline
+    su un dizionario, che qui non esiste. La prova permette a un worker appena
+    avviato (o a un altro worker) di evitare la KDF costosa senza rendere il
+    dump del DB sufficiente a impersonare l'agente.
+
+    La prova include `stored_hash`: un re-enroll o una revoca cambiano l'hash,
+    quindi ogni prova precedente smette di combaciare senza dover cancellare
+    il campo dal JSON. Il confronto va fatto con `hmac.compare_digest`.
+    """
+    material = b"aegis-device-token-v1\x00" + (token or "").encode("utf-8")
+    material += b"\x00" + (stored_hash or "").encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
+
+
+def verify_device_token_proof(token: str, stored_hash: str, proof: str | None) -> bool:
+    if not isinstance(proof, str) or not proof:
+        return False
+    return hmac.compare_digest(device_token_proof(token, stored_hash), proof)
 
 
 def needs_rehash(hashed_password: str) -> bool:

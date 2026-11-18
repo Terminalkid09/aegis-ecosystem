@@ -88,6 +88,11 @@ def _severity_rank(severity: str) -> int:
 def _alert_from_sigma(event: UnifiedEvent, match: Any, agent_id: uuid.UUID) -> Alert:
     technique = match.mitre_techniques[0] if match.mitre_techniques else None
     tactic = tactic_from_tags(getattr(match, "tags", None))
+    # A deception event keeps the same visible alert type whether it came from
+    # a Sigma rule or the guaranteed Kraken fallback. Otherwise one event can
+    # produce two alerts and the UI shows a duplicate.
+    event_type = ("DECEPTION" if event.source_type == "kraken"
+                  else str(event.extra.get("event_type") or event.source_type))
     return Alert(
         agent_id=agent_id,
         severity=match.level.upper() if match.level else "MEDIUM",
@@ -96,7 +101,7 @@ def _alert_from_sigma(event: UnifiedEvent, match: Any, agent_id: uuid.UUID) -> A
         parent_process_name=event.parent_process_name,
         process_name=(event.process_name or event.signature or event.source or "log-source")[:255],
         process_path=event.process_path or event.file_path,
-        event_type=str(event.extra.get("event_type") or event.source_type)[:100],
+        event_type=event_type[:100],
         description=f"[SIGMA {match.rule_id}] {match.title}"
                     + (f" — {event.message[:200]}" if event.message else ""),
         mitre_tactic_id=tactic[0] if tactic else None,
@@ -187,12 +192,23 @@ async def _detect_and_alert(db: AsyncSession, source_name: str, source_type: str
 
     agent = await get_or_create_source_agent(db, source_name, source_type)
     new_alerts: List[Alert] = []
+    # Governed suppressions are evaluated before alert creation. A matching
+    # row increments its own counter; the rule remains enabled and the
+    # suppression expires on its mandatory TTL.
+    from app.services.suppressions import is_suppressed
     for event, match in sigma_matches:
+        if await is_suppressed(db, match.rule_id, event):
+            continue
         new_alerts.append(_alert_from_sigma(event, match, agent.agent_id))
     for match in correlation_matches:
+        if await is_suppressed(db, match.rule_id, match.event):
+            continue
         new_alerts.append(_alert_from_correlation(match, agent.agent_id))
     matched_ids = {e.event_id for e, _ in sigma_matches}
+    matched_ids.update(m.event.event_id for m in correlation_matches if m.event)
     for event in kraken_events:
+        # The fallback is for sensors that have no rule yet; never duplicate
+        # an event already covered by Sigma or correlation.
         if event.event_id not in matched_ids:
             new_alerts.append(_alert_from_kraken(event, agent.agent_id))
     for alert in new_alerts:

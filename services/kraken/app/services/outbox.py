@@ -6,6 +6,12 @@ fuori transazione e poi registra l'esito. Un crash tra invio e aggiornamento
 lascia la riga in `processing`; dopo `AEGIS_OUTBOX_STALE_AFTER_S` viene
 recuperata e rispedita. Il Brain deduplica per `event_id`, quindi il replay è
 sicuro.
+
+Da 4.2.1 il worker accorpa fino a 500 righe in una sola richiesta. Se il Brain
+rifiuta il blocco (4xx), il worker ripete ogni evento singolarmente: così un
+evento velenoso non fa perdere i 499 eventi validi che erano nello stesso
+batch. Il replay manuale (`scripts/replay_outbox.py`) rimette in coda solo i
+falliti scelti, senza toccare quelli già consegnati.
 """
 from __future__ import annotations
 
@@ -14,6 +20,7 @@ import random
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from loguru import logger
 from sqlalchemy import func, select, update
@@ -24,6 +31,7 @@ from app.core.metrics import (
     record_outbox_attempt,
     record_outbox_failed,
     record_outbox_sent,
+    set_outbox_lag,
     set_outbox_pending,
 )
 from app.db.session import AsyncSessionLocal
@@ -47,6 +55,20 @@ def _backoff_seconds(attempts: int) -> float:
     exponential = base * (2 ** max(0, attempts - 1))
     # Jitter 0.5–1.5x: evita che più righe ripartano nello stesso istante.
     return min(cap, exponential) * (0.5 + random.random())
+
+
+def merge_payloads(payloads: list[dict]) -> dict:
+    """Unisce payload già costruiti senza reinterpretarne il contenuto.
+
+    Ogni riga della outbox nasce da un evento Kraken e contiene una lista
+    `events`. Il contratto Brain accetta una lista; il batch è quindi solo una
+    concatenazione, non una nuova trasformazione.
+    """
+    events: list[Any] = []
+    for payload in payloads:
+        if isinstance(payload, dict) and isinstance(payload.get("events"), list):
+            events.extend(payload["events"])
+    return {"events": events}
 
 
 async def _recover_stale(session_factory: SessionFactory, now: datetime) -> int:
@@ -93,17 +115,24 @@ async def _claim(session_factory: SessionFactory, outbox_id: int, now: datetime)
     return (result.rowcount or 0) == 1
 
 
-async def _load(session_factory: SessionFactory, outbox_id: int) -> dict | None:
+async def _load_many(session_factory: SessionFactory, outbox_ids: list[int]) -> list[dict]:
+    if not outbox_ids:
+        return []
     async with session_factory() as session:
-        row = await session.get(Outbox, outbox_id)
-        if row is None:
-            return None
-        return {
+        result = await session.execute(
+            select(Outbox).where(Outbox.id.in_(outbox_ids))
+        )
+        by_id = {row.id: row for row in result.scalars().all()}
+    return [
+        {
             "id": row.id,
             "event_id": row.event_id,
             "payload": row.payload,
             "attempts": row.attempts,
         }
+        for outbox_id in outbox_ids
+        if (row := by_id.get(outbox_id)) is not None
+    ]
 
 
 async def _mark_sent(session_factory: SessionFactory, outbox_id: int, now: datetime) -> None:
@@ -156,14 +185,54 @@ async def _mark_failure(
     return "retried" if retry else "failed"
 
 
-async def _refresh_pending(session_factory: SessionFactory) -> int:
+async def _refresh_pending(session_factory: SessionFactory, now: datetime) -> int:
     async with session_factory() as session:
         pending = await session.scalar(
             select(func.count(Outbox.id)).where(Outbox.status == "pending")
         )
+        oldest = await session.scalar(
+            select(func.min(Outbox.created_at)).where(Outbox.status == "pending")
+        )
     pending = int(pending or 0)
     set_outbox_pending(pending)
+    if oldest is None:
+        set_outbox_lag(0.0)
+    else:
+        if oldest.tzinfo is None:
+            oldest = oldest.replace(tzinfo=UTC)
+        set_outbox_lag(max(0.0, (now - oldest).total_seconds()))
     return pending
+
+
+async def _send_one(
+    session_factory: SessionFactory,
+    sender: Sender,
+    item: dict,
+    summary: dict,
+    now: datetime,
+) -> None:
+    try:
+        result = await sender(item["payload"])
+    except Exception as exc:  # noqa: BLE001 - sender boundary must not kill the worker
+        logger.warning(f"Outbox sender raised: {type(exc).__name__}")
+        result = DeliveryResult(False, True, error=type(exc).__name__)
+
+    if result.ok:
+        await _mark_sent(session_factory, item["id"], now)
+        record_outbox_sent()
+        record_outbox_attempt("success")
+        summary["sent"] += 1
+        return
+
+    outcome = await _mark_failure(
+        session_factory, item["id"], item["attempts"], result, now
+    )
+    record_outbox_attempt("retryable" if result.retryable else "poison")
+    summary[outcome] += 1
+    logger.warning(
+        f"Outbox event {item['event_id']} not delivered: "
+        f"{result.error or result.status_code} ({outcome})"
+    )
 
 
 async def process_outbox_once(
@@ -173,10 +242,18 @@ async def process_outbox_once(
     now: datetime | None = None,
     batch_size: int | None = None,
 ) -> dict:
-    """Drain one due batch. Returns counters useful in tests and logs."""
+    """Drain one due batch. Returns counters useful in tests and logs.
+
+    The batch is one HTTP request when the Brain accepts it. A non-retryable
+    4xx falls back to per-event sends so a poison payload is isolated instead
+    of failing every event that happened to share the batch.
+    """
     now = now or _utcnow()
     limit = max(1, batch_size or settings.AEGIS_OUTBOX_BATCH_SIZE)
-    summary = {"claimed": 0, "sent": 0, "retried": 0, "failed": 0}
+    summary = {
+        "claimed": 0, "sent": 0, "retried": 0, "failed": 0,
+        "batches": 0, "events": 0,
+    }
 
     await _recover_stale(session_factory, now)
 
@@ -188,39 +265,55 @@ async def process_outbox_once(
             .limit(limit)
         )).scalars().all())
 
+    claimed_ids: list[int] = []
     for outbox_id in ids:
-        if not await _claim(session_factory, outbox_id, now):
-            continue
-        summary["claimed"] += 1
+        if await _claim(session_factory, outbox_id, now):
+            claimed_ids.append(outbox_id)
+    summary["claimed"] = len(claimed_ids)
 
-        row = await _load(session_factory, outbox_id)
-        if row is None:
-            continue
-
+    items = await _load_many(session_factory, claimed_ids)
+    if items:
+        summary["batches"] = 1
+        summary["events"] = sum(
+            len(payload.get("events") or [])
+            for item in items
+            if isinstance((payload := item["payload"]), dict)
+        )
+        batch_payload = merge_payloads([item["payload"] for item in items])
         try:
-            result = await sender(row["payload"])
-        except Exception as exc:  # noqa: BLE001 - sender boundary must not kill the worker
-            logger.warning(f"Outbox sender raised: {type(exc).__name__}")
-            result = DeliveryResult(False, True, error=type(exc).__name__)
+            batch_result = await sender(batch_payload)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Outbox batch sender raised: {type(exc).__name__}")
+            batch_result = DeliveryResult(False, True, error=type(exc).__name__)
 
-        if result.ok:
-            await _mark_sent(session_factory, outbox_id, now)
-            record_outbox_sent()
-            record_outbox_attempt("success")
-            summary["sent"] += 1
-            continue
+        if batch_result.ok:
+            for item in items:
+                await _mark_sent(session_factory, item["id"], now)
+                record_outbox_sent()
+                record_outbox_attempt("success")
+            summary["sent"] += len(items)
+        elif batch_result.retryable:
+            for item in items:
+                outcome = await _mark_failure(
+                    session_factory, item["id"], item["attempts"], batch_result, now
+                )
+                record_outbox_attempt("retryable")
+                summary[outcome] += 1
+            logger.warning(
+                f"Outbox batch of {len(items)} events not delivered: "
+                f"{batch_result.error or batch_result.status_code} (retryable)"
+            )
+        else:
+            # Poison batch: retry each event alone. This is the difference
+            # between "one malformed event" and "500 lost events".
+            logger.warning(
+                f"Outbox batch rejected ({batch_result.status_code}); "
+                "isolating events individually"
+            )
+            for item in items:
+                await _send_one(session_factory, sender, item, summary, now)
 
-        outcome = await _mark_failure(
-            session_factory, outbox_id, row["attempts"], result, now
-        )
-        record_outbox_attempt("retryable" if result.retryable else "poison")
-        summary[outcome] += 1
-        logger.warning(
-            f"Outbox event {row['event_id']} not delivered: "
-            f"{result.error or result.status_code} ({outcome})"
-        )
-
-    await _refresh_pending(session_factory)
+    await _refresh_pending(session_factory, now)
     return summary
 
 

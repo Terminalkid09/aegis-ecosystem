@@ -2,6 +2,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from app.core.config import settings
+from app.core.security import verify_device_token_proof
 from app.database.models import Agent, AuditLog
 import uuid
 
@@ -20,6 +21,12 @@ class TestEnrollment:
         assert "agent_id" in data
         assert "agent_secret" in data
         assert data["agent_secret"] != "ALREADY_ENROLLED"
+        agent = await db_session.get(Agent, uuid.UUID(data["agent_id"]))
+        assert agent is not None
+        assert verify_device_token_proof(
+            data["agent_secret"], agent.device_token_hash,
+            (agent.meta or {}).get("device_token_proof"),
+        )
 
     async def test_enroll_invalid_key(self, client: AsyncClient):
         response = await client.post("/api/v1/enroll/enroll", json={
@@ -67,6 +74,10 @@ class TestEnrollment:
         assert isinstance(data["agent_secret"], str) and data["agent_secret"]
         await db_session.refresh(test_agent)
         assert len(test_agent.meta["machine_id_hash"]) == 64
+        assert verify_device_token_proof(
+            data["agent_secret"], test_agent.device_token_hash,
+            test_agent.meta.get("device_token_proof"),
+        )
         audit = await db_session.execute(
             select(AuditLog).where(AuditLog.action == "agent_reenroll"))
         row = audit.scalars().first()
@@ -110,3 +121,5 @@ class TestEnrollment:
         })
         assert again.status_code == 403
         assert "revoked" in again.json()["detail"].lower()
+        await db_session.refresh(test_agent)
+        assert "device_token_proof" not in (test_agent.meta or {})

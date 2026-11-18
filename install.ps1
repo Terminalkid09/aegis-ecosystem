@@ -3,7 +3,12 @@
 param([string]$Mode = "lab", [switch]$Observability)
 if ($Mode -notin @("lab","pilot")) { Write-Error "Uso: .\install.ps1 [lab|pilot] [-Observability]"; exit 2 }
 if ($Mode -eq "pilot" -and $Observability) { Write-Error "-Observability è un profilo lab: in pilot Prometheus/Grafana NON sono previsti."; exit 2 }
-if (-not (Test-Path ".env")) { Copy-Item ".env.example" ".env"; Write-Host "[WARN] Modifica .env con segreti reali prima del pilot." -ForegroundColor Yellow }
+if (-not (Test-Path ".env")) {
+  $template = if (Test-Path ".env.example") { ".env.example" } elseif (Test-Path "env.example") { "env.example" } else { $null }
+  if (-not $template) { Write-Error ".env.example/env.example assente: bundle incompleto."; exit 1 }
+  Copy-Item $template ".env"
+  Write-Host "[WARN] Modifica .env con segreti reali prima del pilot." -ForegroundColor Yellow
+}
 if ($Mode -eq "pilot" -and (Select-String -Path ".env" -Pattern "replace-with" -Quiet)) { Write-Error ".env contiene placeholder: sostituirli per pilot."; exit 1 }
 $compose = if ($Mode -eq "pilot") { "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.mtls.yml" } else { "docker compose -f docker-compose.yml" }
 if ($Observability) {

@@ -1,0 +1,27 @@
+title: Deception SSH Brute Force
+id: kraken-sigma-ssh-bruteforce
+status: stable
+description: |
+  Un honeypot SSH che riceve credenziali è una prova di intento. Il solo
+  banner iniziale, senza username né password, non deve produrre un alert.
+references:
+  - https://attack.mitre.org/techniques/T1110/001/
+author: Aegis Sigma bundle
+date: 2026/11/17
+logsource:
+  product: kraken
+detection:
+  selection:
+    signature: ssh
+    user|exists: true
+  condition: selection
+fields:
+  - src_ip
+  - user
+  - signature
+falsepositives:
+  - Scanner automatico che invia una sola credenziale vuota
+level: medium
+tags:
+  - attack.credential_access
+  - attack.t1110.001

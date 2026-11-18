@@ -6,6 +6,7 @@ and the SBOM. It never needs the repository checkout.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import sys
@@ -21,7 +22,12 @@ def sha256(path: Path) -> str:
 
 
 def main() -> int:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else "release").resolve()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("root", nargs="?", default="release")
+    parser.add_argument("--require-nodetrace", action="store_true")
+    parser.add_argument("--require-image-sboms", action="store_true")
+    args = parser.parse_args()
+    root = Path(args.root).resolve()
     manifest_path = root / "RELEASE_MANIFEST.json"
     checksums_path = root / "SHA256SUMS.txt"
     if not manifest_path.is_file() or not checksums_path.is_file():
@@ -46,11 +52,18 @@ def main() -> int:
         if checksums.get(item["name"]) != item["sha256"]:
             print(f"[X] SHA256SUMS mismatch: {item['name']}")
             return 1
-    for required in ("docker-compose.yml", "docker-compose.prod.yml", ".env.example",
-                     "sbom.cyclonedx.json", "aegis-guard.jar", "aegis-source.tar.gz"):
-        if not (root / required).is_file():
-            print(f"[X] required release asset missing: {required}")
+    required = ("docker-compose.yml", "docker-compose.prod.yml", "env.example",
+                "frontend.zip", "sbom.cyclonedx.json", "aegis-guard.jar",
+                "aegis-source.tar.gz", "RELEASE_SIGNING.md")
+    if args.require_nodetrace:
+        required += ("nodetrace.zip",)
+    for name in required:
+        if not (root / name).is_file():
+            print(f"[X] required release asset missing: {name}")
             return 1
+    if args.require_image_sboms and not manifest.get("image_sboms"):
+        print("[X] per-image SBOMs missing from RELEASE_MANIFEST.json")
+        return 1
     print(f"[OK] release {manifest.get('version')} verified: {len(manifest.get('files', []))} files")
     return 0
 

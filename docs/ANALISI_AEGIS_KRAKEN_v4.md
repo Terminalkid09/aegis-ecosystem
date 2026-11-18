@@ -297,7 +297,7 @@ Impatto: senza licenza esplicita il default legale è "tutti i diritti riservati
          È il singolo blocco più grande all'adozione open source.
 Riproduzione: n/a
 Fix consigliato: scegliere e committare una licenza (Apache-2.0 se l'obiettivo
-                 è adozione enterprise con protezione brevetti; AGPL-3.0 se
+                 è adozione aziendale con protezione brevetti; AGPL-3.0 se
                  l'obiettivo è impedire il SaaS concorrente).
 Test di regressione: check in CI che fallisca se LICENSE manca.
 Release target: v4.1.0 — bloccante
@@ -717,7 +717,7 @@ Regole di confine:
 
 **Kafka/Redpanda: no, non prima della v5.0.** [R] Soglia quantitativa per prenderlo in considerazione: **> 50.000 eventi/s sostenuti** oppure **> 20 consumer group indipendenti** oppure necessità di replay storico su finestre > 7 giorni. Sotto queste soglie Kafka è costo operativo puro: un cluster da gestire, monitorare, aggiornare, con un team che oggi non esiste.
 
-**Kubernetes: no, non prima della v5.0.** [R] Soglia: **> 5 nodi** o necessità di autoscaling su carico variabile o multi-tenant con isolamento forte. Il compose attuale copre developer laptop, home lab, single-server pilot e small business. Per l'enterprise multi-node, la v5.0 può valutare K8s — ma solo dopo che il compose è stato provato in produzione reale su un singolo server.
+**Kubernetes: no, non prima della v5.0.** [R] Soglia: **> 5 nodi** o necessità di autoscaling su carico variabile o multi-tenant con isolamento forte. Il compose attuale copre developer laptop, home lab, single-server pilot e small business. Per il multi-node aziendale, la v5.0 può valutare K8s — ma solo dopo che il compose è stato provato in produzione reale su un singolo server.
 
 **Object storage: sì, in forma minima, in v4.2.0.** [R] I campioni malware e gli artefatti di analisi non appartengono a un volume Docker. Serve uno storage con retention, immutabilità e cancellazione verificata. MinIO in locale, S3 in cloud. Non un data lake: un bucket con policy.
 
@@ -782,7 +782,7 @@ Kafka/Redpanda, Kubernetes, multi-tenancy, data lake — **solo al raggiungiment
 **Il differenziatore che manca:** la deception. Oggi Aegis è "un altro EDR+SIEM". Con Kraken integrato diventa "rilevi l'attacco in corso e vedi cosa sta facendo l'attaccante in una sandbox". Questo è un messaggio di vendita diverso.
 
 **Cosa aumenta davvero l'adozione:**
-1. **Licenza.** Senza, zero adozione enterprise. È il primo lavoro.
+1. **Licenza.** Senza, zero adozione aziendale. È il primo lavoro.
 2. **`docker compose up` che funziona.** Il README promette "one command". Va verificato su una macchina pulita, non su una macchina di sviluppo.
 3. **Demo riproducibile.** `docs/DEMO.md` esiste — va verificato che funzioni da zero.
 4. **Regole Sigma utili.** 14 regole non bastano per un SIEM. Servono 50+ con casi di test.

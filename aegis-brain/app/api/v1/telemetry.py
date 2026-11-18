@@ -469,7 +469,7 @@ async def agent_report(request: Request, payload: EventSchema, db: AsyncSession 
         inc("aegis_events_duplicate_total", 1, f'agent="{agent.agent_id}"')
         return {"status": "duplicate"}
     try:
-        await telemetry_service.process_telemetry(db, agent.agent_id, data)
+        await telemetry_service.process_telemetry(db, agent.agent_id, data, agent=agent)
     except Exception as e:
         inc("aegis_agent_errors_total", 1, f'agent="{agent.agent_id}",error="process_telemetry"')
         raise
@@ -540,7 +540,9 @@ async def agent_report_batch(
             inc("aegis_events_duplicate_total", 1, f'agent="{agent_ref}"')
             continue
         try:
-            await telemetry_service.process_telemetry(db, agent_id, sanitize_event(item.model_dump()))
+            await telemetry_service.process_telemetry(
+                db, agent_id, sanitize_event(item.model_dump()), agent=agent
+            )
             accepted += 1
         except Exception as exc:
             rejected += 1

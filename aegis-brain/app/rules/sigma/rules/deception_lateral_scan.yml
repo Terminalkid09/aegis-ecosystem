@@ -1,0 +1,30 @@
+title: Deception Lateral Scan
+id: kraken-sigma-lateral-scan
+status: stable
+description: |
+  Tentativi di enumerazione o connessione a più servizi dalla stessa sessione
+  deception: il comportamento tipico di un movimento laterale in corso.
+references:
+  - https://attack.mitre.org/techniques/T1046/
+author: Aegis Sigma bundle
+date: 2026/11/17
+logsource:
+  product: kraken
+detection:
+  selection:
+    category:
+      - network_scan
+      - port_scan
+      - lateral_scan
+      - service_enumeration
+  condition: selection
+fields:
+  - src_ip
+  - category
+  - signature
+falsepositives:
+  - Inventory autorizzato eseguito contro il lab shadow
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1046

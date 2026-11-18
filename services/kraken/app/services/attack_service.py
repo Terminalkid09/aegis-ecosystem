@@ -44,6 +44,7 @@ async def ingest_sensor_event(db: AsyncSession, payload: SensorEventIn) -> Attac
             event_id=event.id,
             username=payload.username,
             password=hash_credential(payload.password) if payload.password else None,
+            ntlm_hash=payload.ntlm_hash if hasattr(payload, "ntlm_hash") else None,
         ))
 
     for cmd in payload.commands or []:

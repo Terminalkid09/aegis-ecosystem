@@ -33,6 +33,7 @@ CORE_FILES = [
     "Caddyfile",
     "Caddyfile.mtls",
     ".env.example",
+    "docs/RELEASE_SIGNING.md",
     "install.sh",
     "install.ps1",
     "CHANGELOG.md",
@@ -51,6 +52,20 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+RELEASE_NAMES = {
+    ".env.example": "env.example",
+}
+
+
+def release_name(rel: str) -> str:
+    """Release asset name for a repository-relative input.
+
+    GitHub rewrites names that start with a dot when uploading release assets;
+    `env.example` is the stable name the installer and smoke test use.
+    """
+    return RELEASE_NAMES.get(rel, Path(rel).name)
 
 
 def _copy(src: Path, dst: Path) -> None:
@@ -83,6 +98,9 @@ def main() -> int:
     parser.add_argument("--version", required=True, help="release label, e.g. v4.1.0-rc1")
     parser.add_argument("--out", default="release")
     parser.add_argument("--force", action="store_true", help="replace an existing bundle")
+    parser.add_argument("--sbom-dir", help="directory with per-image CycloneDX SBOMs")
+    parser.add_argument("--require-nodetrace", action="store_true",
+                        help="fail if the Windows NodeTrace bundle is absent")
     args = parser.parse_args()
     if not re.fullmatch(r"v?[0-9]+\.[0-9]+\.[0-9]+(?:-rc[0-9]+)?", args.version):
         raise SystemExit("version must be SemVer or vX.Y.Z-rcN")
@@ -94,7 +112,7 @@ def main() -> int:
     out.mkdir(parents=True)
 
     for rel in CORE_FILES:
-        _copy(ROOT / rel, out / Path(rel).name)
+        _copy(ROOT / rel, out / release_name(rel))
 
     _copy(ROOT / "aegis-guard/target/aegis-guard.jar", out / "aegis-guard.jar")
 
@@ -103,6 +121,8 @@ def main() -> int:
         # Never ship a developer identity: the dist directory can contain the
         # local device key, certificate, token and pid lock from a test run.
         _zip_tree(nt, out / "nodetrace.zip", exclude=NODETRACE_IDENTITY_FILES)
+    elif args.require_nodetrace:
+        raise SystemExit("[X] NodeTrace Windows bundle missing: nodetrace_windows must upload it")
     frontend = ROOT / "frontend/dist"
     if frontend.is_dir():
         _zip_tree(frontend, out / "frontend.zip")
@@ -113,6 +133,20 @@ def main() -> int:
     if not sbom.is_file():
         raise SystemExit("[X] SBOM missing: supply_chain must generate it before release")
     _copy(sbom, out / "sbom.cyclonedx.json")
+
+    image_sboms = []
+    if args.sbom_dir:
+        sbom_dir = (ROOT / args.sbom_dir).resolve()
+        if not sbom_dir.is_dir():
+            raise SystemExit(f"[X] per-image SBOM directory missing: {sbom_dir}")
+        sbom_files = sorted(sbom_dir.glob("*.json"))
+        if not sbom_files:
+            raise SystemExit(f"[X] no per-image SBOMs in {sbom_dir}")
+        for sbom_file in sbom_files:
+            if sbom_file.name == "sbom.cyclonedx.json":
+                raise SystemExit("[X] per-image SBOM collides with repository SBOM")
+            _copy(sbom_file, out / sbom_file.name)
+            image_sboms.append(sbom_file.name)
 
     # Preserve the service boundary and the source provenance without shipping
     # the whole working tree (including local secrets and .perch).
@@ -144,7 +178,8 @@ def main() -> int:
         "components": ["aegis-brain", "aegis-guard", "aegis-link", "frontend",
                        "NodeTrace", "services/kraken"],
         "files": files,
-        "signature": "not produced by this dry-run; the tag release must sign SHA256SUMS.txt with cosign",
+        "image_sboms": image_sboms,
+        "signature": "not produced; 4.2.0 is unsigned by decision (RELEASE_SIGNING.md)",
     }
     (out / "RELEASE_MANIFEST.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"

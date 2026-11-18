@@ -51,7 +51,7 @@ services:
     build: ./aegis-brain
     container_name: aegis-brain
     restart: unless-stopped
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "${BRAIN_WORKERS:-2}"]
     ports:
       - "127.0.0.1:${BRAIN_PORT_EXTERNAL:-8000}:8000"
     environment:
@@ -103,6 +103,10 @@ services:
       PKI_DIR: /app/pki
       ARTIFACT_DIR: /app/artifacts
       MTLS_MODE: ${MTLS_MODE:-off}
+      MTLS_REJECT_LEGACY_HEADER: ${MTLS_REJECT_LEGACY_HEADER:-true}
+      # With more than one worker, rate-limit counters must be shared.
+      RATE_LIMIT_STORAGE_URI: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@aegis-redis:6379/1
+      RATE_LIMIT_TRUST_FORWARDED_FOR: ${RATE_LIMIT_TRUST_FORWARDED_FOR:-true}
       # Kraken vertical: disabled unless the operator opts in. The ingest path
       # still requires its own API key + HMAC secret; SSO uses a dedicated key.
       KRAKEN_INGEST_ENABLED: ${KRAKEN_INGEST_ENABLED:-false}
@@ -303,6 +307,11 @@ services:
       KRAKEN_SSO_SECRET: ${KRAKEN_SSO_SECRET:?KRAKEN_SSO_SECRET must be set for the kraken profile}
       SANDBOX_BROKER_URL: http://aegis-kraken-broker:8100
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set for the kraken profile}
+      SENSOR_CONFIG_SIGNING_KEY: ${KRAKEN_SENSOR_CONFIG_SIGNING_KEY:-}
+      FILE_ANALYSIS_ENABLED: ${KRAKEN_FILE_ANALYSIS_ENABLED:-true}
+      FILE_ANALYSIS_MAX_BYTES: ${KRAKEN_FILE_ANALYSIS_MAX_BYTES:-67108864}
+      FILE_ANALYSIS_TIMEOUT_S: ${KRAKEN_FILE_ANALYSIS_TIMEOUT_S:-30}
+      FILE_ANALYSIS_STORAGE_DIR: /app/data/samples
       MALWARE_RETENTION_DAYS: ${MALWARE_RETENTION_DAYS:-30}
       MALWARE_MAX_TOTAL_BYTES: ${MALWARE_MAX_TOTAL_BYTES:-5368709120}
       CORS_ORIGINS: ${ALLOWED_ORIGINS:-https://aegis.local,http://localhost:3000}
@@ -312,7 +321,7 @@ services:
       AEGIS_INGEST_SECRET: ${KRAKEN_INGEST_SECRET:-}
       AEGIS_INGEST_TIMEOUT_S: ${AEGIS_INGEST_TIMEOUT_S:-5}
       AEGIS_OUTBOX_POLL_INTERVAL_S: ${AEGIS_OUTBOX_POLL_INTERVAL_S:-2}
-      AEGIS_OUTBOX_BATCH_SIZE: ${AEGIS_OUTBOX_BATCH_SIZE:-50}
+      AEGIS_OUTBOX_BATCH_SIZE: ${AEGIS_OUTBOX_BATCH_SIZE:-500}
       AEGIS_OUTBOX_MAX_ATTEMPTS: ${AEGIS_OUTBOX_MAX_ATTEMPTS:-8}
       AEGIS_OUTBOX_BACKOFF_BASE_S: ${AEGIS_OUTBOX_BACKOFF_BASE_S:-2}
       AEGIS_OUTBOX_BACKOFF_MAX_S: ${AEGIS_OUTBOX_BACKOFF_MAX_S:-300}
@@ -353,11 +362,16 @@ services:
       HTTP_SENSOR_PORT: 8080
       FTP_SENSOR_PORT: 2121
       TELNET_SENSOR_PORT: 2323
+      SMB_SENSOR_PORT: 445
+      RDP_SENSOR_PORT: 3389
+      SENSOR_CONFIG_SIGNING_KEY: ${KRAKEN_SENSOR_CONFIG_SIGNING_KEY:-}
     ports:
       - "${KRAKEN_SSH_PORT:-12222}:2222"
       - "${KRAKEN_HTTP_PORT:-18080}:8080"
       - "${KRAKEN_FTP_PORT:-12121}:2121"
       - "${KRAKEN_TELNET_PORT:-12323}:2323"
+      - "${KRAKEN_SMB_PORT:-11445}:445"
+      - "${KRAKEN_RDP_PORT:-13389}:3389"
     depends_on:
       aegis-kraken:
         condition: service_healthy

@@ -6,8 +6,10 @@
 - SeqTracker resta in memoria (gap misurati, mai usati per scartare eventi).
 """
 from collections import OrderedDict
+import asyncio
 import threading
 import os
+import weakref
 
 
 class EventDedup:
@@ -111,6 +113,45 @@ class SeqTracker:
 DEDUP = EventDedup()
 SEQ = SeqTracker()
 
+# A Redis client per event loop (one per uvicorn worker). Creating and closing
+# a client for every event_id burned a TCP/TLS handshake per report and was a
+# measurable part of the ingestion latency. The clients are kept until their
+# loop dies; a broken client is dropped and rebuilt on the next event.
+_REDIS_CLIENTS: "weakref.WeakKeyDictionary[object, object]" = weakref.WeakKeyDictionary()
+_REDIS_CLIENTS_LOCK = threading.Lock()
+
+
+def _redis_for_loop():
+    import redis.asyncio as _redis
+    from app.core.config import settings
+
+    loop = asyncio.get_running_loop()
+    with _REDIS_CLIENTS_LOCK:
+        client = _REDIS_CLIENTS.get(loop)
+        if client is None:
+            url = os.getenv("REDIS_URL") or getattr(
+                settings, "REDIS_URL", "redis://localhost:6379"
+            )
+            client = _redis.from_url(
+                url,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+                max_connections=50,
+            )
+            _REDIS_CLIENTS[loop] = client
+        return client
+
+
+async def _drop_redis_client(loop, client) -> None:
+    with _REDIS_CLIENTS_LOCK:
+        if _REDIS_CLIENTS.get(loop) is client:
+            _REDIS_CLIENTS.pop(loop, None)
+    try:
+        await client.aclose()
+    except Exception:
+        pass
+
 
 def snapshot() -> dict:
     return {"dedup": DEDUP.snapshot(), "seq": SEQ.snapshot()}
@@ -122,18 +163,17 @@ async def is_duplicate(agent_id, event_id, ttl: int | None = None) -> bool:
     if not event_id:
         return False
     # 1. Prova Redis (cross-reboot/worker)
+    from app.core.config import settings
+
+    loop = asyncio.get_running_loop()
+    client = None
     try:
-        import redis.asyncio as _redis
-        from app.core.config import settings
         # TTL configurabile, default da settings
         _ttl = int(ttl) if ttl is not None else int(getattr(settings, "DEDUP_TTL_SECONDS", 86400))
-        # Costruisce URL da env se non già impostato (fallback localhost per test)
-        url = os.getenv("REDIS_URL") or getattr(settings, "REDIS_URL", "redis://localhost:6379")
-        client = _redis.from_url(url, decode_responses=True)
+        client = _redis_for_loop()
         key = f"dedup:{agent_id}:{event_id}"
         # SETNX con TTL: True = nuovo, False = duplicato
         ok = await client.set(key, "1", ex=_ttl, nx=True)
-        await client.aclose()
         if ok is False:  # chiave già presente → duplicato
             DEDUP.duplicates += 1
             return True
@@ -142,6 +182,7 @@ async def is_duplicate(agent_id, event_id, ttl: int | None = None) -> bool:
             DEDUP.check(agent_id, event_id)
             return False
     except Exception:
-        pass
+        if client is not None:
+            await _drop_redis_client(loop, client)
     # 2. Fallback memoria (test o Redis down)
     return DEDUP.check(agent_id, event_id)
