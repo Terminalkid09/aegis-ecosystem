@@ -1,7 +1,8 @@
 # Release audit — Aegis Ecosystem
 
-Status: 2026-11-17. This document audits the tags that already exist, including
-the completed `v4.1.0` release. It does not move history.
+Status: 2026-11-19. This document audits the tags that already exist, including
+the completed `v4.1.0` release. It does not move history. The current release
+being prepared is `v4.3.0`; it is not tagged or published yet.
 
 ## Published tags are immutable
 
@@ -31,6 +32,8 @@ tags.
 | `v3.0.0` | 2026-07-09 | `058dea5` | `058dea5` | yes | none |
 | `v4.0.0` | 2026-09-21 | `38e245f` | `de52206` | yes | `aegis-guard.jar`, `sbom.spdx.json`, `SHA256SUMS.txt` |
 | `v4.1.0` | 2026-11-16 | `17c499f` | `17c499f` | yes | 24 assets: Brain/Link/Frontend/Guard/NodeTrace, compose, SBOM, source, seven images, manifests/checksums |
+| `v4.2.1` | 2026-11-18 | `1de7443` | `1de7443` | yes | 4.2 maintenance release; NodeTrace spec tracked |
+| `v4.3.0` | not cut | — | — | no | release prepared; hosted tag CI still required |
 
 The first four are lightweight tags; `v4.1.0` is annotated. `v4.0.0` and
 `v4.1.0` are the only ones whose code version matches the tag: `aegis-brain`
@@ -74,6 +77,8 @@ The safe correction is:
 | `v3.0.0` | Standalone agents and Discovery Center | historical |
 | `v4.0.0` | EDR + SIEM platform, ETW, Sigma, Telegram, signed enrollment | historical; last batch tag |
 | `v4.1.0` | Foundation + complete Kraken vertical: blocking fixes, CI green, compose/outbox/UI/unified view, complete release | released 2026-11-16; complete |
+| `v4.2.1` | Kraken outbox/lab hardening and 4.2 maintenance | released 2026-11-18 |
+| `v4.3.0` | Unified Go agent, at-least-once commands, 50k Link and release gates | prepared 2026-11-19; tag not cut |
 
 `v4.1.0` is a **minor** because it fixes and hardens existing contracts. The
 removal of the disabled-by-default `script` playbook action will be documented
@@ -223,6 +228,17 @@ superseded; `synchronous_commit` remains `on`. Hosted CI/E2E passed on
   campaigns/fleet/topology/Lab UI, SMB/RDP sensors, ATT&CK coverage, governed
   suppressions, mTLS fingerprint enforcement and asynchronous static file
   analysis. These are implementation candidates, not release verification.
+
+## v4.3.0 release preparation (2026-11-19)
+
+Direct `v4.3.0` release, no `4.3.0-rc1`. The locally executable gates are green:
+27 Link tests, 8 Brain command-queue tests, the 50k Link live cap, process-level
+command restart, `queued — not executed` UI visibility, a 22-file bundle with
+checksums, a clean install from the extracted bundle with API smoke **21/21**,
+and a 4.2.1 server upgrade preserving **68 agents / 321 alerts** with smoke
+**21/21**. The annotated tag, hosted tag workflow, downloaded-asset verification
+and publication remain the external release step. The release is checksummed,
+not cosign-signed; see `docs/RELEASE_SIGNING.md`.
 
 ## Current version fields
 

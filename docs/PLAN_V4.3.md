@@ -780,8 +780,10 @@ l'endpoint; la motivazione è nel solo CHANGELOG, i dati in `BENCHMARK.md`.
 
 - [ ] test unitari, integrazione, race, vet;
 - [ ] Windows 11/Server 2022/2025, Ubuntu 22.04/24.04, RHEL 9;
-- [ ] install, enroll, revoca, re-enroll, upgrade, uninstall, rollback;
-- [ ] migrazione da 4.2.1 e rollback a 4.2.1;
+- [ ] install, enroll, revoca, re-enroll, upgrade e uninstall; il rollback
+      degli agenti legacy è fuori perimetro;
+- [ ] migrazione server da 4.2.1 e restore del database; rollback agenti fuori
+      perimetro;
 - [ ] Link 50k live cap e Brain restart dopo claim senza ack;
 - [ ] release bundle da download pulito e clean install guidata;
 - [ ] soak 7 giorni;
@@ -860,7 +862,8 @@ Gate di approvazione:
   reale.
 - **G2:** NodeTrace Go: parità, cutover, benchmark A e rollback Python verdi.
 - **G3:** Guard Go: parità, cutover, benchmark B e rollback Java/JRE verdi.
-- **G4:** `unified`: identità, migrazione, benchmark C e rollback 4.2.1 verdi.
+- **G4:** `unified`: identità, migrazione, benchmark C e rollback server 4.2.1
+  verdi; rollback agenti legacy fuori perimetro.
 - **G5:** test 82/82 + 140/140 tracciabili; nessun test legacy come copertura
   unica.
 - **G6:** docs, release e download pulito verdi.

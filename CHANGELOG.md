@@ -44,8 +44,9 @@ Il profilo `unified` usa una sola identità Guard e un solo outbox, ma avvia
 anche i collector sensor. Il Brain/UI lo accettano in enrollment, token di
 deploy, job, OTA, Discovery e telemetria recente. Il primo avvio con token
 monouso è stato provato contro il Brain reale: il token è stato consumato e
-l'agente ha inviato telemetria. Restano aperti l'artefatto `unified-latest.zip`,
-servizio/installer e rollback.
+l'agente ha inviato telemetria. Fuori dal perimetro 4.3.0 restano l'artefatto
+`unified-latest.zip`, il servizio/installer drop-in e il rollback: la release
+non li dichiara completati.
 
 Evidenza eseguita il 2026-11-18 (fake) e il 2026-11-19 (stack reale):
 
@@ -79,8 +80,11 @@ controllati, non una sostituzione production-grade dei due agenti legacy.
 **Evidenza di release:** clean install isolata da sorgente senza artefatti
 (`aegis-clean43`) con volumi nuovi, bootstrap admin, enrollment reale,
 heartbeat, evento agente, alert Sigma `T1110.001`, frontend e Link health;
-`api_smoke.py` **21/21 ALL PASS**. Il 50k Link, il restart del consumer comandi
-e i bundle locali restano registrati in `docs/RELEASE_GATE_4.3.md`.
+`api_smoke.py` **21/21 ALL PASS**. Il bundle `v4.3.0` ha 22 file verificati;
+l'upgrade del database 4.2.1 ha preservato 68 agenti e 321 alert, con smoke
+21/21. Il 50k Link, il restart del consumer comandi e i gate restano registrati
+in `docs/RELEASE_GATE_4.3.md`. La CI hosted al tag è l'unico passo ancora
+esterno al repository locale.
 
 ### Changed
 
@@ -358,7 +362,7 @@ Release notes report 166 tests passing.
 - Asynchronous Redis-backed ingestion, PostgreSQL persistence, Docker Compose
   deployment, and Windows/Linux installation scripts.
 
-[Unreleased]: https://github.com/Terminalkid09/aegis-ecosystem/compare/v4.2.1...HEAD
+[4.3.0]: https://github.com/Terminalkid09/aegis-ecosystem/compare/v4.2.1...HEAD
 [4.1.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v4.1.0
 [4.0.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v4.0.0
 [3.0.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v3.0.0
