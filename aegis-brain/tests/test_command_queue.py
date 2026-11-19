@@ -1,26 +1,56 @@
-"""AEGIS-LOGIC-003: coda comandi bounded, FIFO e senza perdite silenziose."""
-import pytest
+"""Coda comandi bounded e consegna at-least-once (ack + visibility timeout)."""
+import asyncio
+import os
 
-from app.services.command_queue import enqueue_command
+import pytest
+import redis.asyncio as redis
+
+from app.services import command_queue, telemetry_service
+from app.services.command_queue import (
+    CommandQueueFull,
+    ack_command,
+    enqueue_command,
+    pop_commands,
+)
 
 
 class FakeRedis:
+    """Minimal Redis fake: only the atomic EVAL enqueue path is allowed."""
+
     def __init__(self):
         self.lists = {}
+        self.eval_calls = 0
 
-    async def llen(self, key):
-        return len(self.lists.get(key, []))
-
-    async def rpush(self, key, value):
-        self.lists.setdefault(key, []).append(value)
-        return len(self.lists[key])
-
-    async def ltrim(self, key, start, stop):
-        values = self.lists.get(key, [])
-        self.lists[key] = values[start:] if stop == -1 else values[start:stop + 1]
+    async def eval(self, script, numkeys, key, *args):
+        assert numkeys == 1
+        assert "RPUSH" in script
+        self.eval_calls += 1
+        limit, value = int(args[0]), args[1]
+        values = self.lists.setdefault(key, [])
+        if len(values) >= limit:
+            return [0, len(values)]
+        values.append(value)
+        return [1, len(values)]
 
     def values(self, agent_id):
         return self.lists.get(f"aegis:commands:{agent_id}", [])
+
+
+@pytest.fixture
+async def real_redis():
+    client = redis.from_url(
+        os.getenv("AEGIS_TEST_REDIS_URL", "redis://127.0.0.1:6379/15"),
+        decode_responses=True,
+    )
+    try:
+        await client.ping()
+    except Exception:
+        await client.aclose()
+        pytest.skip("real Redis is required for delivery tests")
+    await client.flushdb()
+    yield client
+    await client.flushdb()
+    await client.aclose()
 
 
 @pytest.mark.asyncio
@@ -35,26 +65,118 @@ async def test_full_queue_rejects_the_new_command_instead_of_dropping_it():
 
     assert result["queued"] is False
     assert result["reason"] == "queue_full"
+    assert result["depth"] == 3
     assert len(redis.values(agent)) == 3
     assert "CMD-3" not in "".join(redis.values(agent))
 
 
 @pytest.mark.asyncio
-async def test_trim_keeps_newest_entries_if_two_producers_race(monkeypatch):
+async def test_enqueue_is_one_atomic_redis_call():
     redis = FakeRedis()
-    agent = "agent-2"
-    await redis.rpush(f"aegis:commands:{agent}", "old-1")
-    await redis.rpush(f"aegis:commands:{agent}", "old-2")
-    await redis.rpush(f"aegis:commands:{agent}", "old-3")
+    agent = "agent-atomic"
 
-    # Simula il race: LLEN vede 0 ma la lista contiene gia' tre elementi.
-    async def stale_llen(key):
-        return 0
+    result = await enqueue_command(redis, agent, {"command": "ISOLATE_HOST"}, max_length=3)
 
-    monkeypatch.setattr(redis, "llen", stale_llen)
-    await enqueue_command(redis, agent, {"command": "new"}, max_length=3)
+    assert result == {"queued": True, "depth": 1, "limit": 3}
+    assert redis.eval_calls == 1
+    assert len(redis.values(agent)) == 1
 
-    values = redis.values(agent)
-    assert len(values) == 3
-    assert values[-1].endswith('"new"}')
-    assert "old-1" not in "".join(values)
+
+@pytest.mark.asyncio
+async def test_two_producers_cannot_exceed_the_cap(real_redis):
+    """La cap e' dentro lo stesso EVAL: due producer non possono superarla."""
+    agent = "agent-concurrent"
+    results = await asyncio.gather(*(
+        enqueue_command(real_redis, agent, {"command": f"CMD-{i}"}, max_length=5)
+        for i in range(20)
+    ))
+
+    assert sum(1 for result in results if result["queued"]) == 5
+    assert sum(
+        1 for result in results
+        if not result["queued"] and result.get("reason") == "queue_full"
+    ) == 15
+    assert await real_redis.llen(f"aegis:commands:{agent}") == 5
+
+
+@pytest.mark.asyncio
+async def test_unacked_command_is_redelivered_and_ack_is_idempotent(real_redis):
+    agent = "agent-redelivery"
+    await enqueue_command(real_redis, agent, {"command": "ISOLATE_HOST"}, max_length=10)
+
+    first = await pop_commands(real_redis, agent, 1, visibility=1, max_deliveries=5)
+    assert len(first) == 1
+    assert first[0]["command"] == "ISOLATE_HOST"
+    assert first[0]["delivery_id"]
+    assert await real_redis.llen(f"aegis:commands:{agent}") == 0
+
+    assert await pop_commands(real_redis, agent, 1, visibility=1, max_deliveries=5) == []
+
+    await asyncio.sleep(2.1)
+    second = await pop_commands(real_redis, agent, 1, visibility=1, max_deliveries=5)
+    assert len(second) == 1
+    assert second[0]["delivery_id"] == first[0]["delivery_id"]
+    assert second[0]["delivery_attempt"] == 2
+
+    assert await ack_command(real_redis, agent, delivery_id=second[0]["delivery_id"]) is True
+    assert await ack_command(real_redis, agent, delivery_id=second[0]["delivery_id"]) is False
+    assert await real_redis.llen(f"aegis:commands:{agent}:processing") == 0
+
+
+@pytest.mark.asyncio
+async def test_consumer_restart_after_execution_redelivers_the_same_command(real_redis):
+    """A new process must recover the command, not silently acknowledge it.
+
+    The first consumer is closed after the action has run but before the ack,
+    which is the dangerous window for a containment command. The second
+    connection represents the restarted worker. It must receive the same
+    delivery id with attempt=2, so the UI/agent can show a possible duplicate.
+    """
+    url = os.getenv("AEGIS_TEST_REDIS_URL", "redis://127.0.0.1:6379/15")
+    agent = "agent-restart"
+    await enqueue_command(real_redis, agent, {"command": "ISOLATE_HOST"}, max_length=10)
+
+    consumer = redis.from_url(url, decode_responses=True)
+    first = await pop_commands(consumer, agent, 1, visibility=1, max_deliveries=5)
+    assert len(first) == 1
+    assert first[0]["command"] == "ISOLATE_HOST"
+    await consumer.aclose()  # crash after execution, before ack
+
+    await asyncio.sleep(2.1)
+    restarted = redis.from_url(url, decode_responses=True)
+    second = await pop_commands(restarted, agent, 1, visibility=1, max_deliveries=5)
+
+    assert len(second) == 1
+    assert second[0]["command"] == "ISOLATE_HOST"
+    assert second[0]["delivery_id"] == first[0]["delivery_id"]
+    assert second[0]["delivery_attempt"] == 2
+    assert await ack_command(restarted, agent, delivery_id=second[0]["delivery_id"]) is True
+    assert await ack_command(restarted, agent, delivery_id=second[0]["delivery_id"]) is False
+    assert await restarted.llen(f"aegis:commands:{agent}:processing") == 0
+    await restarted.aclose()
+
+
+@pytest.mark.asyncio
+async def test_poison_command_goes_to_dlq_instead_of_looping(real_redis):
+    agent = "agent-dlq"
+    await enqueue_command(real_redis, agent, {"command": "LOOP"}, max_length=10)
+    assert len(await pop_commands(real_redis, agent, 1, visibility=1, max_deliveries=1)) == 1
+
+    await asyncio.sleep(2.1)
+    assert await pop_commands(real_redis, agent, 1, visibility=1, max_deliveries=1) == []
+    assert await real_redis.llen(f"aegis:commands:{agent}:dlq") == 1
+    assert await real_redis.llen(f"aegis:commands:{agent}") == 0
+
+
+@pytest.mark.asyncio
+async def test_send_command_raises_on_full_queue(monkeypatch):
+    async def full_queue(*args, **kwargs):
+        return {"queued": False, "reason": "queue_full", "depth": 100, "limit": 100}
+
+    monkeypatch.setattr(command_queue, "enqueue_command", full_queue)
+
+    with pytest.raises(CommandQueueFull) as excinfo:
+        await telemetry_service.send_command_to_agent("agent-full", {"command": "KILL_PROCESS"})
+
+    assert excinfo.value.command_name == "KILL_PROCESS"
+    assert excinfo.value.depth == 100

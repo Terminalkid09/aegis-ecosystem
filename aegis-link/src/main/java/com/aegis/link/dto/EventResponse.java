@@ -27,6 +27,10 @@ public class EventResponse {
         return new EventResponse("accepted", "Event queued successfully");
     }
 
+    public static EventResponse spooled() {
+        return new EventResponse("spooled", "Event persisted locally; Redis delivery pending");
+    }
+
     public static EventResponse error(String message) {
         return new EventResponse("error", message);
     }

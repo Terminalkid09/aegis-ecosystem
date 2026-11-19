@@ -2,6 +2,7 @@ package com.aegis.link;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /*
 Entry point di aegis-link.
@@ -17,6 +18,7 @@ aegis-guard → POST /api/v1/events → IngestionController
             → aegis-brain (BRPOP consumer)
  */
 @SpringBootApplication
+@EnableScheduling
 public class AegisLinkApplication {
     public static void main(String[] args) {
         SpringApplication.run(AegisLinkApplication.class, args);

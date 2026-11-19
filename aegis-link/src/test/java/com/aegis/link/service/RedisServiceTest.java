@@ -7,7 +7,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.ListOperations;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Instant;
 
@@ -19,10 +19,10 @@ import static org.mockito.Mockito.*;
 class RedisServiceTest {
 
     @Mock
-    private RedisTemplate<String, Object> redisTemplate;
+    private StringRedisTemplate redisTemplate;
 
     @Mock
-    private ListOperations<String, Object> listOperations;
+    private ListOperations<String, String> listOperations;
 
     @Mock
     private tools.jackson.databind.ObjectMapper objectMapper;
@@ -86,7 +86,7 @@ void pushEvent_ThrowsException_WhenRedisFails() {
 
     @Test
     void getAgentIdBySecret_UsesHashedKey() {
-        org.springframework.data.redis.core.ValueOperations<String, Object> valueOperations =
+        org.springframework.data.redis.core.ValueOperations<String, String> valueOperations =
                 mock(org.springframework.data.redis.core.ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("auth:agent:" + RedisService.sha256Hex("s3cr3t"))).thenReturn("agent-9");

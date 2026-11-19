@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     # silenziosamente scartato dal LTRIM. 100 comandi coprono un burst di
     # contenimento mentre l'agente e' momentaneamente offline.
     COMMAND_QUEUE_MAX: int = 100
+    # At-least-once delivery: un comando non ackato torna in coda dopo questo
+    # lease; oltre COMMAND_MAX_DELIVERIES finisce in DLQ invece di loopare.
+    COMMAND_VISIBILITY_TIMEOUT_S: int = 60
+    COMMAND_MAX_DELIVERIES: int = 5
 
     # Rate limiting (audit S1). Lo storage in memoria vale solo per il singolo
     # processo uvicorn: in pilot/HA va puntato a Redis (es. redis://...).
