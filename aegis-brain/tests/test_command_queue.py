@@ -1,6 +1,10 @@
 """Coda comandi bounded e consegna at-least-once (ack + visibility timeout)."""
 import asyncio
+import json
 import os
+import subprocess
+import sys
+import textwrap
 
 import pytest
 import redis.asyncio as redis
@@ -154,6 +158,63 @@ async def test_consumer_restart_after_execution_redelivers_the_same_command(real
     assert await ack_command(restarted, agent, delivery_id=second[0]["delivery_id"]) is False
     assert await restarted.llen(f"aegis:commands:{agent}:processing") == 0
     await restarted.aclose()
+
+
+@pytest.mark.asyncio
+async def test_worker_process_exit_before_ack_is_recovered_by_new_process(real_redis):
+    """Kill a separate worker process after execution, then recover in another."""
+    url = os.getenv("AEGIS_TEST_REDIS_URL", "redis://127.0.0.1:6379/15")
+    agent = "agent-process-restart"
+    await enqueue_command(real_redis, agent, {"command": "KILL_PROCESS"}, max_length=10)
+
+    child = textwrap.dedent("""
+        import asyncio, json, os
+        import redis.asyncio as redis
+        from app.services.command_queue import ack_command, pop_commands
+
+        async def main():
+            client = redis.from_url(os.environ["TEST_REDIS_URL"], decode_responses=True)
+            try:
+                commands = await pop_commands(
+                    client, os.environ["TEST_AGENT"], 1,
+                    visibility=1, max_deliveries=5,
+                )
+                if os.environ.get("ACK") == "1":
+                    for command in commands:
+                        await ack_command(
+                            client, os.environ["TEST_AGENT"],
+                            delivery_id=command["delivery_id"],
+                        )
+                print(json.dumps(commands))
+            finally:
+                await client.aclose()
+
+        asyncio.run(main())
+    """)
+    env = os.environ.copy()
+    env["TEST_REDIS_URL"] = url
+    env["TEST_AGENT"] = agent
+    env["PYTHONPATH"] = os.getcwd() + os.pathsep + env.get("PYTHONPATH", "")
+
+    first = subprocess.run(
+        [sys.executable, "-c", child], cwd=os.getcwd(), env=env,
+        capture_output=True, text=True, timeout=20,
+    )
+    assert first.returncode == 0, first.stderr[-2000:]
+    first_command = json.loads(first.stdout.strip().splitlines()[-1])[0]
+
+    await asyncio.sleep(2.1)
+    env["ACK"] = "1"
+    second = subprocess.run(
+        [sys.executable, "-c", child], cwd=os.getcwd(), env=env,
+        capture_output=True, text=True, timeout=20,
+    )
+    assert second.returncode == 0, second.stderr[-2000:]
+    second_command = json.loads(second.stdout.strip().splitlines()[-1])[0]
+
+    assert second_command["delivery_id"] == first_command["delivery_id"]
+    assert second_command["delivery_attempt"] == 2
+    assert await real_redis.llen(f"aegis:commands:{agent}:processing") == 0
 
 
 @pytest.mark.asyncio

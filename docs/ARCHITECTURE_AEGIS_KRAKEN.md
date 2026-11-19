@@ -281,9 +281,9 @@ upload/download/delete e due oggetti identici indipendenti. Esito `PASS`.
 | Link, test | `mvn -B -q test`, JDK 25 | verde |
 | Link, ack live | claim con `delivery_id`, ack, doppio ack idempotente, requeue senza ack | verde |
 | Link, evento live | POST evento → `202 accepted`; Redis queue/processing/DLQ `0/0/0`; riga `telemetry` in Postgres | verde |
-| Brain, coda comandi | `test_command_queue.py` su Redis reale | 7 passed |
+| Brain, coda comandi | `test_command_queue.py` su Redis reale | 8 passed |
 | Brain, cap concorrente | 20 producer, cap 5: 5 accodati, 15 `queue_full` | verde |
-| Brain, restart consumer | claim, connessione chiusa senza ack, nuova connessione dopo il lease | stesso `delivery_id`, `attempt=2` |
+| Brain, restart consumer | processo worker esce senza ack, nuovo processo dopo il lease | stesso `delivery_id`, `attempt=2` |
 | Link, cap 50k | 50.001 richieste HTTP, 128 worker, Redis senza consumer | 50.000 accepted, 1 × 429, LLEN 50.000, 0 × 5xx |
 | Agente Go | `go test -count=1 ./...` | tutti i package verdi |
 | Profilo unificato | `--profile unified --check` | exit 0 |

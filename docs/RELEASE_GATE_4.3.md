@@ -28,8 +28,9 @@ belong to the 4.5 Network Visibility track, not to this release.
 | Link tests | `mvn -B test`, JDK 25, four test classes | **27 passed** |
 | Link Redis-down path | controller tests: Redis exception → spool; Redis + spool down → 503, never a false 202 | **PASS** |
 | Link 50k live cap | 50,001 HTTP events, 128 client workers, dedicated Redis with no consumer, spool disabled; 50,000 accepted, 1 × 429, `LLEN aegis:events = 50000`, 0 × 5xx, p95 160.1 ms | **PASS** |
-| Brain command queue | `test_command_queue.py` on real Redis | **7 passed** |
-| Brain restart | claim, close the consumer connection without ack, new connection after the lease: same `delivery_id`, `delivery_attempt=2`, ack idempotent | **PASS** |
+| Brain command queue | `test_command_queue.py` on real Redis | **8 passed** |
+| Brain restart | worker process claims and exits without ack; a second process recovers the same command after the lease, `delivery_attempt=2`, then acks | **PASS** |
+| Release bundle local | `v4.3.0-rc1`, 22 files, manifest/checksums and smoke test from a copied bundle | **PASS (local)** |
 | Brain concurrent cap | 20 producers, cap 5: 5 queued, 15 `queue_full` | **PASS** |
 | Link command ack | claim, ack, duplicate ack, requeue without ack | **PASS** |
 | Link live event | `POST /api/v1/events` → `202 accepted`; Redis queue/processing/DLQ `0/0/0`; row in `telemetry` | **PASS** |
@@ -53,8 +54,8 @@ must pass before the release is pushed.**
 | # | Gate | Status | Evidence / what remains |
 |---|---|---|---|
 | 1 | **AP-122** Link atomic check+push and 50k load | **PASS** | 50k live run above; keep the raw JSON with the release evidence |
-| 2 | **AP-123** crash/restart and duplicate visibility | **PARTIAL** | New-connection restart and idempotent ack pass. A real OS-process kill between execution and ack, plus the UI “queued ≠ executed” duplicate indication, are still open |
-| 3 | Release bundle from a clean download | **NOT RUN** | Build `v4.3.0-rc1` bundle, verify `SHA256SUMS.txt`, SBOM, installer and rollback assets from a downloaded copy |
+| 2 | **AP-123** crash/restart and duplicate visibility | **PARTIAL** | Worker-process exit/restart and idempotent ack pass. The UI “queued ≠ executed” duplicate indication is still open |
+| 3 | Release bundle from a clean download | **PARTIAL** | Local bundle from HEAD and smoke test from a copied bundle pass (22 files). A real GitHub download, signature/provenance and rollback assets are still unverified |
 | 4 | Upgrade/rollback from 4.2.1 | **NOT RUN** | Windows and Linux: identity/spool migration, schema upgrade, restore, rollback to the previous tag |
 | 5 | Hosted CI at the tag | **NOT RUN** | CI is tag/manual only. A local green run is not a hosted run; the `v4.3.0-rc1` tag workflow must be green |
 | 6 | **Clean install from the downloaded bundle** | **NOT RUN** | Fresh machine/directory, no seeded data, install → enroll → live event → alert → uninstall, then repeat from the downloaded asset. **This is the gate before push** |
