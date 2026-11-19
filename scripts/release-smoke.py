@@ -43,11 +43,38 @@ def main() -> int:
         if actual != item["sha256"]:
             print(f"[X] checksum mismatch: {item['name']}")
             return 1
-    checksums = {}
-    for line in checksums_path.read_text(encoding="utf-8").splitlines():
-        if "  " in line:
-            digest, name = line.split("  ", 1)
-            checksums[name] = digest
+    # Check the raw bytes first: splitlines() hides CRLF, and a CRLF checksum
+    # file makes `sha256sum -c` fail because each name keeps a trailing '\r'.
+    raw_checksums = checksums_path.read_bytes()
+    if b"\r" in raw_checksums:
+        print("[X] SHA256SUMS.txt contains CR; release checksums must be LF-only")
+        return 1
+    try:
+        checksum_text = raw_checksums.decode("utf-8")
+    except UnicodeDecodeError:
+        print("[X] SHA256SUMS.txt is not valid UTF-8")
+        return 1
+    checksums: dict[str, str] = {}
+    for lineno, line in enumerate(checksum_text.split("\n"), 1):
+        if not line:
+            continue
+        if "  " not in line:
+            print(f"[X] malformed SHA256SUMS.txt line {lineno}: {line!r}")
+            return 1
+        digest, name = line.split("  ", 1)
+        if name in checksums:
+            print(f"[X] duplicate checksum entry: {name}")
+            return 1
+        checksums[name] = digest
+    manifest_names = {item["name"] for item in manifest.get("files", [])}
+    missing = sorted(manifest_names - set(checksums))
+    extra = sorted(set(checksums) - manifest_names)
+    if missing or extra:
+        if missing:
+            print(f"[X] SHA256SUMS.txt missing: {', '.join(missing)}")
+        if extra:
+            print(f"[X] SHA256SUMS.txt has unexpected entries: {', '.join(extra)}")
+        return 1
     for item in manifest.get("files", []):
         if checksums.get(item["name"]) != item["sha256"]:
             print(f"[X] SHA256SUMS mismatch: {item['name']}")

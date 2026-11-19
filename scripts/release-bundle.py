@@ -168,8 +168,13 @@ def main() -> int:
     if not files:
         raise SystemExit("[X] release bundle is empty")
 
+    # Write LF bytes explicitly: Path.write_text() applies the platform newline
+    # translation, and a CRLF SHA256SUMS.txt makes `sha256sum -c` fail on Unix
+    # and on Git Bash because the file name keeps a trailing '\r'.
     digest_lines = [f"{item['sha256']}  {item['name']}" for item in files]
-    (out / "SHA256SUMS.txt").write_text("\n".join(digest_lines) + "\n", encoding="utf-8")
+    (out / "SHA256SUMS.txt").write_bytes(
+        ("\n".join(digest_lines) + "\n").encode("utf-8")
+    )
     manifest = {
         "version": args.version,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -181,8 +186,8 @@ def main() -> int:
         "image_sboms": image_sboms,
         "signature": "not produced; 4.3.0 is unsigned by decision (RELEASE_SIGNING.md)",
     }
-    (out / "RELEASE_MANIFEST.json").write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    (out / "RELEASE_MANIFEST.json").write_bytes(
+        (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
     )
     print(f"Release bundle {args.version}: {len(files)} files in {out}")
     for item in files:
