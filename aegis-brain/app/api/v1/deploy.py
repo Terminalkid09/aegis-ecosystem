@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Header, Query
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -621,6 +621,22 @@ async def get_manifest():
     return bundle
 
 
+def _artifact_response(path: Path, name: str) -> Response:
+    """Return an artifact without Starlette's streaming FileResponse.
+
+    Starlette 1.10.0 wrapped by BaseHTTPMiddleware drops the body of a
+    FileResponse: the client receives Content-Length and zero bytes. That
+    breaks the one-liner install path, which downloads exactly these files.
+    The agent archives are single-digit MB, so a bounded in-memory response
+    is safer than a streaming path that silently truncates.
+    """
+    return Response(
+        content=path.read_bytes(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
 @router.get("/artifacts/{name}")
 async def download_artifact(name: str, agent=Depends(get_current_agent)):
     """Serve artifact all'agente autenticato (l'update lo scarica da qui)."""
@@ -630,7 +646,7 @@ async def download_artifact(name: str, agent=Depends(get_current_agent)):
     path = Path(settings.ARTIFACT_DIR) / safe
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Artifact not found")
-    return FileResponse(path, filename=safe)
+    return _artifact_response(path, safe)
 
 
 @router.get("/bootstrap-artifacts/{name}")
@@ -654,7 +670,7 @@ async def download_bootstrap_artifact(
     path = Path(settings.ARTIFACT_DIR) / safe
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Artifact not found")
-    return FileResponse(path, filename=safe)
+    return _artifact_response(path, safe)
 
 
 class UpdateCommandRequest(BaseModel):

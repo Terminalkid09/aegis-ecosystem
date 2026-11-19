@@ -40,7 +40,7 @@ def check_agent_assets(root: Path) -> list[str]:
     for name, magic in (("aegis-agent-windows-amd64.exe", b"MZ"),
                         ("aegis-agent-linux-amd64", b"\x7fELF")):
         path = root / name
-        if path.is_file() and _binary_magic(path) != magic:
+        if path.is_file() and not _binary_magic(path).startswith(magic):
             problems.append(f"{name} is not a {magic!r} executable")
 
     zip_path = root / "unified-latest.zip"

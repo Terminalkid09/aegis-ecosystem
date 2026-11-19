@@ -149,3 +149,22 @@ def test_unified_is_a_single_agent_installer_not_both_legacy():
     assert 'aegis-agent' in INSTALL_PS1
     assert '"unified"' in INSTALL_SH
     assert 'aegis-agent' in INSTALL_SH
+
+
+def test_artifact_response_does_not_use_streaming_file_response(tmp_path):
+    """Starlette 1.10 + BaseHTTPMiddleware drops FileResponse bodies.
+
+    The installer downloads its artifact from these endpoints; a zero-byte
+    200 with a valid Content-Length broke every one-liner install.
+    """
+    payload = b"unified-agent-archive"
+    path = tmp_path / "unified-latest.zip"
+    path.write_bytes(payload)
+
+    response = deploy._artifact_response(path, "unified-latest.zip")
+
+    assert response.body == payload
+    assert response.media_type == "application/octet-stream"
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="unified-latest.zip"'
+    )
