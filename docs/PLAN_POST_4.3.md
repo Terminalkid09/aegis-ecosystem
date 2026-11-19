@@ -225,9 +225,10 @@ ma era una perdita definitiva se il mittente non ritentava. Non c'era
 
 Oggi, se la coda è piena o Redis è irraggiungibile, Link scrive un file nello
 spool durevole e risponde `202 spooled`; se anche lo spool non è disponibile
-risponde `429` con `Retry-After`. Resta il check+push **non atomico**: due
-producer possono superare il cap. Non è “coda piena = dati al sicuro”; è solo
-un tetto anti-OOM.
+risponde `429` con `Retry-After`. Il check+push è **atomico** (Lua
+`LLEN`+`LPUSH`): il `202` viene restituito solo se Redis o lo spool hanno
+accettato l'evento. Resta da fare il test di carico con producer concorrenti;
+il cap non è “dati al sicuro”, è un tetto anti-OOM. AP-122 è in Test, non Done.
 
 ### 4.3 Cosa succedeva con i comandi (prima del fix)
 
@@ -250,9 +251,10 @@ garanzia è at-least-once.
   ritentabile. Lo spool ha un limite e il drop da spool pieno deve essere
   contato.
 - **Link**: se resta un percorso di ingestion, deve avere un contratto
-  esplicito: `Retry-After`, body `queue_full`, metrica, check+push atomico e,
-  per i flussi che devono sopravvivere a Redis pieno, buffer locale persistente.
-  Syslog UDP resta at-most-once per natura e va dichiarato.
+  esplicito: `Retry-After`, body `queue_full`, metrica, test di carico del
+  check+push atomico e, per i flussi che devono sopravvivere a Redis pieno,
+  buffer locale persistente. Syslog UDP resta at-most-once per natura e va
+  dichiarato.
 - **Comandi**: processing list + ack + requeue, idempotency key, cap atomico,
   `queue_full` propagato come 503/202 esplicito.
 

@@ -34,7 +34,7 @@
 
 | Area | Capabilities |
 |------|-------------|
-| **Endpoint (XDR)** | Guard (Java) + NodeTrace (Python) agents: process lineage, persistence, masquerading, security-control tampering; 9 remediation actions (kill, quarantine, isolate, sinkhole…) |
+| **Endpoint (XDR)** | AegisAgent 4.3 (Go, profili `sensor`/`endpoint`/`unified`): process lineage, persistence, masquerading, security-control tampering; remediation actions (kill, quarantine, isolate, sinkhole…). Guard Java e NodeTrace Python restano i runtime legacy di riferimento durante il cutover. |
 | **Kernel telemetry** | eBPF probes on Linux (`sched_process_exec`, TCP via ringbuf, verified 300/300 events on kernel 6.6); ETW kernel providers on Windows (user-mode consumer, no driver, no signing) |
 | **SIEM ingestion** | Syslog (RFC 3164/5424), Windows Event Log, Zeek, Suricata, nginx/Squid, pfSense/iptables — one pipeline, parser auto-detection, real UDP/TCP listener |
 | **Detection** | 21 static rules with MITRE mapping, custom AND/OR rules, **Sigma engine** (modifiers, mapping, fail-loud exclusions), threshold + sequence correlation over Redis windows |
@@ -219,7 +219,7 @@ python scripts/run_integration_tests.py --import-mode=importlib
 # Guard tests (140 JUnit)
 cd aegis-guard && mvn -B test
 
-# Link tests (17 JUnit)
+# Link tests (25 JUnit)
 cd aegis-link && mvn -B test
 
 # NodeTrace unit tests
@@ -246,43 +246,42 @@ Aegis is built as a set of small services that speak one event model.
 ### High-Level Architecture
 
 ```
- Endpoints / Syslog sources
-   │                │
-   │ agents         │ raw logs (rsyslog, firewall, proxy…)
-   ▼                ▼
-┌──────────┐   ┌──────────┐
-│  Guard   │   │  NodeTrace│        ┌─────────────────────┐
-│  (Java)  │   │ (Python) │──────▶ │      Aegis-Link      │
-└────┬─────┘   └──────────┘        │   (Spring Boot)      │
-     │                             │ ingest gateway, mTLS │
-     │        enrollment, commands, PKI                 │
-     ▼                             └──────────┬──────────┘
-┌───────────────────────────────────┐           │
-│           Aegis-Brain (FastAPI)   │      Redis (queue/cache)
-│  telemetry → detection → alerts   │◀──────────┘
-│  Sigma · correlation · SOAR · FIM │           │
-│  YARA · Total · OSINT · AI        │           ▼
-│  search · OCSF export · audit     │      PostgreSQL
-└───────────────┬───────────────────┘   (partitioned event store)
-                │
-                ▼
-        ┌──────────────┐        ┌──────────────────────────┐
-        │   Dashboard   │        │ Optional: Prometheus +   │
-        │  (React 19)   │        │ Grafana · Ollama (AI) ·  │
-        │  ws realtime  │        │ Caddy (TLS, mTLS)        │
-        └──────────────┘        └──────────────────────────┘
+ Endpoints                         Syslog / legacy sources
+   │                                         │
+   │ AegisAgent (Go)                         │ raw logs
+   │ telemetry, commands, PKI                ▼
+   │                                  ┌──────────────┐
+   │                                  │  Aegis-Link  │ optional
+   │                                  │  Spring Boot │
+   │                                  └──────┬───────┘
+   │                                         │ events
+   ▼                                         ▼
+┌──────────────────────────────────────────────────────┐
+│              Aegis-Brain (FastAPI)                   │
+│  telemetry → detection → alerts → SOAR · Sigma · FIM │
+└───────────────────┬──────────────────────────────────┘
+                    │
+        Redis (commands/queue) + PostgreSQL
+                    │
+                    ▼
+        Dashboard (React) / Caddy
+
+Optional: Prometheus + Grafana · Ollama (AI)
 ```
 
-**Topology.** Each agent knows a single endpoint (`AEGIS_BRAIN_URL` for enrollment, commands and PKI; `AEGIS_GATEWAY_URL` for high-rate telemetry via `aegis-link`, which queues into Redis for the brain to consume). Dashboards are just browsers reading the brain: adding an operator is a registration, adding a host is an enrollment — agents never need to know about dashboards, and dashboards never talk to agents.
+**Architecture diagrams:** [English gallery](docs/diagrams/README.md) — editable draw.io sources with PNG/SVG exports.
+
+**Topology.** Each agent knows a single Brain endpoint (`AEGIS_BRAIN_URL` for enrollment, commands, telemetry and PKI). The Go `sensor`/`endpoint`/`unified` agent sends telemetry directly to the Brain; it does not use `aegis-link`. `aegis-link` is the optional Spring Boot gateway for syslog/legacy event ingestion, and queues those events into Redis for the Brain consumer. Dashboard users are just browsers reading the Brain: adding an operator is a registration, adding a host is an enrollment — agents never need to know about dashboards, and dashboards never talk to agents. A network sensor is a separate product (`aegis-net-sensor`, 4.5), not another agent profile.
 
 ### Components
 
 | Component | Stack | Role |
 | --- | --- | --- |
 | `aegis-brain` | FastAPI, SQLAlchemy, PostgreSQL, Redis | API, auth, telemetry processing, rules, alerts, VaultX, AI/OSINT, SOAR playbooks, syslog ingestion, audit logging |
-| `aegis-link` | Spring Boot | Agent/syslog ingestion gateway; pushes events to Redis |
-| `aegis-guard` | Java 25 | Endpoint security agent and mitigation command consumer |
-| `NodeTrace` | Python | Host telemetry agent for CPU/RAM/process/users/network flows |
+| `aegis-link` | Spring Boot | Optional syslog/legacy event gateway; pushes events to Redis. Not on the Go agent telemetry path |
+| `aegis-agent` | Go | Single agent binary: `sensor` (telemetry), `endpoint` (EDR) and `unified` (both); 4.3 cutover |
+| `aegis-guard` | Java 25 | Legacy endpoint security agent, reference during cutover |
+| `NodeTrace` | Python | Legacy host telemetry agent, reference during cutover |
 | `frontend` | React 19, TypeScript, Vite | Dashboard for alerts, agents, rules, VaultX, OSINT, AI, playbooks, syslog viewer, audit log |
 
 ---
@@ -295,7 +294,7 @@ Every source enters the **same** event model and the **same** detection engine. 
 |---|---|---|---|
 | **eBPF** (`aegis-ebpf/`) | Linux, kernel | `sched_process_exec`, `do_exit`, TCP ESTABLISHED via ringbuf | no (kernel verifier) |
 | **ETW kernel providers** (`aegis_etw.c`) | Windows, user-mode consumer | `Kernel-Process` 1/2, `Kernel-Network` TcpIp | no (system providers) |
-| **Endpoint agents** | host | Guard (processes, persistence, services), NodeTrace (CPU/RAM/disk/network/users) | signed enrollment + mTLS |
+| **Endpoint agents** | host | AegisAgent Go: sensor (CPU/RAM/disk/network/users), endpoint (processes, persistence, services, response), unified (both). Legacy Guard/NodeTrace remain for rollback. | signed enrollment + mTLS |
 | **Log sources** | appliance, server | syslog RFC5424/3164, Windows Event, Zeek, Suricata, nginx/Squid, firewall | none: one config line toward the endpoint |
 
 On Linux, kernel telemetry is native (eBPF — 300/300 events verified without loss on kernel 6.6 with BTF). On Windows it runs through ETW: `aegis_etw.c` is a **user-mode** consumer of system providers (no driver, no signing), spawned by Guard itself and read from its stdout. It is **on by default** when the collector is present: `aegis.bat agents` (and the installer) compile or deploy `aegis-etw.exe`, point `AEGIS_ETW_PATH` at its absolute path and set `AEGIS_ETW_ALLOW_UNSIGNED=true` — the helper is built locally and carries no Authenticode signature, so Guard needs that explicit opt-in before executing it. The stream is **actually ingested**, not just probed: each kernel event enters the same enrichment pipeline as the poll (path, hash, Authenticode, command line) tagged `provenance=etw`, and the Toolhelp32 poll stays as the backstop (persistence, services, Defender, netstat) with a 15s dedup window so a process seen at kernel latency is not re-reported by the poll. If the collector is missing, Guard falls back to polling and **says so** (`quality=degraded:etw-…`): a missing capability, never a silent failure.
@@ -306,14 +305,14 @@ ETW requires a trace session, i.e. **administrative rights**: without them the c
 
 Docker containers come back on their own (`restart: unless-stopped`), but host agents started by hand die with the session. Autostart is a property of the **installation**, not a manual step:
 
-- **Both agents are Windows services (NSSM)** — `AegisGuard` and `AegisNodeTrace` — installed by their installers (`aegis-guard\install\windows\install.ps1`, `NodeTrace\install\windows\install.ps1`; elevated shell, auto-start, restart-on-crash, log file). Uninstall with the matching `uninstall.ps1`. One command does it, requesting elevation itself: **`aegis.bat services`** (or menu option `[S]`). It reports failure explicitly: an install that did not happen never claims success, and the hand-started agents are left running so no endpoint is left uncovered.
+- **Legacy Guard and NodeTrace are Windows services (NSSM)** — `AegisGuard` and `AegisNodeTrace` — installed by their installers (`aegis-guard\install\windows\install.ps1`, `NodeTrace\install\windows\install.ps1`; elevated shell, auto-start, restart-on-crash, log file). Uninstall with the matching `uninstall.ps1`. One command does it, requesting elevation itself: **`aegis.bat services`** (or menu option `[S]`). It reports failure explicitly: an install that did not happen never claims success, and the hand-started agents are left running so no endpoint is left uncovered. The 4.3 Go `unified` profile reuses this installer path only after its service/package gate (AP-115); do not assume the legacy NSSM service is the unified installer.
 - **`python scripts/setup.py` registers them for you** when it runs elevated; if it is not elevated, it prints the exact commands instead of leaving a silent gap. Use `--no-autostart` to force dev-mode agents only (never two instances per endpoint: either services **or** dev processes).
 - **No-admin fallback**: `powershell -ExecutionPolicy Bypass -File scripts/install-agents-autostart.ps1` registers Scheduled Tasks "at log on" (user context; elevated Guard actions unavailable). Remove with `-Remove`.
 - **Token installer**: when remote dashboard connectivity is selected, the installer performs the service registration itself and verifies the service is running before returning success.
 
 ### Remote enrollment: install an agent on another host
 
-Generate a short-lived token in **Deployment Manager** (`Aegis-Guard`, `NodeTrace` or **both**, one slot consumed per agent), then run the one-liner it shows **in an Administrator PowerShell on the target**:
+Generate a short-lived token in **Deployment Manager** (`AegisAgent` unified, `Aegis-Guard`, `NodeTrace` or **both** legacy; one slot consumed per agent), then run the one-liner it shows **in an Administrator PowerShell on the target**. Il percorso `unified` richiede ancora l'artefatto `unified-latest.zip` e il servizio/installer di produzione.
 
 ```powershell
 irm <brain>/api/v1/deploy/install.ps1?agent=both -Headers @{'X-Enroll-Token'='<token>'} | iex
@@ -386,7 +385,7 @@ Build all agents with a single command: `build.bat`. If `JAVA_HOME` still points
   ```
 
   Without at least one `admin`, host isolation, deploy approval, rule and alert deletion and site assignment all return 403 by design. `set-role` refuses to demote the last remaining admin unless `--force` is given.
-- **Agents**: enrollment key at registration, then per-agent Bearer token (NodeTrace) or gateway API key (Aegis-Link). NodeTrace validates that token once at startup with an authenticated call: if the brain rejects it (401) the agent re-enrolls, which is the brain's own recovery path — the same `device_id` is kept, and a **revoked** device is refused (403), so this is not a way back in. Its identity files (`token.json`, device key/certificate) are resolved against a **fixed absolute directory** (`NODETRACE_IDENTITY_DIR`, default: the agent's own folder), never the current working directory.
+- **Agents**: enrollment key at registration, then per-agent Bearer token (NodeTrace) or gateway API key (Aegis-Link for syslog/legacy ingestion). NodeTrace validates that token once at startup with an authenticated call: if the brain rejects it (401) the agent re-enrolls, which is the brain's own recovery path — the same `device_id` is kept, and a **revoked** device is refused (403), so this is not a way back in. Its identity files (`token.json`, device key/certificate) are resolved against a **fixed absolute directory** (`NODETRACE_IDENTITY_DIR`, default: the agent's own folder), never the current working directory.
 - **Aegis-Link**: `X-Api-Key` for event ingestion — server-side only, never exposed to the React app.
 
 The global `AEGIS_API_KEY` is for Aegis-Link and automation scripts. It does **not** grant dashboard access.

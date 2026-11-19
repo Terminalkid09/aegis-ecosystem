@@ -4,9 +4,11 @@ Status: 2026-11-19. This gate defines what 4.3.0 may claim.
 
 ## Decision
 
-**4.3.0 is a lab-validated product release, not a certified malware-analysis
-release.** It can be tagged after the final packaging gate. It must not claim
-real-malware detonation, AWS certification, or production FP/FN rates.
+**4.3.0 is a product-complete release candidate for controlled pilots, not a
+certified malware-analysis release.** It is not a prototype: the core paths
+are implemented, tested and documented. It can be tagged after the final
+packaging gate. It must not claim real-malware detonation, AWS certification,
+production FP/FN rates, or production GA.
 
 Real detonation, controlled malware samples and adversarial detection quality
 are tracked in the **post-4.3 live-validation roadmap**:
@@ -47,6 +49,23 @@ These are packaging/verification items, not new features:
    acceptance test, not a reason to block the code review.
 5. **Link event path** is now green; no longer a blocker.
 
+## Production gap after 4.3.0
+
+This section is deliberately outside the 4.3.0 claim. It is the difference
+between a controlled-pilot product and a production GA:
+
+- upgrade/rollback from 4.2.1 on Windows and Linux, with an identity/spool
+  migration test;
+- signed MSI/deb/rpm packages and service drop-in, without `irm|iex` or
+  `curl|bash` as the production path;
+- crash between command execution and ack, visibility-timeout recovery and
+  duplicate-action visibility in the UI;
+- 50k concurrent producers, Redis full, spool full and consumer restart;
+- 7-day soak with memory/leak checks and restart;
+- clean install on a fresh machine with no seeded data;
+- real endpoint traffic and real malware validation (AP-126);
+- external security review/pen test and a backup/restore drill.
+
 Real detonation and AWS are **not** blockers for 4.3.0:
 
 - real detonation: AP-126, post-4.3;
@@ -55,6 +74,7 @@ Real detonation and AWS are **not** blockers for 4.3.0:
 
 ## Allowed claims for 4.3.0
 
+- a product-complete release candidate for controlled pilots;
 - static file analysis and **optional external detonation integration**;
 - at-least-once command delivery, with possible duplicates after a crash;
 - S3-compatible adapter tested with Garage; AWS optional and not certified;
@@ -65,6 +85,7 @@ Real detonation and AWS are **not** blockers for 4.3.0:
 - “real malware detonation certified”;
 - “AWS tested” or “MinIO tested”;
 - “exactly-once”;
+- “production GA” or “production-ready”;
 - “production-ready detection quality”;
 - “no data loss” without a crash/restart test.
 
@@ -72,5 +93,6 @@ Real detonation and AWS are **not** blockers for 4.3.0:
 
 1. Freeze features.
 2. Run the final checks listed above.
-3. Tag `4.3.0-rc1`, verify a clean download, then tag `4.3.0`.
+3. Tag `4.3.0-rc1`, verify a clean download, then tag `4.3.0` only after the
+   open items are closed or explicitly accepted as a recorded risk.
 4. Start the live-validation track (AP-126/AP-127) only after 4.3.0.

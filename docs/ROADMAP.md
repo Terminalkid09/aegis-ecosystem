@@ -68,7 +68,7 @@ La traccia 4.3.x copre quattro debiti indipendenti dalla 4.5:
   e permessi separati.
 
 Piano dettagliato, fasi e criteri di accettazione:
-`docs/PLAN_POST_4.3.md`. I ticket operativi sono AP-118–AP-125.
+`docs/PLAN_POST_4.3.md`. I ticket operativi sono AP-118–AP-127.
 
 La **live validation post-4.3** è in `docs/ROADMAP_LIVE_VALIDATION.md`
 (English): la 4.3 non certifica malware reale, AWS resta opzionale e la

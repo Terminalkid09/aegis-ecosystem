@@ -4,6 +4,32 @@ All public diagrams in this directory are **English-only**. The editable source
 is `*.drawio`; the exported `*.png` and `*.svg` files are generated from it.
 Keep the source and exports in sync when a component is added or renamed.
 
+## Gallery
+
+### 1. Aegis + Kraken — end-to-end flow
+
+[![Aegis and Kraken end-to-end architecture](./01-aegis-kraken.png)](./01-aegis-kraken.png)
+
+[Editable source](./01-aegis-kraken.drawio) · [SVG](./01-aegis-kraken.svg)
+
+### 2. Kraken standalone — file analysis and deception
+
+[![Kraken standalone file-analysis pipeline](./02-kraken-standalone.png)](./02-kraken-standalone.png)
+
+[Editable source](./02-kraken-standalone.drawio) · [SVG](./02-kraken-standalone.svg)
+
+### 3. Kraken → Aegis — signed event sequence
+
+[![Kraken to Aegis event sequence](./03-kraken-to-aegis.png)](./03-kraken-to-aegis.png)
+
+[Editable source](./03-kraken-to-aegis.drawio) · [SVG](./03-kraken-to-aegis.svg)
+
+### 4. At-least-once command queue
+
+[![At-least-once command queue](./04-command-queue.png)](./04-command-queue.png)
+
+[Editable source](./04-command-queue.drawio) · [SVG](./04-command-queue.svg)
+
 ## Files
 
 | Source | Purpose |

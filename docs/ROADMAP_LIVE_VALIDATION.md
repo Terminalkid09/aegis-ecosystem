@@ -7,9 +7,9 @@ release boundary that matters now.
 
 ## Decision
 
-- **4.3.0** ships as a product-complete lab release: static analysis, optional
-  external detonation integration, local/Garage object storage and the
-  at-least-once command path.
+- **4.3.0** ships as a product-complete release candidate for controlled
+  pilots: static analysis, optional external detonation integration,
+  local/Garage object storage and the at-least-once command path.
 - **4.3.0 does not claim certified real-malware detonation.** The integration
   is exercised with a controlled HTTP detonator; no malware is executed on the
   host or by the web process.
@@ -24,7 +24,7 @@ release boundary that matters now.
 
 ## Phase 1 — 4.3.0 (now)
 
-**Goal:** a coherent, honest lab release.
+**Goal:** a coherent, honest controlled-pilot release candidate.
 
 Required evidence:
 
