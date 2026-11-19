@@ -222,7 +222,10 @@ def main() -> int:
     if result["failures"]:
         print("FAILED: " + "; ".join(result["failures"]), file=sys.stderr)
         return 1
-    print("PASS: 50k Link queue boundary")
+    print(
+        f"PASS: Link queue boundary ({result['accepted']} accepted, "
+        f"{result['rejected_429']} rejected)"
+    )
     return 0
 
 
