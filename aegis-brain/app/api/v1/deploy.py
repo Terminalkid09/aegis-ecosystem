@@ -79,7 +79,7 @@ def _validate_targets(targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 class EnrollTokenRequest(BaseModel):
     label: Optional[str] = None
-    agent_type: str = Field(default="aegis-guard", pattern="^(nodetrace|aegis-guard|unified|both)$")
+    agent_type: str = Field(default="unified", pattern="^(nodetrace|aegis-guard|unified|both)$")
     ttl_minutes: int = Field(default=15, ge=5, le=1440)
     dashboard_remote: bool = True
     dashboard_local: bool = False
@@ -453,7 +453,7 @@ async def _validate_install_token(x_enroll_token: str, db: AsyncSession):
 
 @router.get("/install.ps1", response_class=PlainTextResponse)
 async def install_ps1(
-    agent: str = Query("aegis-guard", pattern="^(nodetrace|aegis-guard|unified|both)$"),
+    agent: str = Query("unified", pattern="^(nodetrace|aegis-guard|unified|both)$"),
     x_enroll_token: str = Header(None, alias="X-Enroll-Token"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -472,7 +472,7 @@ async def install_ps1(
 
 @router.get("/install.sh", response_class=PlainTextResponse)
 async def install_sh(
-    agent: str = Query("aegis-guard", pattern="^(nodetrace|aegis-guard|unified|both)$"),
+    agent: str = Query("unified", pattern="^(nodetrace|aegis-guard|unified|both)$"),
     x_enroll_token: str = Header(None, alias="X-Enroll-Token"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -731,7 +731,7 @@ async def push_update_command(
 # ─── deploy jobs (mass rollout, server-side, no password storage) ──
 
 class DeployJobRequest(BaseModel):
-    agent_type: str = Field(default="nodetrace", pattern="^(nodetrace|aegis-guard|unified)$")
+    agent_type: str = Field(default="unified", pattern="^(nodetrace|aegis-guard|unified)$")
     agent_version: str = Field(default="latest", max_length=50)
     targets: List[Dict[str, Any]]
     username: Optional[str] = Field(default=None, max_length=255)

@@ -10,6 +10,8 @@ import argparse
 import hashlib
 import json
 import sys
+import tarfile
+import zipfile
 from pathlib import Path
 
 
@@ -21,10 +23,57 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _binary_magic(path: Path) -> bytes:
+    with path.open("rb") as handle:
+        return handle.read(4)
+
+
+def check_agent_assets(root: Path) -> list[str]:
+    """Validate the 4.3 Go agent without running it.
+
+    A release that claims to ship the unified agent must contain both platforms
+    and the archives the one-liner installers fetch. Checking the archive
+    contents and the executable magic catches an empty/wrong file that a
+    checksum alone would happily accept.
+    """
+    problems: list[str] = []
+    for name, magic in (("aegis-agent-windows-amd64.exe", b"MZ"),
+                        ("aegis-agent-linux-amd64", b"\x7fELF")):
+        path = root / name
+        if path.is_file() and _binary_magic(path) != magic:
+            problems.append(f"{name} is not a {magic!r} executable")
+
+    zip_path = root / "unified-latest.zip"
+    if zip_path.is_file():
+        try:
+            with zipfile.ZipFile(zip_path) as archive:
+                names = {Path(name).name for name in archive.namelist()}
+            if "aegis-agent.exe" not in names:
+                problems.append("unified-latest.zip does not contain aegis-agent.exe")
+        except zipfile.BadZipFile:
+            problems.append("unified-latest.zip is not a valid zip archive")
+
+    tar_path = root / "unified-latest.tar.gz"
+    if tar_path.is_file():
+        try:
+            with tarfile.open(tar_path, "r:gz") as archive:
+                members = {Path(m.name).name: m for m in archive.getmembers()
+                           if m.isfile()}
+            if "aegis-agent" not in members:
+                problems.append("unified-latest.tar.gz does not contain aegis-agent")
+            elif not members["aegis-agent"].mode & 0o111:
+                problems.append("unified-latest.tar.gz aegis-agent is not executable")
+        except tarfile.TarError:
+            problems.append("unified-latest.tar.gz is not a valid tar.gz archive")
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", nargs="?", default="release")
     parser.add_argument("--require-nodetrace", action="store_true")
+    parser.add_argument("--require-agent", action="store_true",
+                        help="require the Go agent binaries and unified archives")
     parser.add_argument("--require-image-sboms", action="store_true")
     args = parser.parse_args()
     root = Path(args.root).resolve()
@@ -84,9 +133,18 @@ def main() -> int:
                 "aegis-source.tar.gz", "RELEASE_SIGNING.md")
     if args.require_nodetrace:
         required += ("nodetrace.zip",)
+    if args.require_agent:
+        required += ("aegis-agent-windows-amd64.exe", "aegis-agent-linux-amd64",
+                     "unified-latest.zip", "unified-latest.tar.gz")
     for name in required:
         if not (root / name).is_file():
             print(f"[X] required release asset missing: {name}")
+            return 1
+    if args.require_agent:
+        problems = check_agent_assets(root)
+        if problems:
+            for problem in problems:
+                print(f"[X] {problem}")
             return 1
     if args.require_image_sboms and not manifest.get("image_sboms"):
         print("[X] per-image SBOMs missing from RELEASE_MANIFEST.json")

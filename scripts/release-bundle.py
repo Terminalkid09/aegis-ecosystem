@@ -121,17 +121,74 @@ def _git(*args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=ROOT, text=True).strip()
 
 
+def _agent_assets(agent_dir: Path, out: Path, version: str,
+                  required: bool) -> list[str]:
+    """Ship the Go agent next to the legacy runtimes.
+
+    4.3.0 removes the rollback requirement, not the legacy agents: Guard and
+    NodeTrace stay available during migration. But the release must contain the
+    new runtime too, otherwise the bundle can only install the legacy agents.
+    The installers fetch `unified-latest.zip` on Windows and
+    `unified-latest.tar.gz` on Linux; the versioned copies make the signed OTA
+    command (`UPDATE_AGENT` with an explicit version) resolvable, and the raw
+    executables allow a manual rollout without unpacking.
+    """
+    windows = agent_dir / "aegis-agent.exe"
+    linux = agent_dir / "aegis-agent"
+    present = [path for path in (windows, linux) if path.is_file()]
+    if not present:
+        if required:
+            raise SystemExit(f"[X] Go agent binaries missing in {agent_dir}")
+        return []
+    if required and not (windows.is_file() and linux.is_file()):
+        raise SystemExit(
+            "[X] --require-agent needs both aegis-agent.exe (Windows) and "
+            "aegis-agent (Linux)"
+        )
+    created: list[str] = []
+    for src, name in ((windows, "aegis-agent-windows-amd64.exe"),
+                      (linux, "aegis-agent-linux-amd64")):
+        if src.is_file():
+            _copy(src, out / name)
+            created.append(name)
+
+    tag = version.lstrip("v")
+    if windows.is_file():
+        with zipfile.ZipFile(out / "unified-latest.zip", "w",
+                             zipfile.ZIP_DEFLATED) as archive:
+            archive.write(windows, "aegis-agent.exe")
+        shutil.copy2(out / "unified-latest.zip", out / f"unified-{tag}.zip")
+        created += ["unified-latest.zip", f"unified-{tag}.zip"]
+    if linux.is_file():
+        for name in ("unified-latest.tar.gz", f"unified-{tag}.tar.gz"):
+            with tarfile.open(out / name, "w:gz") as archive:
+                info = tarfile.TarInfo("aegis-agent")
+                info.size = linux.stat().st_size
+                info.mode = 0o755
+                info.mtime = int(linux.stat().st_mtime)
+                with linux.open("rb") as handle:
+                    archive.addfile(info, handle)
+            created.append(name)
+    return created
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", required=True, help="release label, e.g. v4.1.0-rc1")
     parser.add_argument("--out", default="release")
     parser.add_argument("--force", action="store_true", help="replace an existing bundle")
     parser.add_argument("--sbom-dir", help="directory with per-image CycloneDX SBOMs")
+    parser.add_argument("--agent-dir",
+                        help="directory with aegis-agent.exe (Windows) and aegis-agent (Linux)")
+    parser.add_argument("--require-agent", action="store_true",
+                        help="fail if the Go agent binaries are absent")
     parser.add_argument("--require-nodetrace", action="store_true",
                         help="fail if the Windows NodeTrace bundle is absent")
     args = parser.parse_args()
     if not re.fullmatch(r"v?[0-9]+\.[0-9]+\.[0-9]+(?:-rc[0-9]+)?", args.version):
         raise SystemExit("version must be SemVer or vX.Y.Z-rcN")
+    if args.require_agent and not args.agent_dir:
+        raise SystemExit("[X] --require-agent needs --agent-dir")
     out = (ROOT / args.out).resolve()
     if out.exists():
         if not args.force:
@@ -154,6 +211,13 @@ def main() -> int:
     frontend = ROOT / "frontend/dist"
     if frontend.is_dir():
         _zip_tree(frontend, out / "frontend.zip")
+
+    agent_files: list[str] = []
+    if args.agent_dir:
+        agent_dir = (ROOT / args.agent_dir).resolve()
+        if not agent_dir.is_dir():
+            raise SystemExit(f"[X] Go agent directory missing: {agent_dir}")
+        agent_files = _agent_assets(agent_dir, out, args.version, args.require_agent)
 
     sbom = ROOT / "sbom.cyclonedx.json"
     if not sbom.is_file():
@@ -210,8 +274,9 @@ def main() -> int:
         "git_commit": _git("rev-parse", "HEAD"),
         "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
         "components": ["aegis-brain", "aegis-guard", "aegis-link", "frontend",
-                       "NodeTrace", "services/kraken"],
+                       "NodeTrace", "aegis-agent", "services/kraken"],
         "files": files,
+        "agent_files": agent_files,
         "image_sboms": image_sboms,
         "signature": "not produced; 4.3.0 is unsigned by decision (RELEASE_SIGNING.md)",
     }

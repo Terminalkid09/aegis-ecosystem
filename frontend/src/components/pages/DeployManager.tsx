@@ -24,14 +24,14 @@ export default function DeployManager() {
 
   // Token Form
   const [tokenLabel, setTokenLabel] = useState('')
-  const [tokenAgent, setTokenAgent] = useState('aegis-guard')
+  const [tokenAgent, setTokenAgent] = useState('unified')
   const [tokenTargetHost, setTokenTargetHost] = useState('')
   const [dashboardRemote, setDashboardRemote] = useState(true)
   const [lastToken, setLastToken] = useState<any>(null)
   const [copied, setCopied] = useState('')
 
   // Job Form
-  const [agentType, setAgentType] = useState('nodetrace')
+  const [agentType, setAgentType] = useState('unified')
   const [method, setMethod] = useState('oneline')
   const [ipText, setIpText] = useState('')
   const [username, setUsername] = useState('')

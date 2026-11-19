@@ -528,6 +528,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: aegis-agent/go.sum
+
       - name: Download NodeTrace Windows bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -554,6 +560,20 @@ jobs:
           # perche' in target resta anche original-aegis-guard.jar (intermedio
           # pre-shade, non e' un artefatto da spedire).
           cp aegis-guard/target/aegis-guard.jar release/
+
+      - name: Build Go agent (Windows and Linux)
+        working-directory: aegis-agent
+        run: |
+          set -euo pipefail
+          mkdir -p ../release-agent
+          VERSION="${GITHUB_REF_NAME#v}"
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath \
+            -ldflags "-s -w -X main.buildVersion=${VERSION}" \
+            -o ../release-agent/aegis-agent.exe ./cmd/aegis-agent
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+            -ldflags "-s -w -X main.buildVersion=${VERSION}" \
+            -o ../release-agent/aegis-agent ./cmd/aegis-agent
+          ls -lh ../release-agent
 
       - name: Setup Node.js for release frontend
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -606,6 +626,8 @@ jobs:
             --out release \
             --force \
             --sbom-dir release-image-sboms \
+            --agent-dir release-agent \
+            --require-agent \
             --require-nodetrace
 
       - name: Save release images
@@ -636,6 +658,7 @@ jobs:
       - name: Smoke test downloaded bundle
         run: |
           python scripts/release-smoke.py release \
+            --require-agent \
             --require-nodetrace \
             --require-image-sboms
 

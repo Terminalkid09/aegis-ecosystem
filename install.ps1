@@ -18,6 +18,13 @@ if ($Observability) {
 Write-Host "[1/4] Build..." -ForegroundColor Cyan; Invoke-Expression "$compose build"
 Write-Host "[2/4] Avvio stack..." -ForegroundColor Cyan; Invoke-Expression "$compose up -d --remove-orphans"
 Write-Host "[3/4] Attesa healthcheck..." -ForegroundColor Cyan; Start-Sleep -Seconds 10; Invoke-Expression "$compose ps"
+# Il bundle 4.3 include l'agente Go: pubblichiamo gli archivi nel volume che
+# il Brain serve agli installer, cosi' il one-liner non richiede una copia
+# manuale. Se il bundle e' legacy-only il glob non matcha e non succede nulla.
+Get-ChildItem -Path "unified-*" -ErrorAction SilentlyContinue | ForEach-Object {
+  try { Invoke-Expression "$compose cp `"$($_.Name)`" aegis-brain:/app/artifacts/" }
+  catch { Write-Warning "impossibile pubblicare $($_.Name) in aegis-brain:/app/artifacts" }
+}
 Write-Host "[4/4] Verifica health..." -ForegroundColor Cyan
 try { (Invoke-WebRequest -Uri "http://localhost:8000/health/live" -UseBasicParsing -TimeoutSec 10).Content | Select-Object -First 1 } catch { Write-Warning $_ }
 if ($Mode -eq "pilot") { Write-Host "PKI bootstrap: docker compose exec aegis-brain python -m app.services.pki --dir /app/pki" -ForegroundColor Yellow }

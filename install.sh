@@ -46,6 +46,14 @@ $COMPOSE up -d --remove-orphans
 echo "[3/4] Attesa healthcheck..."
 for i in {1..30}; do if $COMPOSE ps | grep -q "healthy"; then break; fi; sleep 2; done
 $COMPOSE ps
+# Il bundle 4.3 include l'agente Go: pubblichiamo gli archivi nel volume che
+# il Brain serve agli installer, cosi' il one-liner non richiede una copia
+# manuale. Se il bundle e' legacy-only il glob non matcha e non succede nulla.
+for artifact in unified-*; do
+  [ -f "$artifact" ] || continue
+  $COMPOSE cp "$artifact" aegis-brain:/app/artifacts/ 2>/dev/null \
+    || echo "[WARN] impossibile pubblicare $artifact in aegis-brain:/app/artifacts"
+done
 echo "[4/4] Verifica health..."
 curl -sk http://localhost:8000/health/live | head -c 200; echo
 if [[ "$MODE" == "pilot" ]]; then
