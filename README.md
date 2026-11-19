@@ -219,7 +219,7 @@ python scripts/run_integration_tests.py --import-mode=importlib
 # Guard tests (140 JUnit)
 cd aegis-guard && mvn -B test
 
-# Link tests (25 JUnit)
+# Link tests (27 JUnit)
 cd aegis-link && mvn -B test
 
 # NodeTrace unit tests
@@ -573,7 +573,7 @@ aegis-ecosystem/
 
 ### CI/CD
 
-GitHub Actions runs on every push: lint (flake8 + oxlint), secret scanning, event-contract checks, Windows installer checks, OS-compat matrix (ubuntu + windows), brain + guard + link tests, frontend lint/build, pip-audit, Trivy image scanning (strict on images we build, informational on upstream images), and SBOM generation. The 4.2 workflow includes an ephemeral Compose E2E job; its first hosted run is still pending. Release jobs run on tags.
+GitHub Actions runs at the **release/tag boundary**, not on every intermediate push: lint (flake8 + oxlint), secret scanning, event-contract checks, Windows installer checks, OS-compat matrix (ubuntu + windows), brain + guard + link tests, frontend lint/build, pip-audit, Trivy image scanning (strict on images we build, informational on upstream images), SBOM generation and the ephemeral Compose E2E job. The hosted E2E run still has to be proven on the 4.3.0-rc1 tag before release; a local green run is not a substitute.
 
 ---
 

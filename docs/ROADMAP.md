@@ -44,7 +44,9 @@ Il progetto deve rimanere indipendente: il confronto con prodotti o aziende este
 - **4.5 — Network Visibility:** network sensor separato (`aegis-net-sensor`)
   per gateway e SPAN/TAP, con flow, DNS/DHCP, inventario di rete, detection e
   policy nftables/DNS. Non è un profilo `router` dell'agente endpoint e non
-  entra nel pacchetto `unified`.
+  entra nel pacchetto `unified`. Firewall e DNS rule sono feature di questa
+  traccia, non della 4.3: la 4.3 resta in feature freeze fino al gate di
+  release.
 
 Il cambio di perimetro sposta lavoro tra release, non lo elimina: le stime
 vanno ricalcolate, non presentate come ridotte.

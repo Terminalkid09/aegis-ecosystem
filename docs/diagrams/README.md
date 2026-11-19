@@ -4,6 +4,20 @@ All public diagrams in this directory are **English-only**. The editable source
 is `*.drawio`; the exported `*.png` and `*.svg` files are generated from it.
 Keep the source and exports in sync when a component is added or renamed.
 
+## Visual system
+
+The diagrams share one presentation, not the draw.io defaults:
+
+- graphite canvas with a restrained, semantic palette (blue = Aegis, violet =
+  Brain, emerald = persisted data, rose = Kraken, amber = external/optional);
+- a document header with **DOC ID, version, date and owner**;
+- a source footer and a one-line legend on every page;
+- one canvas size (1600 × 1000) so the four pages read as a series;
+- no vendor logos, screenshots, credentials or decorative clip art.
+
+The version string and document IDs live in `scripts/generate_diagrams.py`.
+Change them there, then re-export; do not edit a PNG or SVG by hand.
+
 ## Gallery
 
 ### 1. Aegis + Kraken — end-to-end flow
@@ -41,7 +55,14 @@ Keep the source and exports in sync when a component is added or renamed.
 
 ## Export
 
-Using the draw.io desktop CLI on Windows:
+Generate both the XML and the exports with the repository script:
+
+```bash
+python scripts/generate_diagrams.py --render
+```
+
+The script finds the draw.io desktop CLI in the common Windows, macOS and Linux
+paths. For a manual export on Windows:
 
 ```bash
 "/c/Program Files/draw.io/draw.io.exe" -x -f png -s 2 \
@@ -49,20 +70,18 @@ Using the draw.io desktop CLI on Windows:
   docs/diagrams/01-aegis-kraken.drawio
 ```
 
-Use `-f svg` for the SVG export. Generate the XML first with:
-
-```bash
-python scripts/generate_diagrams.py
-```
+Use `-f svg` for the SVG export. The PNG is exported at 2× (3202 × 2002) and
+the SVG remains vector, so both are readable when GitHub scales the gallery.
 
 ## Conventions
 
 - **Solid line:** control/data path that exists today.
 - **Dashed line:** optional, external, retry, or failure/recovery path.
-- **Green:** persisted state (Postgres, Redis, object store).
-- **Purple:** Brain and Aegis control/UI.
-- **Pink/red:** Kraken control/UI.
+- **Blue:** Aegis endpoint/control plane.
+- **Violet:** Brain and Aegis UI/API.
+- **Emerald:** persisted state (Postgres, Redis, object store).
+- **Rose:** Kraken control plane and sensors.
 - **Amber:** external or optional component.
-- No vendor logos, no marketing labels, no credentials.
+- **Slate:** neutral actor, boundary or note.
 - A new component must be added to `scripts/generate_diagrams.py` and to this
   table; do not hand-edit only the PNG.

@@ -1,98 +1,109 @@
 # Aegis 4.3 — Release Gate
 
-Status: 2026-11-19. This gate defines what 4.3.0 may claim.
+Status: 2026-11-19. **4.3 is still open; no `4.3.0` or `4.3.0-rc1` tag has
+been cut.** The six gates below are part of the 4.3 release cycle, not a
+post-4.3 cleanup. The cycle is deliberately longer: the product must have live
+evidence before the tag, not only unit tests and documentation.
 
 ## Decision
 
 **4.3.0 is a product-complete release candidate for controlled pilots, not a
-certified malware-analysis release.** It is not a prototype: the core paths
-are implemented, tested and documented. It can be tagged after the final
-packaging gate. It must not claim real-malware detonation, AWS certification,
-production FP/FN rates, or production GA.
+certified malware-analysis release and not production GA.** The core paths are
+implemented and tested, and the Link 50k queue boundary has live evidence. A
+tag is allowed only after every item in the six-gate table is closed or
+explicitly accepted as a recorded risk.
 
 Real detonation, controlled malware samples and adversarial detection quality
-are tracked in the **post-4.3 live-validation roadmap**:
-`docs/ROADMAP_LIVE_VALIDATION.md` (AP-126/AP-127).
+remain in **4.3.x after the 4.3.0 tag** (AP-126/AP-127). The live stack,
+delivery, upgrade/rollback and clean-install validation are **inside 4.3** and
+must not be moved to that later track.
+
+No new feature enters 4.3 while this gate is open. Firewall and DNS policy
+belong to the 4.5 Network Visibility track, not to this release.
 
 ## Evidence
 
 | Check | Evidence | Result |
 |---|---|---|
-| Link tests | `mvn -B -q test`, JDK 25 | 25 passed |
-| Link live event | `POST /api/v1/events` → `202 accepted`; Redis queue/processing/DLQ `0/0/0`; row in `telemetry` | PASS |
-| Link command ack | claim, ack, duplicate ack, requeue without ack | PASS |
-| Link atomic push | check+push in one Lua script; 202 only after `LPUSH` or spool | implemented |
-| Brain command queue | `test_command_queue.py` on real Redis, 6 tests | 6 passed |
-| Brain concurrent cap | 20 producers, cap 5: 5 queued, 15 `queue_full` | PASS |
-| Go | `go test -count=1 ./...`; `--profile unified --check` | PASS |
-| UI | `npm run build`; Playwright with Kraken seed | 13/13 |
-| S3 adapter | Garage v2.5.0 upload/download/delete, two identical samples | PASS |
+| Link tests | `mvn -B test`, JDK 25, four test classes | **27 passed** |
+| Link Redis-down path | controller tests: Redis exception → spool; Redis + spool down → 503, never a false 202 | **PASS** |
+| Link 50k live cap | 50,001 HTTP events, 128 client workers, dedicated Redis with no consumer, spool disabled; 50,000 accepted, 1 × 429, `LLEN aegis:events = 50000`, 0 × 5xx, p95 160.1 ms | **PASS** |
+| Brain command queue | `test_command_queue.py` on real Redis | **7 passed** |
+| Brain restart | claim, close the consumer connection without ack, new connection after the lease: same `delivery_id`, `delivery_attempt=2`, ack idempotent | **PASS** |
+| Brain concurrent cap | 20 producers, cap 5: 5 queued, 15 `queue_full` | **PASS** |
+| Link command ack | claim, ack, duplicate ack, requeue without ack | **PASS** |
+| Link live event | `POST /api/v1/events` → `202 accepted`; Redis queue/processing/DLQ `0/0/0`; row in `telemetry` | **PASS** |
+| Go | `go test -count=1 ./...`; `--profile unified --check` | **PASS** |
+| UI | `npm run build`; Playwright with Kraken seed | **13/13** |
+| S3 adapter | Garage v2.5.0 upload/download/delete, two identical samples | **PASS** |
 | Detection baseline | 14 malicious + 14 benign, synthetic | 14 TP, 0 FN, 5 FP, 9 TN |
-| Diagrams | 4 draw.io sources + PNG/SVG, English | 4/4 |
+| Diagrams | 4 draw.io sources + PNG/SVG, English, dark architecture system | **4/4** |
 
-The 4.3 baseline is **synthetic**: precision `0.737`, recall `1.000`, F1
-`0.848`, FPR `0.357`; thread threshold is 201, not 200. It is not a production
-rate. AP-127 covers the next quality iteration.
+The 50k run is documented in `docs/benchmarks/4.3/link-load-50k.md`. It proves
+the Link HTTP + Redis Lua boundary on one Docker Desktop host; it does not
+prove a multi-host cluster, TLS throughput or 50,000 independent agent
+processes.
 
-## Open items before the tag
+## Six-gate release candidate (all inside 4.3)
 
-These are packaging/verification items, not new features:
+This is the list to close before any push/tag intended as a release candidate.
+**Gate 6 is the fundamental one: a clean install from the downloaded bundle
+must pass before the release is pushed.**
 
-1. **Hosted CI at the tag.** Run the E2E/release job only when preparing the
-   tag; do not push an intermediate state just to test CI.
-2. **Release assets from a clean download.** Verify checksums, SBOM, installer
-   and rollback.
-3. **AP-123 crash/UI check.** The command queue is at-least-once; verify the
-   “queued ≠ executed” semantics and a real process restart.
-4. **AP-122 cap load test.** The atomic script is implemented and the live
-   event path passes; a 50k concurrent-producer test is still a useful
-   acceptance test, not a reason to block the code review.
-5. **Link event path** is now green; no longer a blocker.
+| # | Gate | Status | Evidence / what remains |
+|---|---|---|---|
+| 1 | **AP-122** Link atomic check+push and 50k load | **PASS** | 50k live run above; keep the raw JSON with the release evidence |
+| 2 | **AP-123** crash/restart and duplicate visibility | **PARTIAL** | New-connection restart and idempotent ack pass. A real OS-process kill between execution and ack, plus the UI “queued ≠ executed” duplicate indication, are still open |
+| 3 | Release bundle from a clean download | **NOT RUN** | Build `v4.3.0-rc1` bundle, verify `SHA256SUMS.txt`, SBOM, installer and rollback assets from a downloaded copy |
+| 4 | Upgrade/rollback from 4.2.1 | **NOT RUN** | Windows and Linux: identity/spool migration, schema upgrade, restore, rollback to the previous tag |
+| 5 | Hosted CI at the tag | **NOT RUN** | CI is tag/manual only. A local green run is not a hosted run; the `v4.3.0-rc1` tag workflow must be green |
+| 6 | **Clean install from the downloaded bundle** | **NOT RUN** | Fresh machine/directory, no seeded data, install → enroll → live event → alert → uninstall, then repeat from the downloaded asset. **This is the gate before push** |
+
+Do not cut `4.3.0-rc1` while gate 6 is unproven. Do not call the result a
+release candidate merely because the local tests are green.
 
 ## Production gap after 4.3.0
 
-This section is deliberately outside the 4.3.0 claim. It is the difference
-between a controlled-pilot product and a production GA:
+This is the difference between a controlled-pilot release and production GA:
 
-- upgrade/rollback from 4.2.1 on Windows and Linux, with an identity/spool
-  migration test;
 - signed MSI/deb/rpm packages and service drop-in, without `irm|iex` or
   `curl|bash` as the production path;
-- crash between command execution and ack, visibility-timeout recovery and
-  duplicate-action visibility in the UI;
-- 50k concurrent producers, Redis full, spool full and consumer restart;
-- 7-day soak with memory/leak checks and restart;
-- clean install on a fresh machine with no seeded data;
-- real endpoint traffic and real malware validation (AP-126);
-- external security review/pen test and a backup/restore drill.
+- 7-day soak with memory/leak checks, restart and duplicate-action visibility;
+- real endpoint traffic and a real malware corpus (AP-126);
+- measured detection quality on real benign/malicious data (AP-127);
+- external security review/pen test and a backup/restore drill;
+- multi-host Redis/Postgres failure tests and a documented support model.
 
 Real detonation and AWS are **not** blockers for 4.3.0:
 
-- real detonation: AP-126, post-4.3;
-- AWS/MinIO: optional by design, not part of AP-127. A customer may
-  self-host Garage/Ceph, keep local storage, or use AWS S3.
+- real detonation: AP-126, after the 4.3.0 tag;
+- AWS/MinIO: optional by design; Garage and local storage are supported for
+  the pilot. AWS is not certified.
 
-## Allowed claims for 4.3.0
+## Allowed claims
 
-- a product-complete release candidate for controlled pilots;
-- static file analysis and **optional external detonation integration**;
+- a controlled-pilot release candidate with static analysis and optional
+  external detonation integration;
 - at-least-once command delivery, with possible duplicates after a crash;
+- a verified 50k Link queue boundary on one host, with the exact numbers above;
 - S3-compatible adapter tested with Garage; AWS optional and not certified;
 - a frozen, synthetic detection baseline, not a production FP/FN rate.
 
 ## Not allowed
 
+- “4.3.0 released” or “production GA” while the six-gate table is open;
 - “real malware detonation certified”;
 - “AWS tested” or “MinIO tested”;
 - “exactly-once”;
-- “production GA” or “production-ready”;
 - “production-ready detection quality”;
-- “no data loss” without a crash/restart test.
+- “no data loss” without the process-kill test and restore drill.
 
 ## Release sequence
 
 1. Freeze features.
-2. Run the final checks listed above.
-3. Tag `4.3.0-rc1`, verify a clean download, then tag `4.3.0` only after the
-   open items are closed or explicitly accepted as a recorded risk.
-4. Start the live-validation track (AP-126/AP-127) only after 4.3.0.
+2. Close gates 1–6, including the live 50k, restart, bundle, upgrade/rollback,
+   hosted CI and clean-install evidence.
+3. Tag `v4.3.0-rc1`; run the tag CI and the clean-download smoke test again.
+4. Publish `v4.3.0` only after the RC evidence is reviewed and accepted.
+5. Start AP-126/AP-127 live validation only after the 4.3.0 tag; no new
+   firewall/DNS feature is part of 4.3.

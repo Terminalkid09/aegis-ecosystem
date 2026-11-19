@@ -2,10 +2,8 @@ name: Aegis CI/CD Pipeline
 
 on:
   push:
-    branches: [ "main", "dev" ]
     tags: [ "v*" ]
-  pull_request:
-    branches: [ "main", "dev" ]
+  workflow_dispatch:
 
 jobs:
   lint:
@@ -101,6 +99,29 @@ jobs:
           pip install -r requirements.txt
           python -m unittest tests.test_ebpf tests.test_update tests.test_linux_probe -v
 
+
+  aegis_agent:
+    name: Aegis Agent Go (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: aegis-agent/go.sum
+      - name: Go tests
+        working-directory: aegis-agent
+        run: go test ./... -count=1 -timeout=120s
+      - name: Go vet
+        working-directory: aegis-agent
+        run: go vet ./...
+      - name: Build agent
+        working-directory: aegis-agent
+        run: go build -o "${{ runner.temp }}/aegis-agent" ./cmd/aegis-agent
 
   windows_installers:
     name: Windows Installer Checks
@@ -464,10 +485,9 @@ jobs:
 
   nodetrace_windows:
     name: NodeTrace Windows Package
-    # Eseguirlo anche sulle PR: e' l'unico punto che puo' accorgersi che lo
-    # spec PyInstaller o il percorso dell'artifact non sono stati committati,
-    # prima che un tag immutabile lo scopra durante la release.
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'pull_request'
+    # Build it on the release tag and on an explicit manual preflight; branch
+    # pushes are intentionally not a CI trigger.
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

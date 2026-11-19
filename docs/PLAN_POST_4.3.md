@@ -2,6 +2,11 @@
 
 **Stato:** proposta tecnica del 2026-11-19, pronta per approvazione.
 **Non è una dichiarazione di capacità già implementata.**
+
+**Regola 4.3:** la 4.3 è in feature freeze. I punti 1–6 del gate di release
+(load, restart, bundle, upgrade/rollback, CI al tag, clean install) sono
+lavoro di release, non nuove feature. Firewall e DNS policy entrano nella 4.5
+(Network Visibility), non nella 4.3.
 **Fonti:** `docs/PLAN_V4.3.md`, `docs/ROADMAP.md`, codice `aegis-agent`,
 `aegis-brain`, `aegis-link`.
 
@@ -192,10 +197,11 @@ Il sensor non deve uccidere, isolare o bloccare. Deve:
 ## 4. Link, Redis e perdita di dati
 
 > **Stato al 2026-11-19.** Lo spool durevole Link, il `Retry-After`, il claim
-> atomico con processing/ack e la DLQ sono implementati. AP-122 e AP-123 sono
-> in **Test**, non Done: restano check+push atomico sul Link, prova evento
-> Link → Brain e crash reale del consumer. La fonte di verifica è
-> `docs/RELEASE_GATE_4.3.md`.
+> atomico con processing/ack e la DLQ sono implementati. AP-122 ha ora
+> evidenza live 50k (50.000 accepted, 1 × 429, LLEN 50.000, zero 5xx). AP-123
+> ha un restart a livello di connessione; restano il crash di un processo
+> reale e la visibilità del duplicato nella UI. La fonte di verifica è
+> `docs/RELEASE_GATE_4.3.md` e `docs/benchmarks/4.3/link-load-50k.md`.
 
 ### 4.1 Percorso reale oggi
 

@@ -271,7 +271,7 @@ upload/download/delete e due oggetti identici indipendenti. Esito `PASS`.
 | Job analysis | recupero `queued`/`running` con lease Redis | un job può essere ritentato dopo crash; l'analisi deve essere idempotente |
 | Process tree/DNS | importati da `DETONATION_URL` e mostrati in UI | senza detonatore il report dice `static-only`; detonazione malware reale post-4.3 (AP-126) |
 | Coda comandi | at-least-once, ack, visibility, DLQ su Brain e Link | duplicati possibili; non exactly-once |
-| Link | spool durevole + ack legacy | drain at-least-once; spool locale da montare su volume persistente; check+push non atomico |
+| Link | spool durevole + ack legacy | drain at-least-once; spool locale da montare su volume persistente; check+push atomico (Lua) |
 | Kraken → Aegis | outbox + HMAC + retry/backoff | serve un Brain raggiungibile e secret configurato |
 
 ## 8. Verifica live del 2026-11-19
@@ -281,8 +281,10 @@ upload/download/delete e due oggetti identici indipendenti. Esito `PASS`.
 | Link, test | `mvn -B -q test`, JDK 25 | verde |
 | Link, ack live | claim con `delivery_id`, ack, doppio ack idempotente, requeue senza ack | verde |
 | Link, evento live | POST evento → `202 accepted`; Redis queue/processing/DLQ `0/0/0`; riga `telemetry` in Postgres | verde |
-| Brain, coda comandi | `test_command_queue.py` su Redis reale | 6 passed |
+| Brain, coda comandi | `test_command_queue.py` su Redis reale | 7 passed |
 | Brain, cap concorrente | 20 producer, cap 5: 5 accodati, 15 `queue_full` | verde |
+| Brain, restart consumer | claim, connessione chiusa senza ack, nuova connessione dopo il lease | stesso `delivery_id`, `attempt=2` |
+| Link, cap 50k | 50.001 richieste HTTP, 128 worker, Redis senza consumer | 50.000 accepted, 1 × 429, LLEN 50.000, 0 × 5xx |
 | Agente Go | `go test -count=1 ./...` | tutti i package verdi |
 | Profilo unificato | `--profile unified --check` | exit 0 |
 | UI build | `npm run build` | exit 0 |
