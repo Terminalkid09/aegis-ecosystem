@@ -84,7 +84,11 @@ controllati, non una sostituzione production-grade dei due agenti legacy.
 **Evidenza di release:** clean install isolata da sorgente senza artefatti
 (`aegis-clean43`) con volumi nuovi, bootstrap admin, enrollment reale,
 heartbeat, evento agente, alert Sigma `T1110.001`, frontend e Link health;
-`api_smoke.py` **21/21 ALL PASS**. Il bundle `v4.3.0` ha 28 file verificati, con l'agente Go Windows/Linux e gli archivi `unified-*`;
+`api_smoke.py` **21/21 ALL PASS**. La clean install del gate 6 è stata eseguita
+sull'archivio `31962cd`; il bundle finale aggiunge il fix del download e i
+default `unified`, è verificato con smoke 28/28 e con il download/run live
+dell'agente Go contro un Brain 4.3. Il bundle ha 28 file, con l'agente Go
+Windows/Linux e gli archivi `unified-*`;
 l'upgrade del database 4.2.1 ha preservato 68 agenti e 321 alert, con smoke
 21/21. Il 50k Link, il restart del consumer comandi e i gate restano registrati
 in `docs/RELEASE_GATE_4.3.md`. La CI hosted al tag è l'unico passo ancora

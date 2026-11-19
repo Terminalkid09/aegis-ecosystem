@@ -75,9 +75,12 @@ while the smoke test passed; and `git archive` applied `core.eol`, so
 LF. The builder now writes LF checksums, archives with an explicit LF config,
 fails if any text member still contains CR, and the smoke test rejects CR,
 malformed, duplicate or missing checksum entries; negative tests exit 1. The
-rebuilt source archive differs from the gate-6 archive only in docs,
-`README.md` and the release scripts, so the clean-install evidence still covers
-the shipped runtime code. The third defect was in the installer download
+rebuilt source archive also carries the artifact-download fix, the unified
+defaults and the release-script changes. Gate 6 ran on the `31962cd` archive;
+the final bundle was verified with 28/28 smoke and the live unified-agent
+download/run against a 4.3 Brain. A full image rebuild from the final source
+was not repeated locally because the PyPI fetch timed out; the hosted tag
+workflow is the clean-build gate. The third defect was in the installer download
 itself: `FileResponse` through Starlette 1.10.0's `BaseHTTPMiddleware`
 returned `200` with the correct `Content-Length` and zero bytes, so no
 one-liner could fetch its agent. The endpoint now returns the bounded
