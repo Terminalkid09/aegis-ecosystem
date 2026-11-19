@@ -89,6 +89,34 @@ def _zip_tree(src: Path, dst: Path, exclude: frozenset[str] = frozenset()) -> No
                 archive.write(path, path.relative_to(src).as_posix())
 
 
+def _assert_lf_source(archive: Path) -> None:
+    """Reject CRLF text in the source archive: the bundle targets Linux.
+
+    `git archive` applies core.eol, so a Windows builder with autocrlf=true
+    wrote CRLF into every text file of the tarball even though the blobs are
+    LF. The archive is now generated with an explicit LF config; this guard
+    fails the build if any text member still contains CR.
+    """
+    offenders = []
+    with tarfile.open(archive, "r:gz") as tar:
+        for member in tar.getmembers():
+            if not member.isfile():
+                continue
+            handle = tar.extractfile(member)
+            data = handle.read() if handle else b""
+            if b"\r" not in data or b"\x00" in data:
+                continue
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            offenders.append(member.name)
+    if offenders:
+        raise SystemExit(
+            "[X] source archive ships CRLF text: " + ", ".join(offenders[:5])
+        )
+
+
 def _git(*args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=ROOT, text=True).strip()
 
@@ -152,7 +180,8 @@ def main() -> int:
     # the whole working tree (including local secrets and .perch).
     source = out / "aegis-source.tar.gz"
     subprocess.check_call(
-        ["git", "archive", "--format=tar.gz", f"--prefix=aegis-{args.version}/",
+        ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+         "archive", "--format=tar.gz", f"--prefix=aegis-{args.version}/",
          "-o", str(source), "HEAD"],
         cwd=ROOT,
     )
