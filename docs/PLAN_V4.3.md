@@ -241,8 +241,9 @@ La 4.3 non è solo lato agente. Oggi il server e la UI hanno punti hard-coded:
   host reale e mappatura 1:1 dei test. Guard Java resta il runtime di
   riferimento fino a quei gate.
 - Il profilo `unified` esiste nello stesso binario, con una sola identità Guard
-  e un solo outbox; il live reale ha prodotto telemetria e capabilities. Restano
-  aperti artefatto `unified-latest.zip`, servizio/installer e benchmark C.
+  e un solo outbox; il live reale ha prodotto telemetria e capabilities.
+  L'artefatto `unified-latest.zip`/`.tar.gz` è nel bundle 4.3 e il download
+  bootstrap è stato provato; restano aperti servizio/installer e benchmark C.
 - Il benchmark A/B locale è stato eseguito (2×8 s, Brain finto) e ha trovato
   una regressione di CPU nel polling Windows, corretta; non è una misura di
   ingestione o di flotta.
@@ -708,8 +709,9 @@ per host. Non è un merge di codebase: il modulo è già uno.
       per record contesi; backup di identità/config/spool/update state;
 - [ ] import eventi non consegnati e verifica zero perdite/duplicati;
 - [x] Brain/UI: `unified` in enrollment, deploy, OTA, discovery e filtri;
-- [ ] artefatto `unified-latest.zip` pubblicato e one-liner provato su host
-      target; oggi il token/script è verificato ma l'artefatto manca;
+- [x] artefatto `unified-latest.zip`/`.tar.gz` nel bundle, download bootstrap
+      e run con token monouso verdi;
+- [ ] one-liner su host target con servizio/installer drop-in (fuori 4.3.0);
 - [ ] rimozione dei servizi/pacchetti legacy dopo la finestra di rollback;
 - [x] test live sensor, endpoint e unified su host locale; primo avvio unified
       con token monouso consumato;

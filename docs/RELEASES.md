@@ -233,7 +233,7 @@ superseded; `synchronous_commit` remains `on`. Hosted CI/E2E passed on
 
 Direct `v4.3.0` release, no `4.3.0-rc1`. The locally executable gates are green:
 27 Link tests, 8 Brain command-queue tests, the 50k Link live cap, process-level
-command restart, `queued — not executed` UI visibility, a 22-file bundle with
+command restart, `queued — not executed` UI visibility, a 28-file bundle with the Go agent and
 checksums, a clean install from the extracted bundle with API smoke **21/21**,
 and a 4.2.1 server upgrade preserving **68 agents / 321 alerts** with smoke
 **21/21**. The annotated tag, hosted tag workflow, downloaded-asset verification

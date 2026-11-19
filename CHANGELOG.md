@@ -42,11 +42,14 @@ disponibili su questo host.
 
 Il profilo `unified` usa una sola identità Guard e un solo outbox, ma avvia
 anche i collector sensor. Il Brain/UI lo accettano in enrollment, token di
-deploy, job, OTA, Discovery e telemetria recente. Il primo avvio con token
-monouso è stato provato contro il Brain reale: il token è stato consumato e
-l'agente ha inviato telemetria. Fuori dal perimetro 4.3.0 restano l'artefatto
-`unified-latest.zip`, il servizio/installer drop-in e il rollback: la release
-non li dichiara completati.
+deploy, job, OTA, Discovery e telemetria recente. Il bundle 4.3.0 contiene
+l'agente Go per Windows e Linux (`aegis-agent-windows-amd64.exe`,
+`aegis-agent-linux-amd64`, `unified-latest.zip`, `unified-latest.tar.gz` e le
+copie versionate); `release-smoke.py --require-agent` rifiuta un bundle che ne
+è privo. Guard Java e NodeTrace Python restano gli artefatti legacy per la
+migrazione: il "no rollback" della 4.3 riguarda il downgrade agli agenti
+precedenti, non la loro presenza nel bundle. Fuori dal perimetro 4.3.0 restano
+il servizio/installer drop-in firmato e il rollback.
 
 Evidenza eseguita il 2026-11-18 (fake) e il 2026-11-19 (stack reale):
 
@@ -61,6 +64,7 @@ Evidenza eseguita il 2026-11-18 (fake) e il 2026-11-19 (stack reale):
 | live sensor/endpoint/unified con Brain reale | verdi; righe telemetria 1/18/17, capabilities popolate |
 | primo avvio unified con token monouso | token consumato, agent_type=unified, telemetria presente |
 | deploy API unified | token 200, install.ps1/sh 200, job `manual_required`; SSH/WinRM 501 |
+| bundle agent runtime | `unified-latest.zip` scaricato dal Brain 4.3, eseguito come `agent_type=unified`, telemetria persistita e agente revocato |
 | A/B locale 2×8 s | NodeTrace 27.28 MB RSS vs Go sensor 18.43 MB; Guard Java 126.45 MB vs Go endpoint 18.77 MB |
 
 Il benchmark è in `docs/BENCHMARK.md` e i dati grezzi in
@@ -71,7 +75,7 @@ comparabile a Java e non viene dichiarata più bassa. Durante la misura è stata
 corretta una regressione reale del polling Windows (WMI/Authenticode per tutti
 i processi ogni secondo), che saturava un core.
 
-**Perimetro dichiarato:** artefatto unificato e packaging firmato MSI/deb/rpm,
+**Perimetro dichiarato:** packaging firmato MSI/deb/rpm,
 servizio nativo e rollback Java/JRE/Python su host reale non sono parte della
 4.3.0; sono lavoro successivo. Lo smoke contro il Brain reale è reale, ma non è
 un test di flotta né di servizio installato. La 4.3.0 è una release per pilot
@@ -80,7 +84,7 @@ controllati, non una sostituzione production-grade dei due agenti legacy.
 **Evidenza di release:** clean install isolata da sorgente senza artefatti
 (`aegis-clean43`) con volumi nuovi, bootstrap admin, enrollment reale,
 heartbeat, evento agente, alert Sigma `T1110.001`, frontend e Link health;
-`api_smoke.py` **21/21 ALL PASS**. Il bundle `v4.3.0` ha 22 file verificati;
+`api_smoke.py` **21/21 ALL PASS**. Il bundle `v4.3.0` ha 28 file verificati, con l'agente Go Windows/Linux e gli archivi `unified-*`;
 l'upgrade del database 4.2.1 ha preservato 68 agenti e 321 alert, con smoke
 21/21. Il 50k Link, il restart del consumer comandi e i gate restano registrati
 in `docs/RELEASE_GATE_4.3.md`. La CI hosted al tag è l'unico passo ancora
@@ -105,6 +109,15 @@ comandi batch, ack, scan Discovery e verifica dell'header `X-Client-Cert-Hash`.
 - Base del profilo `endpoint` Guard: `secret.json`/`agent_id`, enrollment
   `aegis-guard`, report legacy e layer di validazione comandi; test di
   integrazione con Brain finto e test sulle funzioni pure.
+
+### Fixed
+
+- Il download degli artefatti (`/deploy/artifacts` e
+  `/deploy/bootstrap-artifacts`) restituiva un `200` con `Content-Length`
+  corretto ma zero byte: `FileResponse` attraverso il `BaseHTTPMiddleware`
+  di Starlette 1.10.0 perdeva il body, quindi nessun one-liner poteva
+  scaricare l'agente. La risposta ora legge l'artefatto in memoria (file da
+  pochi MB) e un test di regressione copre il caso.
 
 ## [4.2.1] - 2026-11-18
 

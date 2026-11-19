@@ -312,7 +312,7 @@ Docker containers come back on their own (`restart: unless-stopped`), but host a
 
 ### Remote enrollment: install an agent on another host
 
-Generate a short-lived token in **Deployment Manager** (`AegisAgent` unified, `Aegis-Guard`, `NodeTrace` or **both** legacy; one slot consumed per agent), then run the one-liner it shows **in an Administrator PowerShell on the target**. Il percorso `unified` richiede ancora l'artefatto `unified-latest.zip` e il servizio/installer di produzione.
+Generate a short-lived token in **Deployment Manager** (`AegisAgent` unified, `Aegis-Guard`, `NodeTrace` or **both** legacy; one slot consumed per agent), then run the one-liner it shows **in an Administrator PowerShell on the target**. The 4.3 bundle ships `unified-latest.zip` (Windows) and `unified-latest.tar.gz` (Linux), and the installers publish them into the Brain artifact volume; the signed drop-in service installer remains outside 4.3.0.
 
 ```powershell
 irm <brain>/api/v1/deploy/install.ps1?agent=both -Headers @{'X-Enroll-Token'='<token>'} | iex
@@ -332,6 +332,8 @@ One preparative step is yours — **publish the artifacts the brain serves** (th
 python scripts/pack-artifacts.py            # -> aegis-brain/artifacts/*-latest.{zip,tar.gz}
 python scripts/pack-artifacts.py --version v4.3.0
 ```
+
+The 4.3 bundle already contains the unified archives and `install.sh`/`install.ps1` publish them into the Brain volume; `pack-artifacts.py` remains the path for the legacy Guard/NodeTrace artifacts and for rebuilds.
 
 It packs exactly what a local install copies: `aegis-guard.jar`, a bundled `jre/` when `build.bat` produced one, `aegis-etw.exe` (kernel telemetry) and `bin/yara64.exe` for Guard; the full PyInstaller bundle for NodeTrace. Missing runtime = hard failure; missing optional piece = declared in the output (`python -m ...`-style honesty, no silent gaps). What the target needs: **Administrator** (service registration + ETW trace session), and a **Java 25+** runtime — either bundled in the artifact or installed there (`Get-JavaMajor` verifies the version, because a Java 8 on `PATH` installs a service that starts and dies with `UnsupportedClassVersionError`).
 

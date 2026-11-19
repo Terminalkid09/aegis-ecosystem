@@ -85,11 +85,16 @@ Verify the downloaded bundle before installing:
 
 ```bash
 sha256sum -c SHA256SUMS.txt
-python scripts/release-smoke.py release --require-image-sboms
+python scripts/release-smoke.py release --require-agent --require-image-sboms
 ```
 
 The bundle ships `env.example` rather than `.env.example`: GitHub rewrites
 asset names that begin with a dot. The installers accept either name.
+
+The 4.3.0 bundle also ships the Go agent (`unified-latest.zip` on Windows,
+`unified-latest.tar.gz` on Linux) alongside the legacy Guard/NodeTrace
+artifacts. "No agent rollback" means no downgrade to the previous agents;
+it does not remove them from the migration path.
 
 Cosign signing is a separate step. `v4.3.0` is checksummed and carries a
 build-provenance attestation, but it is **not** described as a signed
