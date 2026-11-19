@@ -35,12 +35,45 @@ Il progetto deve rimanere indipendente: il confronto con prodotti o aziende este
   essere usata per rinviare la verticale della 4.1.
 - **4.3 — agente unico Go:** Guard e NodeTrace confluiscono in un solo
   agente, con un solo enrollment, updater e contratto eventi; `aegis-link`
-  resta Spring Boot. Il profilo router/OpenWrt è solo lab in questa fase.
+  resta Spring Boot. La release dichiara analisi statica + integrazione
+  detonazione opzionale, **non** detonazione malware reale certificata. Il
+  profilo router/OpenWrt resta un placeholder di lab; il network sensor è la
+  traccia separata 4.5.
 - **4.4 — response intelligence:** contenimento, catalogo azioni, canary e
   verifica end-to-end sopra l'agente unico, non sopra i due agenti vecchi.
+- **4.5 — Network Visibility:** network sensor separato (`aegis-net-sensor`)
+  per gateway e SPAN/TAP, con flow, DNS/DHCP, inventario di rete, detection e
+  policy nftables/DNS. Non è un profilo `router` dell'agente endpoint e non
+  entra nel pacchetto `unified`.
 
 Il cambio di perimetro sposta lavoro tra release, non lo elimina: le stime
 vanno ricalcolate, non presentate come ridotte.
+
+### Traccia post-4.3 — decisione 2026-11-19
+
+`router` è una collocazione, non una capacità. Il network sensor che vede la
+LAN è un binario/servizio separato, con `agent_type=network-sensor`: può stare
+sul gateway oppure ricevere una porta SPAN/TAP. Il profilo `router` attuale è
+solo un placeholder di laboratorio e non va esteso.
+
+La traccia 4.3.x copre quattro debiti indipendenti dalla 4.5:
+
+- **Sensore host:** DNS/flow enrichment, detection con baseline/versioni e
+  capabilities `telemetry-only` esplicite.
+- **Delivery:** Link 429 con contratto di retry e durabilità; coda comandi
+  atomica e at-least-once con ack/requeue.
+- **Deploy:** pacchetti firmati (MSI, deb/rpm, opkg/apk) e bootstrap senza
+  `.ps1`/`.sh` come percorso di produzione; artefatto `unified` in CI.
+- **Fleet UI:** una sola area con Inventory/Rollout/Artifacts, mantenendo API
+  e permessi separati.
+
+Piano dettagliato, fasi e criteri di accettazione:
+`docs/PLAN_POST_4.3.md`. I ticket operativi sono AP-118–AP-125.
+
+La **live validation post-4.3** è in `docs/ROADMAP_LIVE_VALIDATION.md`
+(English): la 4.3 non certifica malware reale, AWS resta opzionale e la
+qualità FP/FN viene migliorata con AP-126/AP-127. La CI si esegue al tag,
+non su ogni stato intermedio.
 
 **Stato al 2026-11-16:** `v4.1.0` è rilasciata sul tag annotato `17c499f`.
 La verticale 4.1.7–4.1.9 è completa — outbox con ripresa dopo un outage del
@@ -322,14 +355,19 @@ enrollare un endpoint; non è il modello di rollout dell'intera flotta.
 
 ### Capacità
 
-- artefatti firmati e riproducibili per Brain, frontend, Link, Guard, NodeTrace
-  e compose bundle, con checksum, SBOM e provenienza verificate dal client;
-- installer Windows (servizio/MSI o equivalente) e pacchetti Linux
-  (deb/rpm/systemd) con upgrade e uninstall testati;
+- artefatti firmati e riproducibili per Brain, frontend, Link, AegisAgent
+  (`unified`) e compose bundle, con checksum, SBOM e provenienza verificate dal
+  client;
+- installer Windows (MSI/MSIX firmato, servizio nativo) e pacchetti Linux
+  (deb/rpm/systemd) con upgrade e uninstall testati; niente `.ps1`/`.sh` come
+  percorso di produzione;
+- package OpenWrt/opkg e gateway Linux per il network sensor 4.5;
 - rollout a fasi: canary su un sito, finestra di osservazione, promozione o
   rollback automatico su errore di salute/versione;
 - inventario flotta con versione desiderata/applicata, deriva, ultimo
   heartbeat, copertura e stato di aggiornamento per host;
+- UI Fleet unica con Inventory, Rollout e Artifacts/OTA; i network sensor
+  restano una vista Network separata, non endpoint mancanti;
 - job remoti SSH/WinRM solo con allowlist di comandi, credenziali dedicate e
   audit; niente comandi arbitrari dal web;
 - modalità offline/air-gapped con mirror degli artefatti e verifica della

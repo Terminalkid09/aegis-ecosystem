@@ -126,7 +126,7 @@ sono implementati. Verifica locale: Brain **853 passed / 3 skipped**, Kraken
 **150 passed**, Playwright **13/13**, `api_smoke.py` **ALL PASS**, frontend
 lint **0 errori / 26 warning**, build e audit runtime **OK**, sensori Kraken
 `healthy`. La fase 2 ha un primo job statico locale (analisi, ZIP, IoC,
-candidato Sigma e cancellazione verificata); object storage S3/MinIO, process
+candidato Sigma e cancellazione verificata); object storage S3-compatibile, process
 tree e DNS history restano da completare.
 
 Il load test supera il gate sul default Compose a **2 worker**: **289.35 rps**
@@ -146,7 +146,7 @@ davvero Aegis da un EDR/SIEM generico:
 
 - analisi file/ZIP come job asincrono nella sandbox Kraken, con timeout,
   limiti di dimensione e kill switch;
-- object storage minimo (MinIO in locale, S3 in cloud) per i campioni, con
+- object storage minimo (Garage in locale, S3 in cloud) per i campioni, con
   retention, immutabilità e cancellazione verificata;
 - estrazione IoC e generazione di candidati Sigma, con provenance e
   confidence;
@@ -156,6 +156,63 @@ davvero Aegis da un EDR/SIEM generico:
 **Uscita:** un sample caricato produce un report asincrono, un IoC esportabile
 e una regola candidata; la cancellazione del sample è verificata da un test e
 l’oggetto non è più recuperabile.
+
+### Stato fase 2 e debiti residui (2026-11-19)
+
+**Funziona ed è verificato:** upload bounded con SHA-256 content-addressed su
+volume locale, manifest ZIP senza estrazione, estrazione IoC, candidato Sigma a
+bassa confidenza con provenance esplicita e cancellazione verificata. I test
+mirati `services/kraken/tests/unit/test_file_analysis.py` passano (6/6, inclusa
+la detonazione HTTP integrata). Il tag
+`v4.2.1` esiste sul remote al commit `1de7443`; gli asset della release non sono
+stati riscaricati in questa verifica.
+
+**Aggiornamento 2026-11-19 (working tree).** I sei debiti elencati nella
+verifica precedente sono stati affrontati nel codice:
+
+- **object storage:** `object_store.py` ha backend locale e S3; ogni job usa
+  una chiave `job_id/sha256`, eliminando la condivisione del blob tra upload
+  identici; `boto3` è in `requirements.txt`. Il percorso S3 è stato provato
+  live contro Garage v2.5.0 (upload, download, due oggetti identici
+  indipendenti, delete verificata); non è stato provato contro AWS o MinIO
+  AIStor. MinIO Community è archiviato; AIStor Free è single-node e con
+  licenza proprietaria.
+- **process tree / DNS:** `detonation.py` invia il sample a un detonatore HTTP
+  esterno isolato (`DETONATION_URL`), valida lo SHA-256 e importa
+  `process_tree`, `dns_history`, IoC e MITRE. Se non è configurato, il report
+  dice esplicitamente `static-only` e `limitations`; non mostra array vuoti
+  come se fossero un risultato;
+- **job dopo un riavvio:** `analysis_worker_loop` e
+  `recover_pending_analysis_jobs` reclamano `queued`/`running` con un lease
+  Redis; il task dopo la risposta resta solo una fast path, la riga DB è la
+  coda durevole;
+- **cancellazione:** un oggetto per job e delete verificata con `head`/`exists`;
+  cancellare un job non tocca l'oggetto di un altro upload identico;
+- **Link:** oltre al `429` con `Retry-After`, il percorso di overload scrive un
+  file durevole in `aegis.link.spool.dir` e risponde `202 spooled`; un drain
+  schedulato cancella il file solo dopo il push. Resta at-least-once, non
+  exactly-once;
+- **coda comandi:** envelope con `delivery_id`, processing list, visibility
+  timeout, ack idempotente e DLQ. La consegna è at-least-once sia su Go → Brain
+  sia sul gateway Link legacy; i duplicati dopo crash sono possibili. Link
+  espone `/api/v1/commands/ack` e `/api/v1/telemetry/commands/ack`; il claim è
+  stato verificato live (ack, doppio ack idempotente, requeue senza ack).
+
+Test mirati: Kraken file analysis **6 passed**, detonazione HTTP locale
+**ok**, S3-compatibile live **ok**, Brain command queue **6 passed** su Redis
+reale, agente Go **tutti i package ok**, Link controller+spool+ack **verdi**.
+Il percorso evento Link → Brain è ora provato live (202, coda svuotata,
+nessuna DLQ, riga `telemetry` in Postgres). Restano da fare e non vanno
+nascosti: detonatore malware reale (AP-126, post-4.3), qualità FP/FN
+(AP-127), AWS/MinIO opzionali con policy di retention/immutabilità e job CI
+eseguito solo al tag candidato.
+
+**Decisione per le fasi successive:** gli agenti Go restano diretti al Brain;
+`aegis-link` resta un gateway opzionale, non il percorso critico. Non si aggiunge
+un pool in memoria: il buffer Link è su disco e il lease dei job è su Redis. La
+coda comandi è ora at-least-once su Go → Brain e sul gateway Link, con ack e
+DLQ; il protocollo dell’agente unico 4.3 deve conservare `delivery_id` e ack. Il network
+sensor resta separato nella 4.5.
 
 ## Fase 3 — 4.3.0: agente unico Go
 
