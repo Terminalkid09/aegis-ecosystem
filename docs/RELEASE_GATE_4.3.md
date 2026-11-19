@@ -28,7 +28,7 @@ the 4.5 Network Visibility track.
 | Brain restart | worker process claims and exits without ack; a second process recovers the same command after the lease, `delivery_attempt=2`, then acks | **PASS** |
 | Command duplicate visibility | OTA panel reports `queued — not executed`, requires an agent ack and states that a crash before the ack can replay the command once; frontend production build passes | **PASS** |
 | Server upgrade | dump of the running 4.2.1 database (68 agents, 321 alerts, Alembic `0022`) restored into a fresh project; Brain 4.3.0 starts at `0022 (head)`; API smoke | **PASS, 21/21** |
-| Bundle | `v4.3.0`, 22 files, manifest + `SHA256SUMS`, smoke from a copied bundle | **PASS (local)** |
+| Bundle | `v4.3.0`, 22 files, manifest + `SHA256SUMS`, smoke from a copied bundle, `sha256sum -c` | **PASS, 22/22** |
 | Clean install from bundle | source archive extracted from the bundle, new project/volumes/ports, image build, admin bootstrap, enrollment, heartbeat, agent event, alert Sigma `T1110.001`; frontend 200, Link UP, API smoke | **PASS, 21/21** |
 | Clean install from Git clone | local clone of `31962cd` with no build outputs, new project/volumes; same install/enroll/event/alert/smoke path | **PASS, 21/21** |
 | Version surfaces | Brain `/health/live`, frontend build, Guard POM, NodeTrace, Go agent | `4.3.0` |
@@ -50,10 +50,24 @@ Windows/Linux agent service packaging.
 |---|---|---|---|
 | 1 | **AP-122** Link atomic check+push and 50k load | **PASS** | 50k live run above; raw evidence retained |
 | 2 | **AP-123** crash/restart and duplicate visibility | **PASS** | process restart/`attempt=2` and idempotent ack pass; OTA UI says `queued — not executed` and explains the ack/replay boundary |
-| 3 | Release bundle from a clean download | **PASS (local)** | 22-file `v4.3.0` bundle; manifest/checksums and copied-bundle smoke pass. GitHub asset download, cosign/provenance verification remain tag-time work; the release is unsigned by decision (`docs/RELEASE_SIGNING.md`) |
+| 3 | Release bundle from a clean download | **PASS (local)** | 22-file `v4.3.0` bundle; manifest/checksums, copied-bundle smoke and `sha256sum -c` (22/22) pass. GitHub asset download, cosign/provenance verification remain tag-time work; the release is unsigned by decision (`docs/RELEASE_SIGNING.md`) |
 | 4 | Upgrade from 4.2.1 | **PASS (server-only)** | 4.2.1 DB restored, 68 agents/321 alerts preserved, Brain 4.3.0 at Alembic head, smoke 21/21. Agent rollback is out of scope by decision |
 | 5 | Hosted CI at the tag | **NOT RUN** | CI is tag/manual only. The `v4.3.0` tag workflow must be green before publishing; a local green run is not a substitute |
 | 6 | **Clean install from the release bundle** | **PASS** | source archive extracted from `v4.3.0`, empty volumes, build + bootstrap + enrollment + event + alert + frontend/Link + smoke 21/21 |
+
+The bundle is built from the HEAD commit recorded in
+`RELEASE_MANIFEST.json`: `release-smoke.py` verifies 22/22 and
+`sha256sum -c SHA256SUMS.txt` verifies 22/22 on Windows/Git Bash. Two newline
+defects were found and fixed before the tag. `SHA256SUMS.txt` was written with
+platform newlines, so `sha256sum -c` failed on every name with a trailing `\r`
+while the smoke test passed; and `git archive` applied `core.eol`, so
+`aegis-source.tar.gz` shipped CRLF text in 729 files even though the blobs are
+LF. The builder now writes LF checksums, archives with an explicit LF config,
+fails if any text member still contains CR, and the smoke test rejects CR,
+malformed, duplicate or missing checksum entries; negative tests exit 1. The
+rebuilt source archive differs from the gate-6 archive only in docs,
+`README.md` and the release scripts, so the clean-install evidence still covers
+the shipped runtime code.
 
 **Gate 5 is the only remaining release blocker.** Do not publish the tag or
 call 4.3.0 released until that hosted run is green and its artifacts are
