@@ -1,21 +1,24 @@
 # Aegis — Live Validation Roadmap (post-4.3)
 
 Status: decision record, 2026-11-19. This document is the English source of
-truth for the validation work that is kept **inside the 4.3.0 release cycle**.
-The older Italian `docs/ROADMAP.md` remains the long-term product roadmap;
-this file defines the release boundary that matters now. AP-126/AP-127 start
-only after the 4.3.0 tag; they are not part of the RC gate.
+truth for the validation work kept **inside the 4.3.0 release cycle**. The
+older Italian `docs/ROADMAP.md` remains the long-term product roadmap.
+AP-126/AP-127 start only after the 4.3.0 tag; they are not part of the release
+gate.
 
 ## Decision
 
-- **4.3.0** will ship as a product-complete release candidate for controlled
-  pilots after the six RC gates pass: static analysis, optional external
-  detonation integration, local/Garage object storage and the at-least-once
-  command path. No tag exists yet.
-- The six gates (50k Link load, crash/restart, release bundle, 4.2.1
-  upgrade/rollback, hosted CI at tag and clean install) are part of 4.3, not a
-  post-release cleanup. The 4.3 cycle is intentionally longer to collect live
-  evidence before the tag.
+- **4.3.0** ships as a product-complete release for controlled pilots after
+  the six gates pass: static analysis, optional external detonation
+  integration, local/Garage object storage and the at-least-once command path.
+- The release is cut **directly as `v4.3.0`**. There is no `4.3.0-rc1` tag and
+  no separate RC publication.
+- The six gates (50k Link load, crash/restart, release bundle, server upgrade,
+  hosted CI at tag and clean install) are part of 4.3. The cycle is longer to
+  collect live evidence before the tag.
+- **Agent rollback is out of scope for 4.3.0.** The user decision is explicit:
+  no rollback to the previous Guard/NodeTrace agents. The server rollback and
+  database restore boundary remain documented.
 - **4.3.0 does not claim certified real-malware detonation.** The integration
   is exercised with a controlled HTTP detonator; no malware is executed on the
   host or by the web process.
@@ -23,15 +26,14 @@ only after the 4.3.0 tag; they are not part of the RC gate.
   a **post-4.3 live-validation track**. They must not be presented as already
   delivered.
 - **AWS is optional.** A customer may run local storage, Garage/Ceph on their
-  own server, or AWS S3. A home user can stay local or on a router; an
-  enterprise can self-host. No cloud dependency is required for 4.3.
+  own server, or AWS S3. No cloud dependency is required for 4.3.
 - CI is executed at the release/tag boundary, not on every intermediate state.
-  Pushing is reserved for a release candidate or an explicit saved state.
+  Pushing is reserved for a release or an explicit saved state.
 
-## Phase 1 — 4.3.0-rc1 (inside 4.3)
+## Phase 1 — 4.3.0 release (inside 4.3)
 
-**Goal:** a coherent, honest controlled-pilot release candidate with live
-evidence before the tag.
+**Goal:** a coherent, honest controlled-pilot release with live evidence before
+the tag.
 
 Required evidence:
 
@@ -43,7 +45,7 @@ Required evidence:
 - UI / Playwright and Go tests green;
 - static file analysis, job recovery, deletion verification;
 - optional S3 adapter tested against an S3-compatible server;
-- release bundle smoke test, upgrade/rollback, hosted CI at tag and clean
+- release bundle smoke test, server upgrade, hosted CI at tag and clean
   install (the six gates in `docs/RELEASE_GATE_4.3.md`);
 - diagrams and docs in English for the public-facing material.
 
@@ -52,13 +54,14 @@ Out of scope for the 4.3.0 claim:
 - real malware execution (AP-126, after the tag);
 - certified sandbox isolation;
 - AWS certification;
-- production FP/FN rates (AP-127, after the tag).
+- production FP/FN rates (AP-127, after the tag);
+- agent rollback to the previous Java/Python runtimes;
 - firewall and DNS policy features (4.5 Network Visibility).
 
 ## Phase 2 — 4.3.x live validation (after 4.3.0)
 
 **Goal:** test the paths that only a real lab can validate. This phase starts
-after the 4.3.0 tag; it is not a substitute for the six RC gates above.
+after the 4.3.0 tag; it is not a substitute for the six release gates above.
 
 1. **Real detonation worker** (AP-126)
    - isolated Windows/Linux VM or container, no Internet, snapshot/restore;
@@ -106,14 +109,16 @@ Allowed for 4.3.0:
 - “static analysis and optional external detonation integration”;
 - “at-least-once command delivery, duplicates possible”;
 - “S3-compatible adapter, tested with Garage; AWS optional and not certified”;
-- “synthetic detection baseline, not a production FP/FN rate”.
+- “synthetic detection baseline, not a production FP/FN rate”;
+- “controlled-pilot release, not production GA”.
 
 Not allowed:
 
 - “real malware detonation certified”;
 - “AWS tested” or “MinIO tested”;
 - “exactly-once”;
-- “production-ready detection quality”.
+- “production-ready detection quality”;
+- “agent rollback tested” (it is outside 4.3.0).
 
 ## References
 

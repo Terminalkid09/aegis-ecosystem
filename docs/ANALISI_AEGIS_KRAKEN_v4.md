@@ -719,7 +719,7 @@ Regole di confine:
 
 **Kubernetes: no, non prima della v5.0.** [R] Soglia: **> 5 nodi** o necessità di autoscaling su carico variabile o multi-tenant con isolamento forte. Il compose attuale copre developer laptop, home lab, single-server pilot e small business. Per il multi-node aziendale, la v5.0 può valutare K8s — ma solo dopo che il compose è stato provato in produzione reale su un singolo server.
 
-**Object storage: sì, in forma minima, in v4.2.0.** [R] I campioni malware e gli artefatti di analisi non appartengono a un volume Docker. Serve uno storage con retention, immutabilità e cancellazione verificata. MinIO in locale, S3 in cloud. Non un data lake: un bucket con policy.
+**Object storage: sì, in forma minima, in v4.2.0.** [R] I campioni malware e gli artefatti di analisi non appartengono a un volume Docker. Serve uno storage con retention, immutabilità e cancellazione verificata. Garage in locale, S3 in cloud. Non un data lake: un bucket con policy.
 
 **Il principio:** ogni componente aggiunto deve risolvere un problema misurato, non anticipato. Oggi il problema misurato è "non c'è integrazione tra due progetti", non "non scaliamo".
 
@@ -752,7 +752,7 @@ Regole di confine:
 - Analisi file/ZIP con sandbox Kraken come job asincrono
 - Estrazione IoC e generazione candidati Sigma
 - Gestione campioni malware con retention e cancellazione verificata
-- Object storage minimo (MinIO/S3)
+- Object storage minimo (S3-compatibile)
 - Process tree e DNS history nella dashboard
 - Dashboard integrata
 - KRAKEN-SEC-003 (timeout comando), KRAKEN-SEC-005, KRAKEN-REL-002/003/004

@@ -22,7 +22,7 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "docs" / "diagrams"
 
-VERSION = "4.3.0-rc1"
+VERSION = "4.3.0"
 DATE = "2026-11-19"
 OWNER = "Aegis Platform"
 PAGE_W = 1600

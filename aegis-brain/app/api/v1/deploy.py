@@ -31,7 +31,7 @@ from app.core.rate_limit import limiter
 
 router = APIRouter(tags=["Agent Deploy"])
 
-VALID_AGENT_TYPES = {"nodetrace", "aegis-guard"}
+VALID_AGENT_TYPES = {"nodetrace", "aegis-guard", "unified"}
 VALID_METHODS = {"ssh", "winrm", "oneline", "interactive"}
 
 
@@ -79,7 +79,7 @@ def _validate_targets(targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 class EnrollTokenRequest(BaseModel):
     label: Optional[str] = None
-    agent_type: str = Field(default="aegis-guard", pattern="^(nodetrace|aegis-guard|both)$")
+    agent_type: str = Field(default="aegis-guard", pattern="^(nodetrace|aegis-guard|unified|both)$")
     ttl_minutes: int = Field(default=15, ge=5, le=1440)
     dashboard_remote: bool = True
     dashboard_local: bool = False
@@ -211,7 +211,9 @@ function Resolve-Java([string]$Dir) {
 }
 
 function Install-AegisAgent($TargetAgent) {
-    $Dir = if ($TargetAgent -eq "nodetrace") { "C:\Aegis\NodeTrace" } else { "C:\Aegis\Guard" }
+    $Dir = if ($TargetAgent -eq "nodetrace") { "C:\Aegis\NodeTrace" }
+           elseif ($TargetAgent -eq "unified") { "C:\Aegis\Agent" }
+           else { "C:\Aegis\Guard" }
     New-Item -ItemType Directory -Force -Path $Dir | Out-Null
     Write-Host "[aegis] downloading $TargetAgent into $Dir ..."
     try {
@@ -233,7 +235,10 @@ function Install-AegisAgent($TargetAgent) {
             Set-Content -Path $TokenFile -Value $EnrollToken -NoNewline -Encoding ascii
             & icacls $TokenFile /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" | Out-Null
             [Environment]::SetEnvironmentVariable("AEGIS_ENROLL_TOKEN_FILE", $TokenFile, "Machine")
-            if ($TargetAgent -eq "aegis-guard") {
+            if ($TargetAgent -eq "unified") {
+                [Environment]::SetEnvironmentVariable("AEGIS_AGENT_PROFILE", "unified", "Machine")
+            }
+            if ($TargetAgent -eq "aegis-guard" -or $TargetAgent -eq "unified") {
                 # Telemetria kernel: se l'artefatto include il collector, si
                 # punta AEGIS_ETW_PATH all'eseguibile ASSOLUTO e si dichiara
                 # l'opt-in (il collector e' compilato dall'operatore, quindi
@@ -259,9 +264,13 @@ function Install-AegisAgent($TargetAgent) {
 
 function Install-AegisService($TargetAgent) {
     if (-not $RemoteDashboard) { return }
-    $service = if ($TargetAgent -eq "nodetrace") { "AegisNodeTrace" } else { "AegisGuard" }
+    $service = if ($TargetAgent -eq "nodetrace") { "AegisNodeTrace" }
+               elseif ($TargetAgent -eq "unified") { "AegisAgent" }
+               else { "AegisGuard" }
     $binary = if ($TargetAgent -eq "nodetrace") {
         Get-ChildItem "C:\Aegis\NodeTrace" -Filter "nodetrace-agent.exe" -Recurse | Select-Object -First 1
+    } elseif ($TargetAgent -eq "unified") {
+        Get-ChildItem "C:\Aegis\Agent" -Filter "aegis-agent.exe" -Recurse | Select-Object -First 1
     } else {
         Get-ChildItem "C:\Aegis\Guard" -Filter "aegis-guard.jar" -Recurse | Select-Object -First 1
     }
@@ -294,6 +303,10 @@ if ($Agent -eq "both") {
     Install-AegisService "nodetrace"
     Install-AegisService "aegis-guard"
     Write-Host "[aegis] both agents installed."
+} elseif ($Agent -eq "unified") {
+    Install-AegisAgent "unified"
+    Install-AegisService "unified"
+    Write-Host "[aegis] unified AegisAgent installed."
 } else {
     Install-AegisAgent $Agent
     Install-AegisService $Agent
@@ -340,6 +353,9 @@ NODETRACE_REGISTER_URL=$BASE/register
 NODETRACE_HEARTBEAT_URL=$BASE/heartbeat
 NODETRACE_UPDATE_URL=$BASE/update
 EOF
+        if [ "$target_agent" = "unified" ]; then
+            printf 'AEGIS_AGENT_PROFILE=unified\n' >> "$dir/aegis.env"
+        fi
         chmod 600 "$dir/aegis.env"
     fi
     rm -f /tmp/aegis-agent.pkg
@@ -356,6 +372,12 @@ install_service() {
         [ -n "$jar" ] || { echo "[aegis] Guard JAR not found" >&2; return 1; }
         command -v java >/dev/null 2>&1 || { echo "[aegis] Java 25+ is required for Guard" >&2; return 1; }
         exec_start="/usr/bin/java -jar ${jar}"
+    elif [ "$target_agent" = "unified" ]; then
+        local exe
+        exe=$(find "/opt/aegis/${target_agent}" -name 'aegis-agent' -type f | head -n 1)
+        [ -n "$exe" ] || { echo "[aegis] Unified executable not found" >&2; return 1; }
+        chmod 755 "$exe"
+        exec_start="$exe"
     else
         local exe
         exe=$(find "/opt/aegis/${target_agent}" -name 'nodetrace-agent' -type f | head -n 1)
@@ -431,7 +453,7 @@ async def _validate_install_token(x_enroll_token: str, db: AsyncSession):
 
 @router.get("/install.ps1", response_class=PlainTextResponse)
 async def install_ps1(
-    agent: str = Query("aegis-guard", pattern="^(nodetrace|aegis-guard|both)$"),
+    agent: str = Query("aegis-guard", pattern="^(nodetrace|aegis-guard|unified|both)$"),
     x_enroll_token: str = Header(None, alias="X-Enroll-Token"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -450,7 +472,7 @@ async def install_ps1(
 
 @router.get("/install.sh", response_class=PlainTextResponse)
 async def install_sh(
-    agent: str = Query("aegis-guard", pattern="^(nodetrace|aegis-guard|both)$"),
+    agent: str = Query("aegis-guard", pattern="^(nodetrace|aegis-guard|unified|both)$"),
     x_enroll_token: str = Header(None, alias="X-Enroll-Token"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -479,6 +501,7 @@ async def list_artifacts(user=Depends(get_current_user)):
     return {
         "items": items,
         "expected": ["aegis-guard-latest.zip", "nodetrace-latest.zip",
+                     "unified-latest.zip", "unified-latest.tar.gz",
                      "aegis-guard-latest.tar.gz", "nodetrace-latest.tar.gz"],
         "note": "Publish from CI (build.bat/mvn) into ARTIFACT_DIR. Installers pull from here — never compile on target.",
     }
@@ -498,6 +521,8 @@ def artifact_name_for(agent_type: str, version: str) -> str:
     v = (version or "latest").strip() or "latest"
     if agent_type == "aegis-guard":
         return f"aegis-guard-{v}.zip"
+    if agent_type == "unified":
+        return f"unified-{v}.zip"
     return f"nodetrace-{v}.zip"
 
 
@@ -660,10 +685,12 @@ async def push_update_command(
     agent = result.scalars().first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    if (agent.agent_type or "").lower() not in ("aegis-guard", "nodetrace", "guard"):
-        raise HTTPException(status_code=400, detail="OTA supported for aegis-guard/nodetrace agents")
+    if (agent.agent_type or "").lower() not in ("aegis-guard", "nodetrace", "unified", "guard"):
+        raise HTTPException(status_code=400, detail="OTA supported for aegis-guard/nodetrace/unified agents")
 
-    atype = "aegis-guard" if "guard" in (agent.agent_type or "").lower() else "nodetrace"
+    normalized_type = (agent.agent_type or "").lower()
+    atype = "unified" if normalized_type == "unified" else (
+        "aegis-guard" if "guard" in normalized_type else "nodetrace")
     fname = artifact_name_for(atype, payload.version)
     path = Path(settings.ARTIFACT_DIR) / fname
     if not path.is_file():
@@ -704,7 +731,7 @@ async def push_update_command(
 # ─── deploy jobs (mass rollout, server-side, no password storage) ──
 
 class DeployJobRequest(BaseModel):
-    agent_type: str = Field(default="nodetrace", pattern="^(nodetrace|aegis-guard)$")
+    agent_type: str = Field(default="nodetrace", pattern="^(nodetrace|aegis-guard|unified)$")
     agent_version: str = Field(default="latest", max_length=50)
     targets: List[Dict[str, Any]]
     username: Optional[str] = Field(default=None, max_length=255)

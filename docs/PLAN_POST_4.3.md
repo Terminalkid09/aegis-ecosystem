@@ -200,8 +200,8 @@ Il sensor non deve uccidere, isolare o bloccare. Deve:
 > atomico con processing/ack e la DLQ sono implementati. AP-122 ha ora
 > evidenza live 50k (50.000 accepted, 1 × 429, LLEN 50.000, zero 5xx). AP-123
 > ha un restart a livello di processo (worker che esce senza ack, secondo
-> processo che recupera `attempt=2`); resta la visibilità del duplicato nella
-> UI. La fonte di verifica è
+> processo che recupera `attempt=2`) e la UI OTA distingue esplicitamente
+> `queued — not executed` dall'ack di esecuzione. La fonte di verifica è
 > `docs/RELEASE_GATE_4.3.md` e `docs/benchmarks/4.3/link-load-50k.md`.
 
 ### 4.1 Percorso reale oggi

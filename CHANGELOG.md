@@ -12,6 +12,96 @@ the tag audit and the release policy.
 > after the batch tags: the full Kraken vertical ships with the hardening
 > fixes, and expansion moves to 4.2+.
 
+## [4.3.0] - 2026-11-19
+
+### Aegis Agent 4.3.0 — parità funzionale NodeTrace e Guard
+
+**Stato: release 4.3.0 per pilot controllati.** Il runtime Go e il profilo
+`unified` sono verificati contro il Brain reale; la release non è production GA
+e non dichiara la certificazione malware. Guard Java e NodeTrace Python restano
+disponibili come runtime legacy durante la migrazione. Il rollback degli agenti
+legacy non è un requisito della 4.3.0 ed è esplicitamente fuori perimetro.
+
+NodeTrace (`sensor`) è stato verificato con la suite Python (82 test, 2 skip) e
+con 84 funzioni di test Go su tutti i package. Il live test del binario copre
+enroll, CSR, `token.json`, heartbeat, `/update`, comandi, ack, scan e header
+`X-Client-Cert-Hash`; è stato eseguito sia con Brain finto sia contro il Brain
+reale locale, con telemetria persistita in PostgreSQL.
+
+Guard (`endpoint`) è stato portato per capacità, non come traduzione meccanica
+dei 140 JUnit: `secret.json`/`agent_id`, enrollment `/enroll/enroll`, outbox
+batch 25/500 ms con buffer 2.000, spool AES-256-GCM 50 MB con quarantena dei
+file corrotti, FIM fsnotify, YARA CLI fail-closed, consumer ETW, monitor
+processi con PID+start time, registry/servizi/persistenza/Defender/Authenticode
+e le 14 azioni (kill, kill tree, block IP e temporaneo, quarantine, remove
+persistence, DNS sinkhole, collect IOC, verify, isolate/deisolate, FIM, YARA,
+update delegato). Il live test del binario copre identità, heartbeat/metriche,
+comandi, ack e header `X-Client-Cert-Hash`; sul Brain reale il profilo endpoint
+ha riportato FIM e response actions attivi, con ETW/YARA dichiarati non
+disponibili su questo host.
+
+Il profilo `unified` usa una sola identità Guard e un solo outbox, ma avvia
+anche i collector sensor. Il Brain/UI lo accettano in enrollment, token di
+deploy, job, OTA, Discovery e telemetria recente. Il primo avvio con token
+monouso è stato provato contro il Brain reale: il token è stato consumato e
+l'agente ha inviato telemetria. Restano aperti l'artefatto `unified-latest.zip`,
+servizio/installer e rollback.
+
+Evidenza eseguita il 2026-11-18 (fake) e il 2026-11-19 (stack reale):
+
+| Gate | Risultato |
+|---|---|
+| `go test ./... -count=1` | 84 funzioni di test Go, tutti i package verdi |
+| `go vet ./...` | verde |
+| build Go Windows e Linux | verde, Go 1.27.4 |
+| `mvn test` Guard Java | 140 test JUnit, 0 failure/error (Temurin 25.0.5.8) |
+| NodeTrace Python | 82 test, 0 failure, 2 skip |
+| live sensor/Guard con Brain finto | verdi; contratto di rete e comandi osservato |
+| live sensor/endpoint/unified con Brain reale | verdi; righe telemetria 1/18/17, capabilities popolate |
+| primo avvio unified con token monouso | token consumato, agent_type=unified, telemetria presente |
+| deploy API unified | token 200, install.ps1/sh 200, job `manual_required`; SSH/WinRM 501 |
+| A/B locale 2×8 s | NodeTrace 27.28 MB RSS vs Go sensor 18.43 MB; Guard Java 126.45 MB vs Go endpoint 18.77 MB |
+
+Il benchmark è in `docs/BENCHMARK.md` e i dati grezzi in
+`docs/benchmarks/4.3/agents-ab.json`. È una misura di footprint e startup su
+Brain finto, non di ingestione PostgreSQL, mTLS/Caddy o flotta. Il vantaggio
+misurato è la riduzione di RSS e artefatto; la CPU dell'endpoint Go è
+comparabile a Java e non viene dichiarata più bassa. Durante la misura è stata
+corretta una regressione reale del polling Windows (WMI/Authenticode per tutti
+i processi ogni secondo), che saturava un core.
+
+**Perimetro dichiarato:** artefatto unificato e packaging firmato MSI/deb/rpm,
+servizio nativo e rollback Java/JRE/Python su host reale non sono parte della
+4.3.0; sono lavoro successivo. Lo smoke contro il Brain reale è reale, ma non è
+un test di flotta né di servizio installato. La 4.3.0 è una release per pilot
+controllati, non una sostituzione production-grade dei due agenti legacy.
+
+**Evidenza di release:** clean install isolata da sorgente senza artefatti
+(`aegis-clean43`) con volumi nuovi, bootstrap admin, enrollment reale,
+heartbeat, evento agente, alert Sigma `T1110.001`, frontend e Link health;
+`api_smoke.py` **21/21 ALL PASS**. Il 50k Link, il restart del consumer comandi
+e i bundle locali restano registrati in `docs/RELEASE_GATE_4.3.md`.
+
+### Changed
+
+- Toolchain Go portata a **1.27.4** (ultima stabile, inclusi i fix di sicurezza
+  del 2 novembre 2026) in `aegis-agent/go.mod`, nel piano 4.3 e nella CI, che ora
+  esegue `go test`, `go vet` e build del binario su Ubuntu e Windows. La macchina
+  di sviluppo è stata portata da Go 1.26.5 a 1.27.4 tramite il pacchetto ufficiale;
+  `go version` e `go env GOROOT` ora puntano alla nuova installazione.
+
+### Added
+
+- Test di integrazione live del sensor Go con Brain finto: enrollment, CSR
+firmata da una CA di test, salvataggio identità, heartbeat/telemetria,
+comandi batch, ack, scan Discovery e verifica dell'header `X-Client-Cert-Hash`.
+- Live reale dei profili `sensor`, `endpoint` e `unified` contro il Brain
+  locale: `scripts/live_agent_profiles.py`; primo avvio unified con token
+  monouso e install.ps1/install.sh generati e verificati sintatticamente.
+- Base del profilo `endpoint` Guard: `secret.json`/`agent_id`, enrollment
+  `aegis-guard`, report legacy e layer di validazione comandi; test di
+  integrazione con Brain finto e test sulle funzioni pure.
+
 ## [4.2.1] - 2026-11-18
 
 The `v4.2.0` tag was created but produced no GitHub Release: its release
@@ -268,7 +358,7 @@ Release notes report 166 tests passing.
 - Asynchronous Redis-backed ingestion, PostgreSQL persistence, Docker Compose
   deployment, and Windows/Linux installation scripts.
 
-[Unreleased]: https://github.com/Terminalkid09/aegis-ecosystem/compare/v4.1.0...HEAD
+[Unreleased]: https://github.com/Terminalkid09/aegis-ecosystem/compare/v4.2.1...HEAD
 [4.1.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v4.1.0
 [4.0.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v4.0.0
 [3.0.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v3.0.0

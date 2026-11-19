@@ -16,6 +16,11 @@ attivazione ETW/YARA restano gate aperti.
 
 **Data:** 2026-11-19
 
+**Decisione di release (2026-11-19):** si va direttamente a `4.3.0`, senza
+`4.3.0-rc1`. Il rollback agli agenti legacy Guard/NodeTrace non è richiesto;
+resta documentato solo il rollback server con ripristino del database. La
+clean install isolata è parte del gate prima del tag.
+
 **Base:** `v4.2.1`, tag annotato su `1de7443` (release pubblicata e verificata).
 
 **Decisione collegata:** la `v4.2.2` non esiste e non verrà creata. I due debiti

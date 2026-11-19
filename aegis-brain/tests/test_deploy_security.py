@@ -137,3 +137,15 @@ def test_windows_installer_says_when_no_service_was_registered():
     """Senza dashboard remota non si registra nulla: va detto, non sottinteso."""
     assert "no service registered" in INSTALL_PS1
     assert "remote dashboard NOT selected" in INSTALL_PS1
+
+
+def test_unified_is_a_single_agent_installer_not_both_legacy():
+    """Unified deve avere un solo artefatto/servizio, non installare Guard+NodeTrace."""
+    assert "unified" in deploy.VALID_AGENT_TYPES
+    assert deploy.artifact_name_for("unified", "4.3.0") == "unified-4.3.0.zip"
+    assert 'elseif ($Agent -eq "unified")' in INSTALL_PS1
+    assert 'Install-AegisAgent "unified"' in INSTALL_PS1
+    assert '"AegisAgent"' in INSTALL_PS1
+    assert 'aegis-agent' in INSTALL_PS1
+    assert '"unified"' in INSTALL_SH
+    assert 'aegis-agent' in INSTALL_SH

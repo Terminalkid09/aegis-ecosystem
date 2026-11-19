@@ -226,13 +226,14 @@ superseded; `synchronous_commit` remains `on`. Hosted CI/E2E passed on
 
 ## Current version fields
 
-These are the release version fields for the `v4.2.1` release.
+These are the release version fields for the `v4.3.0` release.
 
 | Component | File | Current |
 |---|---|---|
-| Brain API | `aegis-brain/app/core/config.py` | `4.2.1` |
-| Frontend | `frontend/package.json` | `4.2.1` |
-| Guard | `aegis-guard/pom.xml` | `4.2.1` |
-| NodeTrace | `NodeTrace/agents/python/agent.py` | `4.2.1` |
-| OCSF agent metadata | `aegis-brain/app/services/ocsf.py` | `4.2.1` |
-| Artifact packer | `scripts/pack-artifacts.py` | `v4.2.1` |
+| Brain API | `aegis-brain/app/core/config.py` | `4.3.0` |
+| Frontend | `frontend/package.json` | `4.3.0` |
+| Unified Go agent | `aegis-agent/internal/config/config.go` | `4.3.0` |
+| Guard legacy | `aegis-guard/pom.xml` | `4.3.0` |
+| NodeTrace legacy | `NodeTrace/agents/python/agent.py` | `4.3.0` |
+| OCSF agent metadata | `aegis-brain/app/services/ocsf.py` | `4.3.0` |
+| Artifact packer | `scripts/pack-artifacts.py` | `v4.3.0` |

@@ -98,6 +98,56 @@ oltre servono worker async + partizionamento PG (ARCH_REVIEW).
 - Guard user-mode: scan 1 s, hash solo nuovi, netstat ≤5 s, spool 50 MB bound.
 - NodeTrace pooling: 10 s heartbeat, batch 25/2 s, dedup 5 s.
 
+## A/B agenti 4.3 (2026-11-18)
+
+Misura live **locale** con Brain finto su `127.0.0.1`, 2 run da 8 s per
+agente, stesso host Windows 11, CPU 8 vCPU, Go 1.27.4, Python 3.13.14 e
+Temurin 25.0.5. Ogni agente partiva con identità pre-seeded, così la misura
+riguarda il runtime e non enrollment/CSR. I processi sono rimasti vivi per
+tutta la finestra; il codice di uscita 1 è il `terminate()` del harness, non un
+crash dell'agente. Il Brain finto conta le richieste ma non ha PostgreSQL:
+questa è una misura di footprint/startup e di contratto live, **non** un
+benchmark di ingestione o di latenza Brain.
+
+| Agente | RSS mediana | RSS picco | CPU mediana | Artefatto |
+|---|---:|---:|---:|---:|
+| NodeTrace Python (baseline) | **27.28 MB** | 28.15 MB | <0.1% (sotto risoluzione) | bundle 34.21 MB |
+| Go `sensor` | **18.43 MB** | 18.46 MB | <0.1% | binario 12.40 MB |
+| Guard Java 25 (baseline) | **126.45 MB** | 139.33 MB | 4.15% | JAR 18.44 MB + JRE 304.14 MB |
+| Go `endpoint` | **18.77 MB** | 19.42 MB | 5.20% | stesso binario 12.40 MB |
+
+Riduzioni misurate: **-32.4% RSS** per il sensore Go rispetto a NodeTrace e
+**-85.2% RSS** per l'endpoint Go rispetto a Guard Java. L'endpoint Go ha CPU
+comparabile (5.20% vs 4.15%, due campioni con rumore di avvio) e il sensore Go
+non ha mostrato carico misurabile. Il vantaggio certo è il footprint, non una
+percentuale di CPU dichiarata: l'endpoint Go non viene presentato come più
+leggero in CPU di Java.
+
+Il primo run dell'endpoint ha esposto una regressione reale: il polling
+leggeva WMI (cmdline/utente) e Authenticode per **tutti** i processi ogni
+secondo, saturando un core. Il fix limita i campi costosi ai soli processi
+nuovi; la misura sopra è successiva al fix. Riproduzione:
+`python scripts/bench_agent_ab.py --runs 2 --duration 8`; dati grezzi in
+`docs/benchmarks/4.3/agents-ab.json`.
+
+## Live profili 4.3 (2026-11-19)
+
+Non è un benchmark di throughput: è la verifica che lo stesso binario Go parli
+con il Brain reale in tutti e tre i ruoli. Stack Compose con PostgreSQL, Redis,
+Brain e Caddy; agente Windows avviato da una home temporanea, hostname univoco,
+agente revocato a fine prova. Il Brain ha registrato rispettivamente **1, 18 e
+17 righe di telemetria** per `sensor`, `endpoint` e `unified`.
+
+| Profilo | agent_type | Capabilities osservate | Telemetria |
+|---|---|---|---:|
+| `sensor` | `nodetrace` | telemetria, scan; kernel `absent` su Windows | 1 |
+| `endpoint` | `aegis-guard` | FIM, azioni, monitor, registry; ETW/YARA non disponibili | 18 |
+| `unified` | `unified` | entrambe le famiglie, un solo processo/outbox | 17 |
+
+È stato inoltre provato il primo avvio `unified` con token monouso: token
+consumato, record `agent_type=unified`, telemetria recente presente. Il test
+non installa un servizio Windows/Linux e non prova il rollback.
+
 ## Coda e resilienza
 
 - Spool cifrato 50 MB, replay ordinato, bound 2000 in RAM (drop-oldest contato).
@@ -107,6 +157,12 @@ oltre servono worker async + partizionamento PG (ARCH_REVIEW).
 
 ## Limiti
 
+- Il benchmark A/B 4.3 è **locale e con Brain finto**: non misura PostgreSQL,
+  Caddy/mTLS, rete reale né una flotta. Lo smoke reale dei tre profili è stato
+  eseguito separatamente (sezione precedente), ma non è un benchmark di
+  capacità del Brain né una prova di flotta.
+- I conteggi CPU sono al secondo e con due run: le differenze sotto ~2 punti
+  percentuali non sono statisticamente significative.
 - Corpus piccolo: **non dichiarare 0 FP globali**, solo su dataset documentato.
 - DB growth: stima, non misura su 90gg reali.
 - MTTD/triage: solo live (pilot).

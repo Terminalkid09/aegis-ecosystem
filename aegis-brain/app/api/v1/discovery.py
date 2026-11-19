@@ -238,9 +238,9 @@ async def _sync_agent_status(db: AsyncSession, ip: str, host: DiscoveredHost):
         threshold = datetime.now(timezone.utc).timestamp() - 600
         is_active = agent.last_seen.timestamp() > threshold if agent.last_seen else False
         is_deployed = agent.last_seen is not None
-        if agent.agent_type == "aegis-guard":
+        if agent.agent_type in ("aegis-guard", "unified"):
             host.guard_status = "active" if is_active else ("deployed" if is_deployed else "not_deployed")
-        elif agent.agent_type in ("nodetrace", "NodeTrace"):
+        if agent.agent_type in ("nodetrace", "NodeTrace", "unified"):
             host.nodetrace_status = "active" if is_active else ("deployed" if is_deployed else "not_deployed")
 
 
@@ -459,8 +459,8 @@ async def deployment_plan(payload: DeploymentPlanRequest, user=Depends(require_p
     _validate_ip_or_raise(payload.ip_address)
 
     if payload.agent_type == "unified":
-        local_command = "cd NodeTrace\\agents\\python\\dist\\nodetrace-agent && nodetrace-agent.exe & cd aegis-guard && java -jar target\\aegis-guard.jar"
-        remote_command = f"Copy agents to {payload.ip_address} and run them."
+        local_command = "aegis-agent.exe --profile unified"
+        remote_command = f"Install the unified AegisAgent artifact on {payload.ip_address} and run it with --profile unified"
     elif payload.agent_type == "nodetrace":
         local_command = "cd NodeTrace\\agents\\python\\dist\\nodetrace-agent && nodetrace-agent.exe"
         remote_command = f"Copy nodetrace-agent folder to {payload.ip_address} and run nodetrace-agent.exe"
@@ -481,6 +481,7 @@ async def deployment_plan(payload: DeploymentPlanRequest, user=Depends(require_p
         "executables": {
             "nodetrace": "NodeTrace/agents/python/dist/nodetrace-agent/nodetrace-agent.exe",
             "guard_jar": "aegis-guard/target/aegis-guard.jar",
+            "unified": "aegis-agent/aegis-agent.exe",
         },
         "note": "Manual/one-line deploy: generate a token in /deploy/token and paste the command on the target. No credential is requested, stored or used.",
     }
@@ -535,9 +536,9 @@ async def sync_agent_status(db: AsyncSession = Depends(get_db), user=Depends(req
         for agent in agents:
             is_active = agent.last_seen.timestamp() > threshold if agent.last_seen else False
             is_deployed = agent.last_seen is not None
-            if agent.agent_type == "aegis-guard":
+            if agent.agent_type in ("aegis-guard", "unified"):
                 host.guard_status = "active" if is_active else ("deployed" if is_deployed else "not_deployed")
-            elif agent.agent_type in ("nodetrace", "NodeTrace"):
+            if agent.agent_type in ("nodetrace", "NodeTrace", "unified"):
                 host.nodetrace_status = "active" if is_active else ("deployed" if is_deployed else "not_deployed")
 
     await db.commit()

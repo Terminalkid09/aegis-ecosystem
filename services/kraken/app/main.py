@@ -46,11 +46,22 @@ async def lifespan(app: FastAPI):
     )
     await init_db()
     await init_redis()
+    from app.services.file_analysis import analysis_worker_loop
+    analysis_stop = asyncio.Event()
+    analysis_task = asyncio.create_task(
+        analysis_worker_loop(analysis_stop), name="kraken-analysis-worker"
+    )
     await plugin_manager.initialize()
     await event_bus.emit_async("system.startup")
     start_outbox_worker()
     logger.info("All systems ready.")
     yield
+    analysis_stop.set()
+    analysis_task.cancel()
+    try:
+        await analysis_task
+    except asyncio.CancelledError:
+        pass
     await stop_outbox_worker()
     await plugin_manager.shutdown()
     await event_bus.emit_async("system.shutdown")

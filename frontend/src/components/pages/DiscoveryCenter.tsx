@@ -360,9 +360,9 @@ export default function DiscoveryCenter() {
               <div>
                 <label className="text-[10px] uppercase font-bold tracking-widest text-[hsl(var(--muted-foreground))] mb-1.5 block">Select Agent Type</label>
                 <select value={deployAgentType} onChange={e => setDeployAgentType(e.target.value)} className="input">
-                  <option value="nodetrace">NodeTrace (Python Telemetry)</option>
-                  <option value="aegis-guard">Aegis-Guard (Java EDR)</option>
-                  <option value="unified">Unified (Guard + NodeTrace)</option>
+                  <option value="unified">AegisAgent (Go unified)</option>
+                  <option value="nodetrace">NodeTrace (legacy Python)</option>
+                  <option value="aegis-guard">Aegis-Guard (legacy Java)</option>
                 </select>
               </div>
 

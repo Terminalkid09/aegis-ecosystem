@@ -93,7 +93,9 @@ export default function DeployManager() {
     mutationFn: () => deployAPI.pushUpdate(otaAgent.trim(), otaVersion.trim() || 'latest'),
     onSuccess: (r) => {
       setOtaResult(r.data)
-      setMsg(r.data.queued ? `UPDATE_AGENT queued (sha ${r.data.command.sha256.slice(0, 12)}…)` : 'Queue offline — payload signed and ready for manual delivery.')
+      setMsg(r.data.queued
+        ? `UPDATE_AGENT accepted by the delivery queue — NOT executed yet (sha ${r.data.command.sha256.slice(0, 12)}…). Waiting for the agent ack.`
+        : 'Queue offline — payload signed and ready for manual delivery. Nothing was executed.')
     },
     onError: (e: any) => setMsg(e?.response?.data?.detail || 'OTA Push failed.')
   })
@@ -146,9 +148,10 @@ export default function DeployManager() {
           <div className="flex gap-2">
             <input value={tokenLabel} onChange={e => setTokenLabel(e.target.value)} placeholder="Label (e.g. office-rollout)" className="input flex-1" />
             <select value={tokenAgent} onChange={e => setTokenAgent(e.target.value)} className="input">
-              <option value="aegis-guard">Aegis-Guard</option>
-              <option value="nodetrace">NodeTrace</option>
-              <option value="both">Both agents</option>
+              <option value="unified">AegisAgent (unified)</option>
+              <option value="aegis-guard">Aegis-Guard (legacy)</option>
+              <option value="nodetrace">NodeTrace (legacy)</option>
+              <option value="both">Both legacy agents</option>
             </select>
           </div>
           <div className="space-y-1">
@@ -210,8 +213,9 @@ export default function DeployManager() {
           <h3 className="text-xs font-bold uppercase tracking-widest text-[hsl(var(--muted-foreground))] flex items-center gap-2"><Play size={14} /> Manual Rollout Tracking</h3>
           <div className="flex gap-2">
             <select value={agentType} onChange={e => setAgentType(e.target.value)} className="input flex-1">
-              <option value="nodetrace">NodeTrace (Telemetry)</option>
-              <option value="aegis-guard">Aegis-Guard (EDR)</option>
+              <option value="unified">AegisAgent (unified)</option>
+              <option value="nodetrace">NodeTrace (legacy telemetry)</option>
+              <option value="aegis-guard">Aegis-Guard (legacy EDR)</option>
             </select>
             <select value={method} onChange={e => setMethod(e.target.value)} className="input">
               <option value="ssh" disabled>SSH (executor pending)</option>
@@ -286,8 +290,18 @@ export default function DeployManager() {
               <div className="rounded bg-[hsl(var(--secondary))] p-2 border border-[hsl(var(--border))] font-mono text-[10px] text-[hsl(var(--muted-foreground))] break-all">
                 <span className="text-emerald-400">sha256:</span> {otaResult.command?.sha256?.slice(0, 32)}…<br/>
                 <span className="text-purple-400">sig:</span> {otaResult.command?.signature?.slice(0, 16)}…<br/>
-                <span className="text-cyan-400">queued:</span> {String(otaResult.queued)}
+                <span className="text-cyan-400">delivery:</span>{' '}
+                <span className={otaResult.queued ? 'text-yellow-400' : 'text-red-400'}>
+                  {otaResult.queued ? 'queued — not executed' : 'not queued — manual delivery'}
+                </span>
               </div>
+            )}
+            {otaResult && (
+              <p className="text-[10px] leading-snug text-[hsl(var(--muted-foreground))]">
+                {otaResult.queued
+                  ? 'Queued is not executed. The agent confirms execution with an ack; a crash before the ack can replay the same command once (at-least-once).'
+                  : 'The command was not queued. Use the signed payload for manual delivery; no action has run on the agent.'}
+              </p>
             )}
           </div>
         </div>

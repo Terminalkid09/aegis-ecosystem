@@ -179,7 +179,7 @@ def main() -> int:
                        "NodeTrace", "services/kraken"],
         "files": files,
         "image_sboms": image_sboms,
-        "signature": "not produced; 4.2.1 is unsigned by decision (RELEASE_SIGNING.md)",
+        "signature": "not produced; 4.3.0 is unsigned by decision (RELEASE_SIGNING.md)",
     }
     (out / "RELEASE_MANIFEST.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"

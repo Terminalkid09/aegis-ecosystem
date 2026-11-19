@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.aegis</groupId>
     <artifactId>aegis-guard</artifactId>
-    <version>4.2.1</version>
+    <version>4.3.0</version>
     <properties>
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>

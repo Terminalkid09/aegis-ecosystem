@@ -330,7 +330,7 @@ One preparative step is yours — **publish the artifacts the brain serves** (th
 
 ```bash
 python scripts/pack-artifacts.py            # -> aegis-brain/artifacts/*-latest.{zip,tar.gz}
-python scripts/pack-artifacts.py --version v4.2.1
+python scripts/pack-artifacts.py --version v4.3.0
 ```
 
 It packs exactly what a local install copies: `aegis-guard.jar`, a bundled `jre/` when `build.bat` produced one, `aegis-etw.exe` (kernel telemetry) and `bin/yara64.exe` for Guard; the full PyInstaller bundle for NodeTrace. Missing runtime = hard failure; missing optional piece = declared in the output (`python -m ...`-style honesty, no silent gaps). What the target needs: **Administrator** (service registration + ETW trace session), and a **Java 25+** runtime — either bundled in the artifact or installed there (`Get-JavaMajor` verifies the version, because a Java 8 on `PATH` installs a service that starts and dies with `UnsupportedClassVersionError`).
@@ -573,7 +573,7 @@ aegis-ecosystem/
 
 ### CI/CD
 
-GitHub Actions runs at the **release/tag boundary**, not on every intermediate push: lint (flake8 + oxlint), secret scanning, event-contract checks, Windows installer checks, OS-compat matrix (ubuntu + windows), brain + guard + link tests, frontend lint/build, pip-audit, Trivy image scanning (strict on images we build, informational on upstream images), SBOM generation and the ephemeral Compose E2E job. The hosted E2E run still has to be proven on the 4.3.0-rc1 tag before release; a local green run is not a substitute.
+GitHub Actions runs at the **release/tag boundary**, not on every intermediate push: lint (flake8 + oxlint), secret scanning, event-contract checks, Windows installer checks, OS-compat matrix (ubuntu + windows), brain + guard + link tests, frontend lint/build, pip-audit, Trivy image scanning (strict on images we build, informational on upstream images), SBOM generation and the ephemeral Compose E2E job. The hosted E2E run still has to be proven on the `v4.3.0` tag before the release is published; a local green run is not a substitute.
 
 ---
 

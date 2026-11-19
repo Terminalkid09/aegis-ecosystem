@@ -9,6 +9,11 @@
   conteggiati due volte (metriche, mai perdita). Accettato e documentato.
 - **Consumer Redis**: `BRPOPLPUSH` + processing + DLQ — kill -9 di un worker =
   requeue al boot, niente perdita.
+- **Comandi**: Brain e Link usano claim atomico, processing list, visibility
+  timeout, ack idempotente e DLQ. La garanzia è at-least-once: un crash tra
+  esecuzione e ack può duplicare l'azione; non è exactly-once. AP-123 è in
+  **Test**, non Done. Il percorso eventi Link ha ancora il check+push non
+  atomico (AP-122).
 
 ## Scalare (stesso host, pronto oggi)
 ```bash
