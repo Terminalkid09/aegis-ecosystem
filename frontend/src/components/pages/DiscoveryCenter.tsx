@@ -20,7 +20,7 @@ export default function DiscoveryCenter() {
   const [selectedHosts, setSelectedHosts] = useState<Set<string>>(new Set())
   const [showRepHelp, setShowRepHelp] = useState(false)
   const [deployModal, setDeployModal] = useState<any>(null)
-  const [deployAgentType, setDeployAgentType] = useState('nodetrace')
+  const [deployAgentType, setDeployAgentType] = useState('unified')
   const [plan, setPlan] = useState<any>(null)
 
   // Queries
@@ -361,8 +361,6 @@ export default function DiscoveryCenter() {
                 <label className="text-[10px] uppercase font-bold tracking-widest text-[hsl(var(--muted-foreground))] mb-1.5 block">Select Agent Type</label>
                 <select value={deployAgentType} onChange={e => setDeployAgentType(e.target.value)} className="input">
                   <option value="unified">AegisAgent (Go unified)</option>
-                  <option value="nodetrace">NodeTrace (legacy Python)</option>
-                  <option value="aegis-guard">Aegis-Guard (legacy Java)</option>
                 </select>
               </div>
 

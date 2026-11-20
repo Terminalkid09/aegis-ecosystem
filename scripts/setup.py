@@ -7,10 +7,13 @@ Installazione (da repo appena clonata):
 Fa tutto, nell'ordine:
   1. preflight dipendenze (docker, compose, python) con messaggi chiari
   2. .env: se manca, lo GENERA con segreti casuali forti (nessun placeholder)
-  3. binari vendor (nssm, yara64) scaricati con SHA-256 pinnato, se assenti
-  4. build artefatti agenti se assenti (PyInstaller + Maven + JRE + ETW)
-  5. avvio piattaforma (compose) + attesa readiness + agenti host + smoke API
-  6. bootstrap admin: crea/promuove l'utente admin e stampa le credenziali
+  3. avvio piattaforma (compose) + attesa readiness + smoke API
+  4. bootstrap admin: crea/promuove l'utente admin e stampa le credenziali
+
+Gli agenti endpoint non vengono piu' compilati o installati da questo script:
+la 4.3 li installa dalla Deployment Manager con un token monouso e l'archivio
+unified pubblicato. Guard/NodeTrace restano solo nel sorgente per i 4.2.1
+gia' installati.
 
 Aggiornamento (dopo un git pull, o direttamente):
     python scripts/setup.py update
@@ -494,15 +497,6 @@ def cmd_update(args) -> int:
     log("aggiornamento completato: dati preservati (volume DB intatto, "
         "migrazioni applicate all'avvio).")
 
-    # Il pull puo' aver portato una versione nuova dei binari vendor.
-    ensure_binaries()
-
-    if args.rebuild_agents and IS_NT:
-        if build_agents() != 0:
-            log("agenti non ricompilati: la piattaforma e' comunque aggiornata", "!")
-    elif agents_built():
-        log("agenti host: artefatti presenti (usa --rebuild-agents per ricompilarli)")
-
     env = read_env()
     email, password = bootstrap_admin(env, args.email, args.password)
     if email:
@@ -519,20 +513,12 @@ def main() -> int:
     sub = ap.add_subparsers(dest="command")
     up = sub.add_parser("update", help="git pull + rebuild + riavvio (dati preservati)")
     up.add_argument("--force", action="store_true", help="procedi anche con working tree sporco")
-    up.add_argument("--rebuild-agents", action="store_true", help="ricompila anche gli agenti host")
     up.add_argument("--wait", type=int, default=120)
     up.add_argument("--email")
     up.add_argument("--password")
 
     ap.add_argument("--email", help="email admin (default: admin@aegis.local o quella nel .env)")
     ap.add_argument("--password", help="password admin (default: generata e salvata nel .env)")
-    ap.add_argument("--no-agents", action="store_true", help="non avviare gli agenti host")
-    ap.add_argument("--no-autostart", action="store_true",
-                    help="non registrare gli agenti come servizi Windows (solo avvio dev)")
-    ap.add_argument("--force-build", action="store_true", help="ricompila gli artefatti anche se presenti")
-    ap.add_argument("--skip-build", action="store_true", help="salta la build degli artefatti")
-    ap.add_argument("--skip-binaries", action="store_true",
-                    help="non scaricare nssm/yara64 (offline o li metti a mano)")
     args = ap.parse_args()
 
     if args.command == "update":
@@ -550,19 +536,6 @@ def main() -> int:
     if status == "created":
         log(".env creato con segreti casuali.", "+")
 
-    # Prima della build: l'installer di Guard deploya yara64.exe se lo trova,
-    # quindi scaricarlo adesso significa che l'agente parte con YARA attivo e
-    # con i servizi registrabili (nssm).
-    if not args.skip_binaries:
-        if ensure_binaries() != 0:
-            log("binari vendor incompleti: la piattaforma parte comunque, "
-                "ma servizi Windows e scansioni YARA restano disattivati "
-                "finche' non li metti a mano (istruzioni sopra).", "!")
-
-    if not args.skip_build:
-        if build_agents() != 0:
-            return 1
-
     if ai_profile_requested():
         log("profilo AI locale attivo (AEGIS_WITH_AI=1): avvio anche ollama")
     else:
@@ -579,17 +552,6 @@ def main() -> int:
     if not email:
         return 1
     log(f"admin pronto: {email}", "+")
-
-    if not args.no_agents:
-        # Prima i servizi (persistono al reboot), poi — solo se NON registrati —
-        # l'avvio dev. Mai entrambi: due istanze per endpoint = telemetria doppia.
-        services_up = False if args.no_autostart else install_agent_services()
-        if services_up:
-            log("agenti gestiti dai servizi Windows (ripartono da soli al boot)", "+")
-        else:
-            if start_agents() != 0:
-                log("agenti non avviati: la piattaforma resta utilizzabile", "!")
-        time.sleep(8)
 
     if run_smoke("http://127.0.0.1:8000", email, password) != 0:
         return 1

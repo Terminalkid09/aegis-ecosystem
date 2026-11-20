@@ -18,9 +18,10 @@ the tag audit and the release policy.
 
 **Stato: release 4.3.0 per pilot controllati.** Il runtime Go e il profilo
 `unified` sono verificati contro il Brain reale; la release non è production GA
-e non dichiara la certificazione malware. Guard Java e NodeTrace Python restano
-disponibili come runtime legacy durante la migrazione. Il rollback degli agenti
-legacy non è un requisito della 4.3.0 ed è esplicitamente fuori perimetro.
+e non dichiara la certificazione malware. Il bundle 4.3 non contiene più Guard
+Java e NodeTrace Python: restano solo nel sorgente per compatibilità 4.2.1 e non
+sono offribili per nuovi deploy. Il rollback agli agenti legacy non è un
+requisito della 4.3.0 ed è esplicitamente fuori perimetro.
 
 NodeTrace (`sensor`) è stato verificato con la suite Python (82 test, 2 skip) e
 con 84 funzioni di test Go su tutti i package. Il live test del binario copre
@@ -42,14 +43,14 @@ disponibili su questo host.
 
 Il profilo `unified` usa una sola identità Guard e un solo outbox, ma avvia
 anche i collector sensor. Il Brain/UI lo accettano in enrollment, token di
-deploy, job, OTA, Discovery e telemetria recente. Il bundle 4.3.0 contiene
-l'agente Go per Windows e Linux (`aegis-agent-windows-amd64.exe`,
-`aegis-agent-linux-amd64`, `unified-latest.zip`, `unified-latest.tar.gz` e le
-copie versionate); `release-smoke.py --require-agent` rifiuta un bundle che ne
-è privo. Guard Java e NodeTrace Python restano gli artefatti legacy per la
-migrazione: il "no rollback" della 4.3 riguarda il downgrade agli agenti
-precedenti, non la loro presenza nel bundle. Fuori dal perimetro 4.3.0 restano
-il servizio/installer drop-in firmato e il rollback.
+deploy, job, OTA, Discovery e telemetria recente. Il bundle 4.3.0 contiene solo
+l'agente Go per Windows e Linux: `unified-latest.zip`, `unified-latest.tar.gz` e
+le copie versionate `unified-4.3.0.*`. L'archivio Windows include
+`aegis-agent.exe` e `aegis-etw.exe`; quello Linux include `aegis-agent`,
+`aegis-collector` e `aegis_exec.bpf.o`. `release-smoke.py --require-agent`
+rifiuta un bundle senza questi file e rifiuta esplicitamente Guard/NodeTrace e i
+binari grezzi. Fuori dal perimetro 4.3.0 restano il servizio/installer drop-in
+firmato e il rollback.
 
 Evidenza eseguita il 2026-11-18 (fake) e il 2026-11-19 (stack reale):
 
@@ -79,16 +80,18 @@ i processi ogni secondo), che saturava un core.
 servizio nativo e rollback Java/JRE/Python su host reale non sono parte della
 4.3.0; sono lavoro successivo. Lo smoke contro il Brain reale è reale, ma non è
 un test di flotta né di servizio installato. La 4.3.0 è una release per pilot
-controllati, non una sostituzione production-grade dei due agenti legacy.
+controllati, non una sostituzione production-grade di un servizio endpoint
+firmato; il bundle non contiene più Guard/NodeTrace, che restano solo nel
+sorgente per i 4.2.1 già installati.
 
 **Evidenza di release:** clean install isolata da sorgente senza artefatti
 (`aegis-clean43`) con volumi nuovi, bootstrap admin, enrollment reale,
 heartbeat, evento agente, alert Sigma `T1110.001`, frontend e Link health;
 `api_smoke.py` **21/21 ALL PASS**. La clean install del gate 6 è stata eseguita
 sull'archivio `31962cd`; il bundle finale aggiunge il fix del download e i
-default `unified`, è verificato con smoke 28/28 e con il download/run live
-dell'agente Go contro un Brain 4.3. Il bundle ha 28 file, con l'agente Go
-Windows/Linux e gli archivi `unified-*`;
+default `unified`, è verificato con smoke 24/24 e con il download/run live
+dell'agente Go contro un Brain 4.3. Il bundle ha 24 file: quattro archivi
+`unified-*` e i tre helper kernel dentro gli archivi;
 l'upgrade del database 4.2.1 ha preservato 68 agenti e 321 alert, con smoke
 21/21. Il 50k Link, il restart del consumer comandi e i gate restano registrati
 in `docs/RELEASE_GATE_4.3.md`. La CI hosted al tag è l'unico passo ancora

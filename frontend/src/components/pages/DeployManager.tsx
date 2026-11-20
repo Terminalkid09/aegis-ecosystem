@@ -149,9 +149,6 @@ export default function DeployManager() {
             <input value={tokenLabel} onChange={e => setTokenLabel(e.target.value)} placeholder="Label (e.g. office-rollout)" className="input flex-1" />
             <select value={tokenAgent} onChange={e => setTokenAgent(e.target.value)} className="input">
               <option value="unified">AegisAgent (unified)</option>
-              <option value="aegis-guard">Aegis-Guard (legacy)</option>
-              <option value="nodetrace">NodeTrace (legacy)</option>
-              <option value="both">Both legacy agents</option>
             </select>
           </div>
           <div className="space-y-1">
@@ -214,8 +211,6 @@ export default function DeployManager() {
           <div className="flex gap-2">
             <select value={agentType} onChange={e => setAgentType(e.target.value)} className="input flex-1">
               <option value="unified">AegisAgent (unified)</option>
-              <option value="nodetrace">NodeTrace (legacy telemetry)</option>
-              <option value="aegis-guard">Aegis-Guard (legacy EDR)</option>
             </select>
             <select value={method} onChange={e => setMethod(e.target.value)} className="input">
               <option value="ssh" disabled>SSH (executor pending)</option>

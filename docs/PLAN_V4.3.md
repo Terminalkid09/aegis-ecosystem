@@ -21,6 +21,20 @@ attivazione ETW/YARA restano gate aperti.
 resta documentato solo il rollback server con ripristino del database. La
 clean install isolata è parte del gate prima del tag.
 
+> **Nota di stato (2026-11-20):** le sezioni 2.x descrivono la fotografia
+> pre-cutover e la sequenza A/B/C. La decisione A ha superato la sequenza: il
+> bundle e la UI 4.3 sono già unified-only. I riferimenti a Guard/NodeTrace qui
+> sotto restano come storia della migrazione e compatibilità 4.2.1, non come
+> percorso di deploy offerto.
+
+**Decisione di perimetro (2026-11-20): A — bundle unified-only.** Il bundle
+4.3 contiene solo i quattro archivi `unified-*` (latest + copie versionate) e i
+helper kernel dentro gli archivi. Guard e NodeTrace non vengono più spediti né
+offerti dalla UI di deploy; restano nel sorgente esclusivamente come riferimento
+di compatibilità per agenti 4.2.1 già installati. Il Brain continua ad accettare
+la loro telemetria, ma non esistono più token, job o installer legacy per nuovi
+deploy. Servizio/installer drop-in firmato e rollback restano fuori perimetro.
+
 **Base:** `v4.2.1`, tag annotato su `1de7443` (release pubblicata e verificata).
 
 **Decisione collegata:** la `v4.2.2` non esiste e non verrà creata. I due debiti

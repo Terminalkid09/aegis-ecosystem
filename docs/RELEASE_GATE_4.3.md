@@ -12,9 +12,10 @@ malware-analysis release and not production GA.** The live install, enrollment,
 event, detection, upgrade, bundle and clean-install paths have real evidence.
 The tag may be created only after the hosted tag workflow is green.
 
-The bundle ships both the 4.3 Go agent and the legacy Guard/NodeTrace
-artifacts. "No agent rollback" removes the downgrade requirement, not the
-legacy runtimes: they remain the migration baseline.
+The bundle ships only the 4.3 unified Go agent. Guard and NodeTrace remain in
+the source tree for 4.2.1 compatibility, but they are not in the bundle and are
+not offered by the 4.3 deployment UI. "No agent rollback" removes the
+downgrade requirement; it does not leave a legacy artifact path in the bundle.
 
 Agent rollback is explicitly **out of scope** for 4.3.0: there is no requirement
 to roll back to the previous Guard/NodeTrace agents. The supported rollback
@@ -32,7 +33,7 @@ the 4.5 Network Visibility track.
 | Brain restart | worker process claims and exits without ack; a second process recovers the same command after the lease, `delivery_attempt=2`, then acks | **PASS** |
 | Command duplicate visibility | OTA panel reports `queued — not executed`, requires an agent ack and states that a crash before the ack can replay the command once; frontend production build passes | **PASS** |
 | Server upgrade | dump of the running 4.2.1 database (68 agents, 321 alerts, Alembic `0022`) restored into a fresh project; Brain 4.3.0 starts at `0022 (head)`; API smoke | **PASS, 21/21** |
-| Bundle | `v4.3.0`, 28 files incl. the Go agent, manifest + `SHA256SUMS`, smoke from a copied bundle, `sha256sum -c` | **PASS, 28/28** |
+| Bundle | `v4.3.0`, 24 files incl. the four unified archives, manifest + `SHA256SUMS`, smoke from a copied bundle, `sha256sum -c` | **PASS, 24/24** |
 | Clean install from bundle | source archive extracted from the bundle, new project/volumes/ports, image build, admin bootstrap, enrollment, heartbeat, agent event, alert Sigma `T1110.001`; frontend 200, Link UP, API smoke | **PASS, 21/21** |
 | Clean install from Git clone | local clone of `31962cd` with no build outputs, new project/volumes; same install/enroll/event/alert/smoke path | **PASS, 21/21** |
 | Unified agent from bundle | `unified-latest.zip` downloaded from the Brain bootstrap endpoint with a single-use token; binary ran as `agent_type=unified`, telemetry persisted, agent revoked | **PASS** |
@@ -43,10 +44,11 @@ the 4.5 Network Visibility track.
 | Detection baseline | 14 malicious + 14 benign, synthetic | 14 TP, 0 FN, 5 FP, 9 TN |
 | Diagrams | 4 draw.io sources + PNG/SVG, English, dark architecture system, version `4.3.0` | **4/4** |
 
-The bundle now ships the Go agent for Windows and Linux as well as the legacy
-Guard/NodeTrace artifacts. The live test downloads the agent from the bundle
-through the same bootstrap endpoint the one-liner uses, so the installer path
-is exercised, not only a local binary.
+The bundle ships only the unified Go agent for Windows and Linux. The Windows
+archive contains `aegis-agent.exe` and `aegis-etw.exe`; the Linux archive
+contains `aegis-agent`, `aegis-collector` and `aegis_exec.bpf.o`. The live test
+downloads the agent from the bundle through the same bootstrap endpoint the
+one-liner uses, so the installer path is exercised, not only a local binary.
 
 The 50k run is documented in `docs/benchmarks/4.3/link-load-50k.md`. It proves
 the Link HTTP + Redis Lua boundary on one Docker Desktop host; it does not
@@ -60,14 +62,14 @@ Windows/Linux agent service packaging.
 |---|---|---|---|
 | 1 | **AP-122** Link atomic check+push and 50k load | **PASS** | 50k live run above; raw evidence retained |
 | 2 | **AP-123** crash/restart and duplicate visibility | **PASS** | process restart/`attempt=2` and idempotent ack pass; OTA UI says `queued — not executed` and explains the ack/replay boundary |
-| 3 | Release bundle from a clean download | **PASS (local)** | 28-file `v4.3.0` bundle including the Go agent; manifest/checksums, copied-bundle smoke and `sha256sum -c` (28/28) pass, and `--require-agent` rejects a bundle without it. GitHub asset download, cosign/provenance verification remain tag-time work; the release is unsigned by decision (`docs/RELEASE_SIGNING.md`) |
+| 3 | Release bundle from a clean download | **PASS (local)** | 24-file `v4.3.0` unified-only bundle; manifest/checksums, copied-bundle smoke and `sha256sum -c` (24/24) pass, and `--require-agent` rejects a bundle without the four archives or the kernel helpers and rejects legacy/raw artifacts. GitHub asset download, cosign/provenance verification remain tag-time work; the release is unsigned by decision (`docs/RELEASE_SIGNING.md`) |
 | 4 | Upgrade from 4.2.1 | **PASS (server-only)** | 4.2.1 DB restored, 68 agents/321 alerts preserved, Brain 4.3.0 at Alembic head, smoke 21/21. Agent rollback is out of scope by decision |
 | 5 | Hosted CI at the tag | **NOT RUN** | CI is tag/manual only. The `v4.3.0` tag workflow must be green before publishing; a local green run is not a substitute |
 | 6 | **Clean install from the release bundle** | **PASS** | source archive extracted from `v4.3.0`, empty volumes, build + bootstrap + enrollment + event + alert + frontend/Link + smoke 21/21 |
 
 The bundle is built from the HEAD commit recorded in
-`RELEASE_MANIFEST.json`: `release-smoke.py` verifies 28/28 and
-`sha256sum -c SHA256SUMS.txt` verifies 28/28 on Windows/Git Bash. Three
+`RELEASE_MANIFEST.json`: `release-smoke.py` verifies 24/24 and
+`sha256sum -c SHA256SUMS.txt` verifies 24/24 on Windows/Git Bash. Three
 release-path defects were found and fixed before the tag. `SHA256SUMS.txt` was written with
 platform newlines, so `sha256sum -c` failed on every name with a trailing `\r`
 while the smoke test passed; and `git archive` applied `core.eol`, so
@@ -77,7 +79,7 @@ fails if any text member still contains CR, and the smoke test rejects CR,
 malformed, duplicate or missing checksum entries; negative tests exit 1. The
 rebuilt source archive also carries the artifact-download fix, the unified
 defaults and the release-script changes. Gate 6 ran on the `31962cd` archive;
-the final bundle was verified with 28/28 smoke and the live unified-agent
+the final bundle was verified with 24/24 smoke and the live unified-agent
 download/run against a 4.3 Brain. A full image rebuild from the final source
 was not repeated locally because the PyPI fetch timed out; the hosted tag
 workflow is the clean-build gate. The third defect was in the installer download

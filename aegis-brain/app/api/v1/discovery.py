@@ -190,14 +190,14 @@ class ReputationUpsert(BaseModel):
 class DeploymentPlanRequest(BaseModel):
     ip_address: str
     os_type: str = Field(default="linux", pattern="^(linux|windows)$")
-    agent_type: str = Field(default="nodetrace", pattern="^(nodetrace|aegis-guard|unified)$")
+    agent_type: str = Field(default="unified", pattern="^unified$")
     method: str = Field(default="manual", pattern="^(manual|ssh|winrm|interactive)$")
     job_id: Optional[int] = None
     pin: Optional[str] = None
 
 class AutoDeployRequest(BaseModel):
     ip_address: str
-    agent_type: str = Field(default="nodetrace", pattern="^(nodetrace|aegis-guard|unified)$")
+    agent_type: str = Field(default="unified", pattern="^unified$")
     username: Optional[str] = None
     password: Optional[str] = None
 
@@ -458,15 +458,8 @@ async def deployment_plan(payload: DeploymentPlanRequest, user=Depends(require_p
         )
     _validate_ip_or_raise(payload.ip_address)
 
-    if payload.agent_type == "unified":
-        local_command = "aegis-agent.exe --profile unified"
-        remote_command = f"Install the unified AegisAgent artifact on {payload.ip_address} and run it with --profile unified"
-    elif payload.agent_type == "nodetrace":
-        local_command = "cd NodeTrace\\agents\\python\\dist\\nodetrace-agent && nodetrace-agent.exe"
-        remote_command = f"Copy nodetrace-agent folder to {payload.ip_address} and run nodetrace-agent.exe"
-    else:
-        local_command = "cd aegis-guard && java -jar target\\aegis-guard.jar"
-        remote_command = f"Copy aegis-guard.jar to {payload.ip_address} and run: java -jar aegis-guard.jar"
+    local_command = "aegis-agent.exe --profile unified"
+    remote_command = f"Install the unified AegisAgent artifact on {payload.ip_address} and run it with --profile unified"
 
     return {
         "status": "planned",
@@ -479,8 +472,6 @@ async def deployment_plan(payload: DeploymentPlanRequest, user=Depends(require_p
         "deploy_command": None,
         "oneline_endpoint": "/api/v1/deploy/token",
         "executables": {
-            "nodetrace": "NodeTrace/agents/python/dist/nodetrace-agent/nodetrace-agent.exe",
-            "guard_jar": "aegis-guard/target/aegis-guard.jar",
             "unified": "aegis-agent/aegis-agent.exe",
         },
         "note": "Manual/one-line deploy: generate a token in /deploy/token and paste the command on the target. No credential is requested, stored or used.",

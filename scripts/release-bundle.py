@@ -75,11 +75,6 @@ def _copy(src: Path, dst: Path) -> None:
     shutil.copy2(src, dst)
 
 
-NODETRACE_IDENTITY_FILES = frozenset({
-    "token.json", "device.crt", "device.key", "nodetrace.pid",
-})
-
-
 def _zip_tree(src: Path, dst: Path, exclude: frozenset[str] = frozenset()) -> None:
     if not src.is_dir():
         raise SystemExit(f"[X] missing release directory: {src}")
@@ -87,6 +82,16 @@ def _zip_tree(src: Path, dst: Path, exclude: frozenset[str] = frozenset()) -> No
         for path in sorted(src.rglob("*")):
             if path.is_file() and path.name not in exclude:
                 archive.write(path, path.relative_to(src).as_posix())
+
+
+def _tar_member(archive: tarfile.TarFile, path: Path, arcname: str,
+                mode: int) -> None:
+    info = tarfile.TarInfo(arcname)
+    info.size = path.stat().st_size
+    info.mode = mode
+    info.mtime = int(path.stat().st_mtime)
+    with path.open("rb") as handle:
+        archive.addfile(info, handle)
 
 
 def _assert_lf_source(archive: Path) -> None:
@@ -123,52 +128,58 @@ def _git(*args: str) -> str:
 
 def _agent_assets(agent_dir: Path, out: Path, version: str,
                   required: bool) -> list[str]:
-    """Ship the Go agent next to the legacy runtimes.
+    """Ship only the unified Go agent and its kernel helpers.
 
-    4.3.0 removes the rollback requirement, not the legacy agents: Guard and
-    NodeTrace stay available during migration. But the release must contain the
-    new runtime too, otherwise the bundle can only install the legacy agents.
-    The installers fetch `unified-latest.zip` on Windows and
-    `unified-latest.tar.gz` on Linux; the versioned copies make the signed OTA
-    command (`UPDATE_AGENT` with an explicit version) resolvable, and the raw
-    executables allow a manual rollout without unpacking.
+    4.3 is the unified-only release: Guard and NodeTrace are not copied into
+    the bundle. The four archives are the complete install set:
+
+      * Windows: `aegis-agent.exe` + `aegis-etw.exe`
+      * Linux: `aegis-agent` + `aegis-collector` + `aegis_exec.bpf.o`
+
+    The versioned copies make the signed OTA command (`UPDATE_AGENT` with an
+    explicit version) resolvable. Raw binaries are deliberately not shipped:
+    the installers consume the archives, and two extra copies only create
+    ambiguity about which file is the supported one.
     """
     windows = agent_dir / "aegis-agent.exe"
     linux = agent_dir / "aegis-agent"
-    present = [path for path in (windows, linux) if path.is_file()]
-    if not present:
-        if required:
-            raise SystemExit(f"[X] Go agent binaries missing in {agent_dir}")
+    etw = agent_dir / "aegis-etw.exe"
+    collector = agent_dir / "aegis-collector"
+    bpf_obj = agent_dir / "aegis_exec.bpf.o"
+    required_files = (windows, linux, etw, collector, bpf_obj)
+    present = [path for path in required_files if path.is_file()]
+    if not present and not required:
         return []
-    if required and not (windows.is_file() and linux.is_file()):
-        raise SystemExit(
-            "[X] --require-agent needs both aegis-agent.exe (Windows) and "
-            "aegis-agent (Linux)"
-        )
-    created: list[str] = []
-    for src, name in ((windows, "aegis-agent-windows-amd64.exe"),
-                      (linux, "aegis-agent-linux-amd64")):
-        if src.is_file():
-            _copy(src, out / name)
-            created.append(name)
+    if required:
+        missing = [path.name for path in required_files if not path.is_file()]
+        if missing:
+            raise SystemExit(
+                "[X] incomplete unified agent directory; missing: "
+                + ", ".join(missing)
+            )
 
+    created: list[str] = []
     tag = version.lstrip("v")
     if windows.is_file():
         with zipfile.ZipFile(out / "unified-latest.zip", "w",
                              zipfile.ZIP_DEFLATED) as archive:
             archive.write(windows, "aegis-agent.exe")
+            if etw.is_file():
+                archive.write(etw, "aegis-etw.exe")
         shutil.copy2(out / "unified-latest.zip", out / f"unified-{tag}.zip")
         created += ["unified-latest.zip", f"unified-{tag}.zip"]
     if linux.is_file():
-        for name in ("unified-latest.tar.gz", f"unified-{tag}.tar.gz"):
-            with tarfile.open(out / name, "w:gz") as archive:
-                info = tarfile.TarInfo("aegis-agent")
-                info.size = linux.stat().st_size
-                info.mode = 0o755
-                info.mtime = int(linux.stat().st_mtime)
-                with linux.open("rb") as handle:
-                    archive.addfile(info, handle)
-            created.append(name)
+        latest_tar = out / "unified-latest.tar.gz"
+        with tarfile.open(latest_tar, "w:gz") as archive:
+            _tar_member(archive, linux, "aegis-agent", 0o755)
+            if collector.is_file():
+                _tar_member(archive, collector, "aegis-collector", 0o755)
+            if bpf_obj.is_file():
+                _tar_member(archive, bpf_obj, "aegis_exec.bpf.o", 0o644)
+        # Build once and copy: separate tarfile runs embed different gzip
+        # timestamps, so the versioned OTA copy would not be byte-identical.
+        shutil.copy2(latest_tar, out / f"unified-{tag}.tar.gz")
+        created += ["unified-latest.tar.gz", f"unified-{tag}.tar.gz"]
     return created
 
 
@@ -181,9 +192,7 @@ def main() -> int:
     parser.add_argument("--agent-dir",
                         help="directory with aegis-agent.exe (Windows) and aegis-agent (Linux)")
     parser.add_argument("--require-agent", action="store_true",
-                        help="fail if the Go agent binaries are absent")
-    parser.add_argument("--require-nodetrace", action="store_true",
-                        help="fail if the Windows NodeTrace bundle is absent")
+                        help="fail if the unified agent or kernel helpers are absent")
     args = parser.parse_args()
     if not re.fullmatch(r"v?[0-9]+\.[0-9]+\.[0-9]+(?:-rc[0-9]+)?", args.version):
         raise SystemExit("version must be SemVer or vX.Y.Z-rcN")
@@ -199,15 +208,6 @@ def main() -> int:
     for rel in CORE_FILES:
         _copy(ROOT / rel, out / release_name(rel))
 
-    _copy(ROOT / "aegis-guard/target/aegis-guard.jar", out / "aegis-guard.jar")
-
-    nt = ROOT / "NodeTrace/agents/python/dist/nodetrace-agent"
-    if nt.is_dir():
-        # Never ship a developer identity: the dist directory can contain the
-        # local device key, certificate, token and pid lock from a test run.
-        _zip_tree(nt, out / "nodetrace.zip", exclude=NODETRACE_IDENTITY_FILES)
-    elif args.require_nodetrace:
-        raise SystemExit("[X] NodeTrace Windows bundle missing: nodetrace_windows must upload it")
     frontend = ROOT / "frontend/dist"
     if frontend.is_dir():
         _zip_tree(frontend, out / "frontend.zip")
@@ -273,8 +273,8 @@ def main() -> int:
         "created_at": datetime.now(timezone.utc).isoformat(),
         "git_commit": _git("rev-parse", "HEAD"),
         "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
-        "components": ["aegis-brain", "aegis-guard", "aegis-link", "frontend",
-                       "NodeTrace", "aegis-agent", "services/kraken"],
+        "components": ["aegis-brain", "aegis-link", "frontend",
+                       "aegis-agent", "aegis-ebpf", "services/kraken"],
         "files": files,
         "agent_files": agent_files,
         "image_sboms": image_sboms,

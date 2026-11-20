@@ -46,9 +46,9 @@ $COMPOSE up -d --remove-orphans
 echo "[3/4] Attesa healthcheck..."
 for i in {1..30}; do if $COMPOSE ps | grep -q "healthy"; then break; fi; sleep 2; done
 $COMPOSE ps
-# Il bundle 4.3 include l'agente Go: pubblichiamo gli archivi nel volume che
-# il Brain serve agli installer, cosi' il one-liner non richiede una copia
-# manuale. Se il bundle e' legacy-only il glob non matcha e non succede nulla.
+# Il bundle 4.3 include solo l'agente Go: pubblichiamo gli archivi nel volume
+# che il Brain serve agli installer, cosi' il one-liner non richiede una copia
+# manuale.
 for artifact in unified-*; do
   [ -f "$artifact" ] || continue
   $COMPOSE cp "$artifact" aegis-brain:/app/artifacts/ 2>/dev/null \
@@ -62,3 +62,5 @@ if [[ "$MODE" == "pilot" ]]; then
   echo "[INFO] Verifica mTLS: :8443 richiede cert device (vedi docs/OPERATIONS.md §2b)"
 fi
 echo "[OK] Deploy $MODE completato. Dashboard: http://localhost:3000  API: http://localhost:8000  Caddy: https://aegis.local"
+echo "[INFO] Primo admin (se non esiste): docker compose exec aegis-brain python -m app.admin bootstrap admin@aegis.local '<password-forte>'"
+echo "[INFO] Verifica admin esistenti: docker compose exec aegis-brain python -m app.admin list"

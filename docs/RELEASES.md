@@ -33,7 +33,7 @@ tags.
 | `v4.0.0` | 2026-09-21 | `38e245f` | `de52206` | yes | `aegis-guard.jar`, `sbom.spdx.json`, `SHA256SUMS.txt` |
 | `v4.1.0` | 2026-11-16 | `17c499f` | `17c499f` | yes | 24 assets: Brain/Link/Frontend/Guard/NodeTrace, compose, SBOM, source, seven images, manifests/checksums |
 | `v4.2.1` | 2026-11-18 | `1de7443` | `1de7443` | yes | 4.2 maintenance release; NodeTrace spec tracked |
-| `v4.3.0` | not cut | — | — | no | release prepared; hosted tag CI still required |
+| `v4.3.0` | not cut | — | — | no | unified-only 24-file bundle prepared; hosted tag CI still required |
 
 The first four are lightweight tags; `v4.1.0` is annotated. `v4.0.0` and
 `v4.1.0` are the only ones whose code version matches the tag: `aegis-brain`
@@ -233,8 +233,8 @@ superseded; `synchronous_commit` remains `on`. Hosted CI/E2E passed on
 
 Direct `v4.3.0` release, no `4.3.0-rc1`. The locally executable gates are green:
 27 Link tests, 8 Brain command-queue tests, the 50k Link live cap, process-level
-command restart, `queued — not executed` UI visibility, a 28-file bundle with the Go agent and
-checksums, a clean install from the extracted bundle with API smoke **21/21**,
+command restart, `queued — not executed` UI visibility, a 24-artifact unified-only
+bundle with checksums, a clean install from the extracted bundle with API smoke **21/21**,
 and a 4.2.1 server upgrade preserving **68 agents / 321 alerts** with smoke
 **21/21**. The annotated tag, hosted tag workflow, downloaded-asset verification
 and publication remain the external release step. The release is checksummed,

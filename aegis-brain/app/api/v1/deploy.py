@@ -31,7 +31,7 @@ from app.core.rate_limit import limiter
 
 router = APIRouter(tags=["Agent Deploy"])
 
-VALID_AGENT_TYPES = {"nodetrace", "aegis-guard", "unified"}
+VALID_AGENT_TYPES = {"unified"}
 VALID_METHODS = {"ssh", "winrm", "oneline", "interactive"}
 
 
@@ -79,7 +79,7 @@ def _validate_targets(targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 class EnrollTokenRequest(BaseModel):
     label: Optional[str] = None
-    agent_type: str = Field(default="unified", pattern="^(nodetrace|aegis-guard|unified|both)$")
+    agent_type: str = Field(default="unified", pattern="^unified$")
     ttl_minutes: int = Field(default=15, ge=5, le=1440)
     dashboard_remote: bool = True
     dashboard_local: bool = False
@@ -171,156 +171,67 @@ async def revoke_enroll_token(token_id: int, request: Request, db: AsyncSession 
 # ─── one-liner install scripts (served, token validated at enroll time) ──
 
 INSTALL_PS1 = r"""# Aegis one-liner installer (Windows, admin PowerShell)
-param([string]$Agent = "{AGENT}")
 $ErrorActionPreference = "Stop"
-$Token = $env:AEGIS_ENROLL_TOKEN
-if (-not $Token -and $Request.Headers) { $Token = $Request.Headers["X-Enroll-Token"] }
-# Token is passed via -Headers @{'X-Enroll-Token'='...'} | iex
 $Base = "{BASE}/api/v1"
 $EnrollToken = "{ENROLL_TOKEN}"
 $ManifestPubkey = "{MANIFEST_PUBKEY}"
 $RemoteDashboard = {REMOTE_DASHBOARD}
+$Dir = "C:\Aegis\Agent"
+$Service = "AegisAgent"
 
-function Get-JavaMajor([string]$Exe) {
-    # La sola presenza di `java` nel PATH non basta: la prima java del PATH puo'
-    # essere la 8 (su questa macchina lo era), il servizio si installa, parte e
-    # muore con UnsupportedClassVersionError — e in dashboard l'host
-    # semplicemente non compare, senza un errore visibile da nessuna parte.
-    try {
-        $first = (& $Exe -version 2>&1 | Select-Object -First 1)
-        if ("$first" -match 'version "(\d+)(?:\.(\d+))?') {
-            $major = [int]$Matches[1]
-            if ($major -eq 1 -and $Matches[2]) { return [int]$Matches[2] }
-            return $major
-        }
-    } catch { }
-    return 0
+New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+Write-Host "[aegis] downloading the unified AegisAgent into $Dir ..."
+$pkg = Join-Path $Dir "agent.pkg"
+Invoke-WebRequest -Uri "$Base/deploy/bootstrap-artifacts/unified-latest.zip" `
+    -Headers @{"X-Enroll-Token" = $EnrollToken} -OutFile $pkg -UseBasicParsing
+Expand-Archive -Path $pkg -DestinationPath $Dir -Force
+Remove-Item -Force $pkg
+
+$binary = Join-Path $Dir "aegis-agent.exe"
+if (-not (Test-Path $binary)) {
+    throw "No unified runtime found after extraction: $binary"
 }
 
-function Resolve-Java([string]$Dir) {
-    # Ordine di preferenza: runtime incluso nell'artefatto (host senza Java
-    # installato), poi java del PATH — ma solo se la versione e' >= 25.
-    $candidates = @((Join-Path $Dir "jre\bin\java.exe"),
-                    (Get-Command java -ErrorAction SilentlyContinue).Source)
-    foreach ($candidate in $candidates) {
-        if ($candidate -and (Test-Path $candidate) -and (Get-JavaMajor $candidate) -ge 25) {
-            return $candidate
-        }
-    }
-    return $null
-}
+if ($RemoteDashboard) {
+    [Environment]::SetEnvironmentVariable("AEGIS_BRAIN_URL", $Base, "Machine")
+    [Environment]::SetEnvironmentVariable("AEGIS_MANIFEST_PUBKEY", $ManifestPubkey, "Machine")
+    [Environment]::SetEnvironmentVariable("AEGIS_AGENT_PROFILE", "unified", "Machine")
 
-function Install-AegisAgent($TargetAgent) {
-    $Dir = if ($TargetAgent -eq "nodetrace") { "C:\Aegis\NodeTrace" }
-           elseif ($TargetAgent -eq "unified") { "C:\Aegis\Agent" }
-           else { "C:\Aegis\Guard" }
-    New-Item -ItemType Directory -Force -Path $Dir | Out-Null
-    Write-Host "[aegis] downloading $TargetAgent into $Dir ..."
-    try {
-        $pkg = "$Dir\agent.pkg"
-        Invoke-WebRequest -Uri "$Base/deploy/bootstrap-artifacts/$TargetAgent-latest.zip" `
-            -Headers @{"X-Enroll-Token" = $EnrollToken} -OutFile $pkg -UseBasicParsing
-        Expand-Archive -Path $pkg -DestinationPath $Dir -Force
-        if ($RemoteDashboard) {
-            [Environment]::SetEnvironmentVariable("AEGIS_BRAIN_URL", $Base, "Machine")
-            [Environment]::SetEnvironmentVariable("AEGIS_MANIFEST_PUBKEY", $ManifestPubkey, "Machine")
-            [Environment]::SetEnvironmentVariable("NODETRACE_REGISTER_URL", "$Base/register", "Machine")
-            [Environment]::SetEnvironmentVariable("NODETRACE_HEARTBEAT_URL", "$Base/heartbeat", "Machine")
-            [Environment]::SetEnvironmentVariable("NODETRACE_UPDATE_URL", "$Base/update", "Machine")
-            # Token one-shot su file 0600, mai nell'env persistente. Il file
-            # condiviso va bene: un token "both" copre un tipo per agente.
-            $TokenDir = Join-Path $env:ProgramData "Aegis"
-            New-Item -ItemType Directory -Force -Path $TokenDir | Out-Null
-            $TokenFile = Join-Path $TokenDir "enroll.token"
-            Set-Content -Path $TokenFile -Value $EnrollToken -NoNewline -Encoding ascii
-            & icacls $TokenFile /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" | Out-Null
-            [Environment]::SetEnvironmentVariable("AEGIS_ENROLL_TOKEN_FILE", $TokenFile, "Machine")
-            if ($TargetAgent -eq "unified") {
-                [Environment]::SetEnvironmentVariable("AEGIS_AGENT_PROFILE", "unified", "Machine")
-            }
-            if ($TargetAgent -eq "aegis-guard" -or $TargetAgent -eq "unified") {
-                # Telemetria kernel: se l'artefatto include il collector, si
-                # punta AEGIS_ETW_PATH all'eseguibile ASSOLUTO e si dichiara
-                # l'opt-in (il collector e' compilato dall'operatore, quindi
-                # senza firma Authenticode: Guard lo esegue solo con questa
-                # dichiarazione esplicita). Se manca, NON si finge nulla:
-                # Guard usa il polling e lo dice (quality=degraded:etw-...).
-                $etw = Join-Path $Dir "aegis-etw.exe"
-                if (Test-Path $etw) {
-                    [Environment]::SetEnvironmentVariable("AEGIS_ETW_ENABLED", "true", "Machine")
-                    [Environment]::SetEnvironmentVariable("AEGIS_ETW_PATH", $etw, "Machine")
-                    [Environment]::SetEnvironmentVariable("AEGIS_ETW_ALLOW_UNSIGNED", "true", "Machine")
-                } else {
-                    Write-Host "[aegis] no ETW collector in the artifact: Guard will use polling (declared as quality=degraded:etw-...)."
-                }
-            }
-        }
-        Remove-Item -Force $pkg
-    } catch {
-        Write-Host "[aegis] failed to download $TargetAgent, ensure artifact is published."
-        throw
-    }
-}
+    # Token one-shot su file 0600, mai nell'env persistente.
+    $TokenDir = Join-Path $env:ProgramData "Aegis"
+    New-Item -ItemType Directory -Force -Path $TokenDir | Out-Null
+    $TokenFile = Join-Path $TokenDir "enroll.token"
+    Set-Content -Path $TokenFile -Value $EnrollToken -NoNewline -Encoding ascii
+    & icacls $TokenFile /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" | Out-Null
+    [Environment]::SetEnvironmentVariable("AEGIS_ENROLL_TOKEN_FILE", $TokenFile, "Machine")
 
-function Install-AegisService($TargetAgent) {
-    if (-not $RemoteDashboard) { return }
-    $service = if ($TargetAgent -eq "nodetrace") { "AegisNodeTrace" }
-               elseif ($TargetAgent -eq "unified") { "AegisAgent" }
-               else { "AegisGuard" }
-    $binary = if ($TargetAgent -eq "nodetrace") {
-        Get-ChildItem "C:\Aegis\NodeTrace" -Filter "nodetrace-agent.exe" -Recurse | Select-Object -First 1
-    } elseif ($TargetAgent -eq "unified") {
-        Get-ChildItem "C:\Aegis\Agent" -Filter "aegis-agent.exe" -Recurse | Select-Object -First 1
+    $etw = Join-Path $Dir "aegis-etw.exe"
+    if (Test-Path $etw) {
+        [Environment]::SetEnvironmentVariable("AEGIS_ETW_ENABLED", "true", "Machine")
+        [Environment]::SetEnvironmentVariable("AEGIS_ETW_PATH", $etw, "Machine")
+        [Environment]::SetEnvironmentVariable("AEGIS_ETW_ALLOW_UNSIGNED", "true", "Machine")
     } else {
-        Get-ChildItem "C:\Aegis\Guard" -Filter "aegis-guard.jar" -Recurse | Select-Object -First 1
+        Write-Host "[aegis] no ETW collector in the artifact: unified will declare quality=degraded:etw-..."
     }
-    if (-not $binary) { throw "No $TargetAgent runtime found after extraction" }
-    if ($TargetAgent -eq "aegis-guard") {
-        $java = Resolve-Java "C:\Aegis\Guard"
-        if (-not $java) {
-            throw "Java 25+ is required for Aegis-Guard: bundle a runtime under jre\ in the artifact, or install it on the target."
-        }
-        Write-Host "[aegis] using Java: $java (major $((Get-JavaMajor $java)))"
-        $binPath = "`"$java`" -jar `"$($binary.FullName)`""
-    } else {
-        $binPath = "`"$($binary.FullName)`""
-    }
-    if (Get-Service $service -ErrorAction SilentlyContinue) {
-        Stop-Service $service -Force -ErrorAction SilentlyContinue
-        sc.exe delete $service | Out-Null
+
+    if (Get-Service $Service -ErrorAction SilentlyContinue) {
+        Stop-Service $Service -Force -ErrorAction SilentlyContinue
+        sc.exe delete $Service | Out-Null
         Start-Sleep -Milliseconds 500
     }
-    New-Service -Name $service -BinaryPathName $binPath -DisplayName $service `
-        -Description "Aegis $TargetAgent agent" -StartupType Automatic | Out-Null
-    sc.exe failure $service reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
-    Start-Service $service
-    Write-Host "[aegis] $service service installed and started."
+    New-Service -Name $Service -BinaryPathName "`"$binary`"" `
+        -DisplayName $Service -Description "Aegis unified agent" `
+        -StartupType Automatic | Out-Null
+    sc.exe failure $Service reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
+    Start-Service $Service
+    Write-Host "[aegis] $Service service installed and started."
+} else {
+    Write-Host "[aegis] remote dashboard NOT selected: files extracted, no service registered."
+    Write-Host "        Start the agent from $Dir, or re-issue a token with remote dashboard enabled."
 }
 
-if ($Agent -eq "both") {
-    Install-AegisAgent "nodetrace"
-    Install-AegisAgent "aegis-guard"
-    Install-AegisService "nodetrace"
-    Install-AegisService "aegis-guard"
-    Write-Host "[aegis] both agents installed."
-} elseif ($Agent -eq "unified") {
-    Install-AegisAgent "unified"
-    Install-AegisService "unified"
-    Write-Host "[aegis] unified AegisAgent installed."
-} else {
-    Install-AegisAgent $Agent
-    Install-AegisService $Agent
-    Write-Host "[aegis] installed."
-}
-if (-not $RemoteDashboard) {
-    Write-Host "[aegis] remote dashboard NOT selected: files extracted, no service registered."
-    Write-Host "        Start the agent from its directory, or re-issue a token with remote dashboard enabled for a persistent service."
-}
-Write-Host "[aegis] Set AEGIS_BRAIN_URL=$Base and AEGIS_MANIFEST_PUBKEY before starting the agent."
-Write-Host "[aegis] For NodeTrace also set NODETRACE_REGISTER_URL=$Base/register,"
-Write-Host "        NODETRACE_HEARTBEAT_URL=$Base/heartbeat and NODETRACE_UPDATE_URL=$Base/update."
 Write-Host "[aegis] The agent will consume the single-use token during its first enrollment."
-Write-Host "[aegis] Verify: Get-Service AegisGuard,AegisNodeTrace and logs under C:\Aegis\<agent>\logs."
+Write-Host "[aegis] Verify: Get-Service $Service; logs under $Dir\logs."
 Write-Host "[aegis] Docs: https://aegis.local/docs/agent-install"
 """
 
@@ -328,73 +239,51 @@ INSTALL_SH = """#!/usr/bin/env bash
 # Aegis one-liner installer (Linux, root)
 # usage: curl -fsSL -H 'X-Enroll-Token: <token>' https://aegis.local/api/v1/deploy/install.sh | sudo bash
 set -euo pipefail
-AGENT="{AGENT}"
 BASE="{BASE}/api/v1"
 ENROLL_TOKEN="{ENROLL_TOKEN}"
 MANIFEST_PUBKEY="{MANIFEST_PUBKEY}"
 REMOTE_DASHBOARD="{REMOTE_DASHBOARD}"
+DIR="/opt/aegis/unified"
 
-install_agent() {
-    local target_agent=$1
-    local dir="/opt/aegis/${target_agent}"
-    mkdir -p "$dir"
-    echo "[aegis] downloading ${target_agent} into ${dir} ..."
-    curl -fsSL -H "X-Enroll-Token: $ENROLL_TOKEN" \
-        "$BASE/deploy/bootstrap-artifacts/${target_agent}-latest.tar.gz" -o /tmp/aegis-agent.pkg
-    tar -xzf /tmp/aegis-agent.pkg -C "$dir"
-    if [ "$REMOTE_DASHBOARD" = "1" ]; then
-        printf '%s' "$ENROLL_TOKEN" > "$dir/enroll.token"
-        chmod 600 "$dir/enroll.token"
-        cat > "$dir/aegis.env" <<EOF
+mkdir -p "$DIR"
+echo "[aegis] downloading the unified AegisAgent into $DIR ..."
+curl -fsSL -H "X-Enroll-Token: $ENROLL_TOKEN" \
+    "$BASE/deploy/bootstrap-artifacts/unified-latest.tar.gz" -o /tmp/aegis-agent.pkg
+tar -xzf /tmp/aegis-agent.pkg -C "$DIR"
+rm -f /tmp/aegis-agent.pkg
+chmod 755 "$DIR/aegis-agent"
+if [ -f "$DIR/aegis-collector" ]; then
+    chmod 755 "$DIR/aegis-collector"
+fi
+
+if [ "$REMOTE_DASHBOARD" = "1" ]; then
+    printf '%s' "$ENROLL_TOKEN" > "$DIR/enroll.token"
+    chmod 600 "$DIR/enroll.token"
+    cat > "$DIR/aegis.env" <<EOF
 AEGIS_BRAIN_URL=$BASE
 AEGIS_MANIFEST_PUBKEY=$MANIFEST_PUBKEY
-AEGIS_ENROLL_TOKEN_FILE=$dir/enroll.token
-NODETRACE_REGISTER_URL=$BASE/register
-NODETRACE_HEARTBEAT_URL=$BASE/heartbeat
-NODETRACE_UPDATE_URL=$BASE/update
+AEGIS_ENROLL_TOKEN_FILE=$DIR/enroll.token
+AEGIS_AGENT_PROFILE=unified
 EOF
-        if [ "$target_agent" = "unified" ]; then
-            printf 'AEGIS_AGENT_PROFILE=unified\n' >> "$dir/aegis.env"
-        fi
-        chmod 600 "$dir/aegis.env"
+    if [ -x "$DIR/aegis-collector" ] && [ -f "$DIR/aegis_exec.bpf.o" ]; then
+        cat >> "$DIR/aegis.env" <<EOF
+NODETRACE_EBPF=1
+NODETRACE_EBPF_COLLECTOR=$DIR/aegis-collector
+NODETRACE_EBPF_OBJ=$DIR/aegis_exec.bpf.o
+EOF
     fi
-    rm -f /tmp/aegis-agent.pkg
-}
+    chmod 600 "$DIR/aegis.env"
 
-install_service() {
-    local target_agent=$1
-    [ "$REMOTE_DASHBOARD" = "1" ] || return 0
-    local service_name="aegis-${target_agent}"
-    local exec_start
-    if [ "$target_agent" = "aegis-guard" ]; then
-        local jar
-        jar=$(find "/opt/aegis/${target_agent}" -name 'aegis-guard.jar' -type f | head -n 1)
-        [ -n "$jar" ] || { echo "[aegis] Guard JAR not found" >&2; return 1; }
-        command -v java >/dev/null 2>&1 || { echo "[aegis] Java 25+ is required for Guard" >&2; return 1; }
-        exec_start="/usr/bin/java -jar ${jar}"
-    elif [ "$target_agent" = "unified" ]; then
-        local exe
-        exe=$(find "/opt/aegis/${target_agent}" -name 'aegis-agent' -type f | head -n 1)
-        [ -n "$exe" ] || { echo "[aegis] Unified executable not found" >&2; return 1; }
-        chmod 755 "$exe"
-        exec_start="$exe"
-    else
-        local exe
-        exe=$(find "/opt/aegis/${target_agent}" -name 'nodetrace-agent' -type f | head -n 1)
-        [ -n "$exe" ] || { echo "[aegis] NodeTrace executable not found" >&2; return 1; }
-        chmod 755 "$exe"
-        exec_start="$exe"
-    fi
-    cat > "/etc/systemd/system/${service_name}.service" <<EOF
+    cat > /etc/systemd/system/aegis-unified.service <<EOF
 [Unit]
-Description=Aegis ${target_agent} agent
+Description=Aegis unified agent
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${exec_start}
-EnvironmentFile=/opt/aegis/${target_agent}/aegis.env
+ExecStart=$DIR/aegis-agent
+EnvironmentFile=$DIR/aegis.env
 Restart=always
 RestartSec=5
 User=root
@@ -402,26 +291,12 @@ User=root
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl enable --now "$service_name.service"
-    systemctl is-active --quiet "$service_name.service"
-    echo "[aegis] ${service_name} service installed and started."
-}
-
-if [ "$AGENT" = "both" ]; then
-    install_agent "nodetrace"
-    install_agent "aegis-guard"
-    install_service "nodetrace"
-    install_service "aegis-guard"
-    echo "[aegis] both agents installed."
+    systemctl enable --now aegis-unified.service
+    systemctl is-active --quiet aegis-unified.service
+    echo "[aegis] aegis-unified service installed and started."
 else
-    install_agent "$AGENT"
-    install_service "$AGENT"
-    echo "[aegis] installed."
+    echo "[aegis] remote dashboard NOT selected: files extracted, no service registered."
 fi
-echo "[aegis] Set AEGIS_BRAIN_URL=$BASE and AEGIS_MANIFEST_PUBKEY before starting the agent."
-echo "[aegis] For NodeTrace also set NODETRACE_REGISTER_URL=$BASE/register,"
-echo "        NODETRACE_HEARTBEAT_URL=$BASE/heartbeat and NODETRACE_UPDATE_URL=$BASE/update."
-echo "[aegis] The agent will consume the single-use token during its first enrollment."
 """
 
 
@@ -453,39 +328,33 @@ async def _validate_install_token(x_enroll_token: str, db: AsyncSession):
 
 @router.get("/install.ps1", response_class=PlainTextResponse)
 async def install_ps1(
-    agent: str = Query("unified", pattern="^(nodetrace|aegis-guard|unified|both)$"),
+    agent: str = Query("unified", pattern="^unified$"),
     x_enroll_token: str = Header(None, alias="X-Enroll-Token"),
     db: AsyncSession = Depends(get_db),
 ):
     token = await _validate_install_token(x_enroll_token, db)
-    if agent == "both" and token.agent_type != "both":
-        raise HTTPException(status_code=403, detail="Token does not allow both agents")
-    if agent != "both" and token.agent_type not in (agent, "both"):
-        raise HTTPException(status_code=403, detail="Token agent type does not match installer")
+    if token.agent_type != "unified":
+        raise HTTPException(status_code=403, detail="Legacy enrollment tokens are no longer accepted")
     config = token.install_config or {}
     pubkey = _manifest_pubkey_b64()
     return INSTALL_PS1.replace("{BASE}", settings.PUBLIC_BASE_URL.rstrip("/")).replace(
         "{ENROLL_TOKEN}", x_enroll_token.strip()).replace("{MANIFEST_PUBKEY}", pubkey).replace(
-        "{AGENT}", agent).replace(
         "{REMOTE_DASHBOARD}", "$true" if config.get("dashboard_remote", True) else "$false")
 
 
 @router.get("/install.sh", response_class=PlainTextResponse)
 async def install_sh(
-    agent: str = Query("unified", pattern="^(nodetrace|aegis-guard|unified|both)$"),
+    agent: str = Query("unified", pattern="^unified$"),
     x_enroll_token: str = Header(None, alias="X-Enroll-Token"),
     db: AsyncSession = Depends(get_db),
 ):
     token = await _validate_install_token(x_enroll_token, db)
-    if agent == "both" and token.agent_type != "both":
-        raise HTTPException(status_code=403, detail="Token does not allow both agents")
-    if agent != "both" and token.agent_type not in (agent, "both"):
-        raise HTTPException(status_code=403, detail="Token agent type does not match installer")
+    if token.agent_type != "unified":
+        raise HTTPException(status_code=403, detail="Legacy enrollment tokens are no longer accepted")
     config = token.install_config or {}
     pubkey = _manifest_pubkey_b64()
     return INSTALL_SH.replace("{BASE}", settings.PUBLIC_BASE_URL.rstrip("/")).replace(
         "{ENROLL_TOKEN}", x_enroll_token.strip()).replace("{MANIFEST_PUBKEY}", pubkey).replace(
-        "{AGENT}", agent).replace(
         "{REMOTE_DASHBOARD}", "1" if config.get("dashboard_remote", True) else "0")
 
 
@@ -500,9 +369,7 @@ async def list_artifacts(user=Depends(get_current_user)):
                 items.append({"name": p.name, "size": p.stat().st_size})
     return {
         "items": items,
-        "expected": ["aegis-guard-latest.zip", "nodetrace-latest.zip",
-                     "unified-latest.zip", "unified-latest.tar.gz",
-                     "aegis-guard-latest.tar.gz", "nodetrace-latest.tar.gz"],
+        "expected": ["unified-latest.zip", "unified-latest.tar.gz"],
         "note": "Publish from CI (build.bat/mvn) into ARTIFACT_DIR. Installers pull from here — never compile on target.",
     }
 
@@ -518,12 +385,10 @@ class ManifestUnavailable(RuntimeError):
 
 
 def artifact_name_for(agent_type: str, version: str) -> str:
+    if agent_type != "unified":
+        raise ValueError(f"unsupported agent type: {agent_type}")
     v = (version or "latest").strip() or "latest"
-    if agent_type == "aegis-guard":
-        return f"aegis-guard-{v}.zip"
-    if agent_type == "unified":
-        return f"unified-{v}.zip"
-    return f"nodetrace-{v}.zip"
+    return f"unified-{v}.zip"
 
 
 def sha256_file(path: Path) -> str:
@@ -664,8 +529,9 @@ async def download_bootstrap_artifact(
     safe = Path(name).name
     if not safe or safe.startswith("."):
         raise HTTPException(status_code=400, detail="Invalid artifact name")
-    expected_types = {token.agent_type} if token.agent_type != "both" else {"aegis-guard", "nodetrace"}
-    if not any(safe.startswith(f"{agent_type}-") for agent_type in expected_types):
+    if token.agent_type != "unified":
+        raise HTTPException(status_code=403, detail="Legacy enrollment tokens are no longer accepted")
+    if not safe.startswith("unified-"):
         raise HTTPException(status_code=403, detail="Token agent type does not match artifact")
     path = Path(settings.ARTIFACT_DIR) / safe
     if not path.is_file():
@@ -701,13 +567,10 @@ async def push_update_command(
     agent = result.scalars().first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    if (agent.agent_type or "").lower() not in ("aegis-guard", "nodetrace", "unified", "guard"):
-        raise HTTPException(status_code=400, detail="OTA supported for aegis-guard/nodetrace/unified agents")
-
     normalized_type = (agent.agent_type or "").lower()
-    atype = "unified" if normalized_type == "unified" else (
-        "aegis-guard" if "guard" in normalized_type else "nodetrace")
-    fname = artifact_name_for(atype, payload.version)
+    if normalized_type != "unified":
+        raise HTTPException(status_code=400, detail="OTA supported for unified agents only")
+    fname = artifact_name_for("unified", payload.version)
     path = Path(settings.ARTIFACT_DIR) / fname
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"Artifact {fname} not published in ARTIFACT_DIR")
@@ -718,7 +581,7 @@ async def push_update_command(
         raise HTTPException(status_code=503, detail=str(exc))
     from app.services import pki as _pki2
     cmd = build_update_command(
-        atype, payload.version, settings.PUBLIC_BASE_URL, digest,
+        "unified", payload.version, settings.PUBLIC_BASE_URL, digest,
         _pki2.canonical_manifest_bytes(bundle["manifest"]).decode("utf-8"),
         bundle["ed25519"],
     )
@@ -747,7 +610,7 @@ async def push_update_command(
 # ─── deploy jobs (mass rollout, server-side, no password storage) ──
 
 class DeployJobRequest(BaseModel):
-    agent_type: str = Field(default="unified", pattern="^(nodetrace|aegis-guard|unified)$")
+    agent_type: str = Field(default="unified", pattern="^unified$")
     agent_version: str = Field(default="latest", max_length=50)
     targets: List[Dict[str, Any]]
     username: Optional[str] = Field(default=None, max_length=255)

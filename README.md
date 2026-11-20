@@ -34,7 +34,7 @@
 
 | Area | Capabilities |
 |------|-------------|
-| **Endpoint (XDR)** | AegisAgent 4.3 (Go, profili `sensor`/`endpoint`/`unified`): process lineage, persistence, masquerading, security-control tampering; remediation actions (kill, quarantine, isolate, sinkhole…). Guard Java e NodeTrace Python restano i runtime legacy di riferimento durante il cutover. |
+| **Endpoint (XDR)** | AegisAgent 4.3 (Go, profili `sensor`/`endpoint`/`unified`): process lineage, persistence, masquerading, security-control tampering; remediation actions (kill, quarantine, isolate, sinkhole…). |
 | **Kernel telemetry** | eBPF probes on Linux (`sched_process_exec`, TCP via ringbuf, verified 300/300 events on kernel 6.6); ETW kernel providers on Windows (user-mode consumer, no driver, no signing) |
 | **SIEM ingestion** | Syslog (RFC 3164/5424), Windows Event Log, Zeek, Suricata, nginx/Squid, pfSense/iptables — one pipeline, parser auto-detection, real UDP/TCP listener |
 | **Detection** | 21 static rules with MITRE mapping, custom AND/OR rules, **Sigma engine** (modifiers, mapping, fail-loud exclusions), threshold + sequence correlation over Redis windows |
@@ -114,7 +114,7 @@
 
 | Command | Answer |
 |---|---|
-| `/status` (alias `/agents`) | How many agents are online and, per device: hostname, agent (Guard/NodeTrace), OS and last contact (`online` / `offline 4m` / `never seen`) |
+| `/status` (alias `/agents`) | How many agents are online and, per device: hostname, agent type (unified; legacy rows remain visible), OS and last contact (`online` / `offline 4m` / `never seen`) |
 | `/alerts` | Open alerts, filtered with your threshold (the same one the notifications use) |
 | `/help` (and `/start`) | The command list plus **your chat ID** — that is how the setup step discovers it |
 
@@ -126,8 +126,8 @@
 |--------|-------------|
 | **Network scan** | ARP + ICMP sweep + TCP connect scan — finds ALL devices on the subnet, not just those with open ports |
 | **MAC vendor lookup** | OUI database identifies device manufacturers (Samsung, Apple, Cisco…) |
-| **Agent status per IP** | `guard_status` / `nodetrace_status` show which agents are deployed and active on each host |
-| **Signed one-line enrollment** | `POST /api/v1/deploy/token` issues a short-lived token for Guard, NodeTrace, or both; the installer downloads artifacts, registers Windows services / systemd units, enables restart recovery and consumes one slot per agent. Credential-based WinRM/SSH deployment was **removed** (HTTP 410), not disabled |
+| **Agent status per IP** | `guard_status` / `nodetrace_status` (legacy database columns) show which agent rows are active on each host; new deployments are unified |
+| **Signed one-line enrollment** | `POST /api/v1/deploy/token` issues a short-lived token for the unified AegisAgent; the installer downloads the unified archive, registers the Windows service / systemd unit, enables restart recovery and consumes the single-use token. Credential-based WinRM/SSH deployment was **removed** (HTTP 410), not disabled |
 
 ### 🔐 VaultX (Encrypted Notes)
 
@@ -152,7 +152,7 @@
 
 ### One command (recommended)
 
-Serve **Docker Desktop running** and **Python 3.15+**. Nothing else to start: the `.env` (random secrets), agent builds if missing, stack startup, admin bootstrap and smoke test are all guided by the same command.
+Serve **Docker Desktop running** and **Python 3.15+**. Nothing else to start: the `.env` (random secrets), stack startup, admin bootstrap and smoke test are all guided by the same command. Endpoint agents are installed separately from **Deployment Manager** with the one-line token installer.
 
 ```bash
 git clone https://github.com/Terminalkid09/aegis-ecosystem.git
@@ -162,13 +162,12 @@ python scripts/setup.py
 
 It prints the admin credentials, the dashboard URL and the update path.
 
-> **Run it from an *Administrator* terminal** (`Right-click → Run as administrator`) if you want the host agents installed as persistent Windows services with kernel telemetry. That single elevated session is what pays the privilege cost once: agents run as `LocalSystem` (always admin, no UAC prompt ever again, restart at boot). Not elevated, `setup.py` still brings the whole stack up and **prints the exact commands to run later** — it never leaves a silent gap. The same applies to `aegis.bat services`, which requests the elevation itself with one UAC prompt.
+> `setup.py` only starts the server stack and bootstraps the admin; it does not build or install Guard/NodeTrace. The 4.3 unified agent is installed from **Deployment Manager** with a single-use token. That installer needs an Administrator/elevated shell for Windows service registration and the ETW kernel session.
 
 To update later (data preserved — the database volume is never touched):
 
 ```bash
 python scripts/setup.py update          # rebuild + restart, DB preserved
-python scripts/setup.py update --rebuild-agents   # also recompile host agents
 ```
 
 **Requirements, honestly:**
@@ -176,11 +175,8 @@ python scripts/setup.py update --rebuild-agents   # also recompile host agents
 | Needed | When |
 |---|---|
 | Docker Desktop (running) + Python 3.15+ | always (`setup.py` preflight stops and says so if missing) |
-| JDK 25+ and Maven | only if agent artifacts don't exist and must be built (Windows: `build.bat` is invoked for you) |
-| `nssm.exe` | **downloaded by `setup.py`** with pinned SHA-256 — used to install agents as Windows services |
-| `yara64.exe` | **downloaded by `setup.py`** with pinned SHA-256 — used for on-endpoint YARA scans |
 
-Both binaries are not in the repo (`.exe` is gitignored): the setup downloads and hash-verifies them (on the archive and again on the extracted executable). Offline or on a hash mismatch the install **continues** and declares exactly what stays off, with the manual command. `--skip-binaries` skips the download.
+The unified agent and its kernel helpers are built by the release CI and shipped in the bundle; a source build is documented under **Standalone agent builds**. `setup.py` no longer downloads NSSM/YARA or compiles the legacy Java/Python agents.
 
 The `.bat` files are **not** a required step: `aegis.bat` is a convenience menu (start/stop/logs/build) for development. Local AI does not start by default: `set AEGIS_WITH_AI=1` before `setup.py` to enable Ollama.
 
@@ -279,9 +275,9 @@ Optional: Prometheus + Grafana · Ollama (AI)
 | --- | --- | --- |
 | `aegis-brain` | FastAPI, SQLAlchemy, PostgreSQL, Redis | API, auth, telemetry processing, rules, alerts, VaultX, AI/OSINT, SOAR playbooks, syslog ingestion, audit logging |
 | `aegis-link` | Spring Boot | Optional syslog/legacy event gateway; pushes events to Redis. Not on the Go agent telemetry path |
-| `aegis-agent` | Go | Single agent binary: `sensor` (telemetry), `endpoint` (EDR) and `unified` (both); 4.3 cutover |
-| `aegis-guard` | Java 25 | Legacy endpoint security agent, reference during cutover |
-| `NodeTrace` | Python | Legacy host telemetry agent, reference during cutover |
+| `aegis-agent` | Go | Single agent binary: `sensor` (telemetry), `endpoint` (EDR) and `unified` (both); 4.3 runtime |
+
+Guard (Java) and NodeTrace (Python) remain in the source tree only for 4.2.1 compatibility. They are not shipped in the 4.3 bundle and are not offered by the 4.3 deployment UI.
 | `frontend` | React 19, TypeScript, Vite | Dashboard for alerts, agents, rules, VaultX, OSINT, AI, playbooks, syslog viewer, audit log |
 
 ---
@@ -294,85 +290,68 @@ Every source enters the **same** event model and the **same** detection engine. 
 |---|---|---|---|
 | **eBPF** (`aegis-ebpf/`) | Linux, kernel | `sched_process_exec`, `do_exit`, TCP ESTABLISHED via ringbuf | no (kernel verifier) |
 | **ETW kernel providers** (`aegis_etw.c`) | Windows, user-mode consumer | `Kernel-Process` 1/2, `Kernel-Network` TcpIp | no (system providers) |
-| **Endpoint agents** | host | AegisAgent Go: sensor (CPU/RAM/disk/network/users), endpoint (processes, persistence, services, response), unified (both). Legacy Guard/NodeTrace remain available during migration; agent rollback is outside 4.3.0. | signed enrollment + mTLS |
+| **Endpoint agents** | host | AegisAgent Go: sensor (CPU/RAM/disk/network/users), endpoint (processes, persistence, services, response), unified (both). 4.3 ships only the unified runtime; agent rollback is outside 4.3.0. | signed enrollment + mTLS |
 | **Log sources** | appliance, server | syslog RFC5424/3164, Windows Event, Zeek, Suricata, nginx/Squid, firewall | none: one config line toward the endpoint |
 
-On Linux, kernel telemetry is native (eBPF — 300/300 events verified without loss on kernel 6.6 with BTF). On Windows it runs through ETW: `aegis_etw.c` is a **user-mode** consumer of system providers (no driver, no signing), spawned by Guard itself and read from its stdout. It is **on by default** when the collector is present: `aegis.bat agents` (and the installer) compile or deploy `aegis-etw.exe`, point `AEGIS_ETW_PATH` at its absolute path and set `AEGIS_ETW_ALLOW_UNSIGNED=true` — the helper is built locally and carries no Authenticode signature, so Guard needs that explicit opt-in before executing it. The stream is **actually ingested**, not just probed: each kernel event enters the same enrichment pipeline as the poll (path, hash, Authenticode, command line) tagged `provenance=etw`, and the Toolhelp32 poll stays as the backstop (persistence, services, Defender, netstat) with a 15s dedup window so a process seen at kernel latency is not re-reported by the poll. If the collector is missing, Guard falls back to polling and **says so** (`quality=degraded:etw-…`): a missing capability, never a silent failure.
+On Linux, kernel telemetry is native (eBPF — 300/300 events verified without loss on kernel 6.6 with BTF). On Windows it runs through ETW: `aegis_etw.c` is a **user-mode** consumer of system providers (no driver, no signing), started by the unified Go agent and read from its stdout. It is enabled when `aegis-etw.exe` is next to the agent and `AEGIS_ETW_ENABLED=true`; the one-liner sets the absolute `AEGIS_ETW_PATH` and `AEGIS_ETW_ALLOW_UNSIGNED=true` because the helper is locally built and unsigned. The stream is **actually ingested**, not just probed: each kernel event enters the same enrichment pipeline as the poll (path, hash, Authenticode, command line) tagged `provenance=etw`, and the Toolhelp32 poll stays as the backstop (persistence, services, Defender, netstat) with a 15s dedup window. If the collector is missing, the agent falls back to polling and **says so** (`quality=degraded:etw-…`): a missing capability, never a silent failure.
 
-ETW requires a trace session, i.e. **administrative rights**: without them the collector prints the reason and exits, and Guard reports exactly that (`quality=degraded:etw-stream-StartTrace:_5_(serve_admin)`). Windows does not let a process elevate itself silently — UAC consent is mandatory for anything the user launches — so the elevation is paid **once**: `aegis.bat services` registers both agents as services (one prompt, then they run as LocalSystem: always admin, no prompt ever again, and they restart at boot). `aegis.bat agents` (dev mode) asks for the same elevation on every start; skip it with `set AEGIS_NO_ELEVATE=1` and the agents run with `quality=degraded:etw-…` declared. Installing the services is the professional path; the dev launcher exists so a fresh clone runs in a minute. A proprietary kernel-mode driver is only needed for **inline prevention** — that requires EV signing and Microsoft attestation, and is out of scope together with ETW-TI.
+ETW requires a trace session, i.e. **administrative rights**: without them the collector prints the reason and exits, and the agent reports exactly that (`quality=degraded:etw-stream-StartTrace:_5_(serve_admin)`). Windows does not let a process elevate itself silently — UAC consent is mandatory. The one-liner registers `AegisAgent` as a service (one elevation, then LocalSystem, restart at boot). A proprietary kernel-mode driver is only needed for **inline prevention** — that requires EV signing and Microsoft attestation, and is out of scope together with ETW-TI.
 
 ### Agents survive reboot
 
 Docker containers come back on their own (`restart: unless-stopped`), but host agents started by hand die with the session. Autostart is a property of the **installation**, not a manual step:
 
-- **Legacy Guard and NodeTrace are Windows services (NSSM)** — `AegisGuard` and `AegisNodeTrace` — installed by their installers (`aegis-guard\install\windows\install.ps1`, `NodeTrace\install\windows\install.ps1`; elevated shell, auto-start, restart-on-crash, log file). Uninstall with the matching `uninstall.ps1`. One command does it, requesting elevation itself: **`aegis.bat services`** (or menu option `[S]`). It reports failure explicitly: an install that did not happen never claims success, and the hand-started agents are left running so no endpoint is left uncovered. The 4.3 Go `unified` profile reuses this installer path only after its service/package gate (AP-115); do not assume the legacy NSSM service is the unified installer.
-- **`python scripts/setup.py` registers them for you** when it runs elevated; if it is not elevated, it prints the exact commands instead of leaving a silent gap. Use `--no-autostart` to force dev-mode agents only (never two instances per endpoint: either services **or** dev processes).
-- **No-admin fallback**: `powershell -ExecutionPolicy Bypass -File scripts/install-agents-autostart.ps1` registers Scheduled Tasks "at log on" (user context; elevated Guard actions unavailable). Remove with `-Remove`.
+- **The unified AegisAgent is a Windows service (`AegisAgent`) or a systemd unit (`aegis-unified`)** — installed by the one-liner (`New-Service` on Windows, systemd on Linux; elevated shell, auto-start, restart-on-crash). The legacy NSSM installers remain in the source tree for 4.2.1 compatibility but are not shipped or offered in 4.3. `aegis.bat services` is a development convenience, not the 4.3 installer.
+- **`python scripts/setup.py` starts the stack**; the 4.3 agent service is registered by the token installer, not by the legacy service scripts.
 - **Token installer**: when remote dashboard connectivity is selected, the installer performs the service registration itself and verifies the service is running before returning success.
 
 ### Remote enrollment: install an agent on another host
 
-Generate a short-lived token in **Deployment Manager** (`AegisAgent` unified, `Aegis-Guard`, `NodeTrace` or **both** legacy; one slot consumed per agent), then run the one-liner it shows **in an Administrator PowerShell on the target**. The 4.3 bundle ships `unified-latest.zip` (Windows) and `unified-latest.tar.gz` (Linux), and the installers publish them into the Brain artifact volume; the signed drop-in service installer remains outside 4.3.0.
+Generate a short-lived token in **Deployment Manager** for **AegisAgent (unified)**, then run the one-liner it shows **in an Administrator PowerShell on the target**. The 4.3 bundle ships only `unified-latest.zip` (Windows) and `unified-latest.tar.gz` (Linux), and the installers publish them into the Brain artifact volume; the signed drop-in service installer remains outside 4.3.0.
 
 ```powershell
-irm <brain>/api/v1/deploy/install.ps1?agent=both -Headers @{'X-Enroll-Token'='<token>'} | iex
+irm <brain>/api/v1/deploy/install.ps1?agent=unified -Headers @{'X-Enroll-Token'='<token>'} | iex
 ```
 
 ```bash
-curl -fsSL -H 'X-Enroll-Token: <token>' '<brain>/api/v1/deploy/install.sh?agent=both' | sudo bash
+curl -fsSL -H 'X-Enroll-Token: <token>' '<brain>/api/v1/deploy/install.sh?agent=unified' | sudo bash
 ```
 
-The installer downloads the artifact for that agent, extracts it (Guard into `C:\Aegis\Guard`, NodeTrace into `C:\Aegis\NodeTrace`), sets the brain URL, the Ed25519 manifest public key and a `0600` enrollment-token file (the token is never written into the persistent environment), and **registers the service** (`New-Service` on Windows, systemd on Linux) — the same service model as a local install. It refuses to pretend: if remote-dashboard connectivity was not selected in the token, it says that no service was registered instead of reporting success.
+The installer downloads the unified artifact, extracts it into `C:\Aegis\Agent` (Windows) or `/opt/aegis/unified` (Linux), sets the brain URL, the Ed25519 manifest public key and a `0600` enrollment-token file (the token is never written into the persistent environment), and **registers the service** (`AegisAgent` on Windows, `aegis-unified.service` on Linux). It refuses to pretend: if remote-dashboard connectivity was not selected in the token, it says that no service was registered instead of reporting success.
 
 For a host that is already enrolled, issue the token with `target_hostname` set to that host's existing hostname. Re-enrollment without a host-bound token is rejected with `409` and audited; the static `AGENT_ENROLL_KEY` cannot replace an existing device secret.
 
-One preparative step is yours — **publish the artifacts the brain serves** (they are build outputs, never committed):
-
-```bash
-python scripts/pack-artifacts.py            # -> aegis-brain/artifacts/*-latest.{zip,tar.gz}
-python scripts/pack-artifacts.py --version v4.3.0
-```
-
-The 4.3 bundle already contains the unified archives and `install.sh`/`install.ps1` publish them into the Brain volume; `pack-artifacts.py` remains the path for the legacy Guard/NodeTrace artifacts and for rebuilds.
-
-It packs exactly what a local install copies: `aegis-guard.jar`, a bundled `jre/` when `build.bat` produced one, `aegis-etw.exe` (kernel telemetry) and `bin/yara64.exe` for Guard; the full PyInstaller bundle for NodeTrace. Missing runtime = hard failure; missing optional piece = declared in the output (`python -m ...`-style honesty, no silent gaps). What the target needs: **Administrator** (service registration + ETW trace session), and a **Java 25+** runtime — either bundled in the artifact or installed there (`Get-JavaMajor` verifies the version, because a Java 8 on `PATH` installs a service that starts and dies with `UnsupportedClassVersionError`).
+The 4.3 bundle already contains the unified archives, and `install.sh`/`install.ps1` publish them into the Brain volume; no separate artifact step is required. For a source build, compile the Go agent and its kernel helpers (Windows `aegis-etw.exe`; Linux `aegis-collector` + `aegis_exec.bpf.o`) and pass that directory to `scripts/release-bundle.py --agent-dir <dir> --require-agent`. The target needs **Administrator** for service registration and the ETW trace session; Linux eBPF additionally needs `libbpf1` and the kernel capabilities (`CAP_BPF` + `CAP_PERFMON`, or root). Missing helpers are declared as degraded, never silently assumed. `scripts/pack-artifacts.py` is legacy-only and is not part of the 4.3 install path.
 
 ### Development mode (agents)
 
 ```bash
-# NodeTrace
-cd NodeTrace\agents\python
-set AEGIS_ENROLL_KEY=<key>
-set AEGIS_MANIFEST_PUBKEY=<base64 from /deploy/manifest>
-set NODETRACE_REGISTER_URL=http://localhost:8000/api/v1/register
-python agent.py
-```
-
-```bash
-# Guard
-cd aegis-guard
+# Unified Go agent
+cd aegis-agent
+go build -o aegis-agent.exe ./cmd/aegis-agent
 set AEGIS_BRAIN_URL=http://localhost:8000/api/v1
-set AEGIS_GATEWAY_URL=http://localhost:8000/api/v1/telemetry/report
+set AEGIS_AGENT_PROFILE=unified
 set AEGIS_ENROLL_KEY=<key>
 set AEGIS_MANIFEST_PUBKEY=<base64 from /deploy/manifest>
-jre-new\bin\java.exe -jar target\aegis-guard.jar
+aegis-agent.exe --profile unified
 ```
 
 Two details that fail with unreadable errors:
 
-- **A JVM 25+ is required**, and the `java` on the `PATH` is not automatically suitable: if it is an 8, the service installs, starts and dies with `UnsupportedClassVersionError`. The installer verifies the **version** and uses the resolved path, not the `java` string.
-- **`AEGIS_ENROLL_KEY` is only needed for the first enrollment** when no `secret.json`/`token.json` exists. The one-liner installer writes the single-use token to a `0600` file and sets `AEGIS_ENROLL_TOKEN_FILE`; the token is not persisted in the environment. Re-enrollment of an already registered host requires a token with `target_hostname` for that host. `AEGIS_MANIFEST_PUBKEY` is mandatory for OTA and is injected by the installer.
+- **`AEGIS_ENROLL_KEY` is only needed for the first enrollment** when no identity exists. The one-liner installer writes the single-use token to a `0600` file and sets `AEGIS_ENROLL_TOKEN_FILE`; the token is not persisted in the environment. Re-enrollment of an already registered host requires a token with `target_hostname` for that host.
+- **Kernel helpers are optional but declared.** Windows uses `aegis-etw.exe` next to the agent; Linux uses `aegis-collector` + `aegis_exec.bpf.o` and `NODETRACE_EBPF=1`. If a helper is missing, the agent falls back and reports `quality=degraded:...`; it never pretends the kernel stream is active. `AEGIS_MANIFEST_PUBKEY` is mandatory for OTA and is injected by the installer.
 
 ### Standalone agent builds
 
-Pre-compiled agents ship without Python/JDK runtime dependencies:
+The unified agent is a single static Go binary; the kernel helpers are separate files in the same archive:
 
-| Agent | Build Tool | Output | Runtime |
+| Artifact | Build Tool | Output | Runtime |
 |---|---|---|---|
-| NodeTrace | PyInstaller | `NodeTrace/agents/python/dist/nodetrace-agent/nodetrace-agent.exe` | 15 MB (bundled) |
-| Aegis-Guard | Maven + jlink | `aegis-guard/target/aegis-guard.jar` + `jre-new/` | 47 MB (minimal JRE) |
+| AegisAgent | Go 1.27.4 | `aegis-agent.exe` / `aegis-agent` | no JRE, no Python |
+| ETW helper | MinGW-w64 | `aegis-etw.exe` | user-mode, admin trace session |
+| eBPF sensor | clang + libbpf | `aegis-collector` + `aegis_exec.bpf.o` | Linux >= 5.8, BTF, `CAP_BPF` + `CAP_PERFMON` (or root) |
 
-Build all agents with a single command: `build.bat`. If `JAVA_HOME` still points at a JRE 8, `mvn test` fails with a confusing `class file version 65.0 ... only recognizes up to 52.0` (stale classes) even though compile reports success — point it at a JDK 25+ first.
+The `go build` command is above; the ETW compile and the eBPF build are documented in `aegis-ebpf/README.md`. The release CI builds all three.
 
 ---
 
@@ -387,7 +366,16 @@ Build all agents with a single command: `build.bat`. If `JAVA_HOME` still points
   ```
 
   Without at least one `admin`, host isolation, deploy approval, rule and alert deletion and site assignment all return 403 by design. `set-role` refuses to demote the last remaining admin unless `--force` is given.
-- **Agents**: enrollment key at registration, then per-agent Bearer token (NodeTrace) or gateway API key (Aegis-Link for syslog/legacy ingestion). NodeTrace validates that token once at startup with an authenticated call: if the brain rejects it (401) the agent re-enrolls, which is the brain's own recovery path — the same `device_id` is kept, and a **revoked** device is refused (403), so this is not a way back in. Its identity files (`token.json`, device key/certificate) are resolved against a **fixed absolute directory** (`NODETRACE_IDENTITY_DIR`, default: the agent's own folder), never the current working directory.
+
+  On a fresh localhost there is **no implicit admin**. That is deliberate: an HTTP request must not be able to grant itself a role. Create the first admin from the host shell:
+
+  ```bash
+  docker exec aegis-brain python -m app.admin bootstrap admin@aegis.local '<strong-password>'
+  docker exec aegis-brain python -m app.admin list
+  ```
+
+  `bootstrap` is idempotent for an existing account only if the password matches; it does not reset a forgotten password. Use `create-user <username> <email> <password> --role admin` for a new admin, or `set-role <email> admin` on an account whose password you know. Being on `localhost` is not a role: the CLI is the trust boundary.
+- **Agents**: enrollment key at registration, then a per-agent Bearer token for the unified Go agent; Aegis-Link uses an `X-Api-Key` for syslog/legacy event ingestion. The agent validates its token once at startup with an authenticated call: if the brain rejects it (401) the agent re-enrolls, keeping the same `device_id`; a **revoked** device is refused (403), so this is not a way back in. Its identity files (`token.json`, device key/certificate) are resolved against a **fixed absolute directory** (`NODETRACE_IDENTITY_DIR`, default: the agent's own folder), never the current working directory.
 - **Aegis-Link**: `X-Api-Key` for event ingestion — server-side only, never exposed to the React app.
 
 The global `AEGIS_API_KEY` is for Aegis-Link and automation scripts. It does **not** grant dashboard access.
@@ -478,10 +466,10 @@ Key environment variables (full list in `.env.example`):
 | `AI_AUTOMATIC_ENRICH` | `false` | Automatic alert enrichment toward a **cloud** provider |
 | `AEGIS_WITH_AI` | unset | Set `1` to add the Ollama service to the stack |
 | `OLLAMA_URL` | in-stack | Point at a powerful LAN machine to keep AI local with big models |
-| `AEGIS_ETW_ENABLED` | `true` when the collector exists | Spawns the ETW kernel collector from Guard |
-| `AEGIS_ETW_PATH` | absolute path set by the launcher | Must be **absolute**: Guard refuses to execute a collector resolved from a writable workdir (hijack) |
+| `AEGIS_ETW_ENABLED` | `true` when the collector exists | Spawns the ETW kernel collector from the unified Go agent |
+| `AEGIS_ETW_PATH` | absolute path set by the installer | Must be **absolute**: the agent refuses to execute a collector resolved from a writable workdir (hijack) |
 | `AEGIS_ETW_ALLOW_UNSIGNED` | `true` for locally built collectors | Allows an unsigned helper. Keep `false` if you sign `aegis-etw.exe` and want signature enforcement |
-| `AEGIS_NO_ELEVATE` | unset | `1` stops `aegis.bat agents` from requesting the UAC prompt for kernel telemetry (the agents then run without ETW and say so) |
+| `AEGIS_NO_ELEVATE` | unset | Legacy `aegis.bat` only; the unified agent reports degraded ETW instead of prompting for UAC |
 | `NODETRACE_IDENTITY_DIR` | agent directory | Where `token.json` and the device key/certificate live. Resolved as an **absolute** path on purpose: with a relative path the same device used a different identity per launch directory, and the brain answered 401 to every authenticated call |
 | `PLAYBOOK_SCRIPT_ENABLED` | `false` | Shell `script` SOAR actions (keep off unless explicitly approved) |
 | `RATE_LIMIT_STORAGE_URI` | memory | `redis://…` for multi-worker/HA rate limiting |
@@ -558,10 +546,10 @@ aegis-ecosystem/
 │   ├── alembic/versions/    # DB migrations
 │   └── tests/               # 823 pytest (CI-verified; 3 YARA skips)
 ├── aegis-link/              # Spring Boot ingestion gateway
-├── aegis-guard/             # Java endpoint agent (processes, FIM, remediation)
-│   └── install/windows/     # NSSM service installer/uninstaller
-├── NodeTrace/               # Python telemetry agent
-│   └── agents/python/       # PyInstaller standalone build
+├── aegis-guard/             # legacy Java source (4.2.1 compatibility; not shipped)
+│   └── install/windows/     # legacy NSSM installer (not used by 4.3)
+├── NodeTrace/               # legacy Python source (4.2.1 compatibility; not shipped)
+│   └── agents/python/       # legacy PyInstaller build
 ├── aegis-ebpf/              # eBPF probes (Linux) + ETW collector (Windows)
 ├── frontend/                # React 19 / TypeScript dashboard
 │   ├── src/components/      # pages, common widgets

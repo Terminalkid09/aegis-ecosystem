@@ -515,7 +515,7 @@ jobs:
 
   release:
     name: Release Artifacts
-    needs: [build_and_test, supply_chain, nodetrace_windows, e2e]
+    needs: [build_and_test, supply_chain, e2e]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     # Il minimo indispensabile per creare la release, caricare i file e
@@ -534,33 +534,6 @@ jobs:
           go-version: '1.27.4'
           cache-dependency-path: aegis-agent/go.sum
 
-      - name: Download NodeTrace Windows bundle
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: nodetrace-windows
-          path: NodeTrace/agents/python/dist/nodetrace-agent
-
-      - name: Setup Java
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
-        with:
-          distribution: 'temurin'
-          java-version: '25'
-          cache: maven
-
-      - name: Build Release
-        run: |
-          cd aegis-guard
-          mvn clean package
-          cd ..
-          mkdir -p release
-          # Il glob dev'essere *.jar, non aegis-guard-*.jar: lo shade plugin
-          # rinomina l'artefatto finale in aegis-guard.jar (senza versione),
-          # quindi il pattern con il trattino non matchava NIENTE e la release
-          # moriva su un cp a target/ pieno. Copio il file ESATTO e non *.jar
-          # perche' in target resta anche original-aegis-guard.jar (intermedio
-          # pre-shade, non e' un artefatto da spedire).
-          cp aegis-guard/target/aegis-guard.jar release/
-
       - name: Build Go agent (Windows and Linux)
         working-directory: aegis-agent
         run: |
@@ -574,6 +547,23 @@ jobs:
             -ldflags "-s -w -X main.buildVersion=${VERSION}" \
             -o ../release-agent/aegis-agent ./cmd/aegis-agent
           ls -lh ../release-agent
+
+      - name: Build kernel helpers
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+          # ETW: consumer user-mode Windows, nessuna firma e nessun driver.
+          x86_64-w64-mingw32-gcc -O2 -Wall aegis-ebpf/aegis_etw.c \
+            -o release-agent/aegis-etw.exe -ladvapi32 -ltdh -lws2_32
+          # eBPF: oggetto CO-RE + collector Linux, compilati nel container
+          # privilegiato perche' serve il BTF del kernel per vmlinux.h.
+          docker run --rm --privileged \
+            -v "$PWD/aegis-ebpf:/src" \
+            debian:bookworm-slim \
+            bash /src/build-in-docker.sh
+          cp aegis-ebpf/aegis-collector aegis-ebpf/aegis_exec.bpf.o release-agent/
+          ls -lh release-agent
 
       - name: Setup Node.js for release frontend
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -591,8 +581,6 @@ jobs:
           docker build -t "aegis-brain:${GITHUB_REF_NAME}" aegis-brain
           docker build -t "aegis-link:${GITHUB_REF_NAME}" aegis-link
           docker build -t "aegis-frontend:${GITHUB_REF_NAME}" frontend
-          docker build -t "aegis-guard:${GITHUB_REF_NAME}" aegis-guard
-          docker build -t "aegis-nodetrace:${GITHUB_REF_NAME}" NodeTrace/agents/python
           docker build -t "kraken:${GITHUB_REF_NAME}" services/kraken
           docker build -f services/kraken/Dockerfile.broker -t "kraken-broker:${GITHUB_REF_NAME}" services/kraken
 
@@ -606,7 +594,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-image-sboms
-          for name in aegis-brain aegis-link aegis-frontend aegis-guard aegis-nodetrace kraken kraken-broker; do
+          for name in aegis-brain aegis-link aegis-frontend kraken kraken-broker; do
             echo "SBOM $name..."
             docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
@@ -627,21 +615,18 @@ jobs:
             --force \
             --sbom-dir release-image-sboms \
             --agent-dir release-agent \
-            --require-agent \
-            --require-nodetrace
+            --require-agent
 
       - name: Save release images
         run: |
           set -euo pipefail
           # GitHub Releases limita ogni singolo asset a 2 GiB. Il tar non
-          # compresso delle sette immagini supera quel limite; gzip lo riduce
+          # compresso delle cinque immagini supera quel limite; gzip lo riduce
           # e, se ancora troppo grande, lo dividiamo in parti riassemblabili.
           docker save \
             "aegis-brain:${GITHUB_REF_NAME}" \
             "aegis-link:${GITHUB_REF_NAME}" \
             "aegis-frontend:${GITHUB_REF_NAME}" \
-            "aegis-guard:${GITHUB_REF_NAME}" \
-            "aegis-nodetrace:${GITHUB_REF_NAME}" \
             "kraken:${GITHUB_REF_NAME}" \
             "kraken-broker:${GITHUB_REF_NAME}" \
             | gzip -9 > release/aegis-images.tar.gz
@@ -659,7 +644,6 @@ jobs:
         run: |
           python scripts/release-smoke.py release \
             --require-agent \
-            --require-nodetrace \
             --require-image-sboms
 
       # Provenance, non firma: l'attestazione lega gli asset al repository e

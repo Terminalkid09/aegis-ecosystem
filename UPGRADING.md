@@ -4,9 +4,10 @@ This is the upgrade guide for the **4.3.0 release**. There is no `4.3.0-rc1`
 tag and no separate release-candidate cut: the release is cut directly as
 `v4.3.0` after the live gates are green.
 
-The 4.3.0 release ships the unified Go agent runtime for controlled pilots.
-Guard Java and NodeTrace Python remain available as legacy runtimes while
-customers migrate. Rolling back those legacy agents is **not** part of 4.3.0;
+The 4.3.0 release ships **only** the unified Go agent runtime for controlled
+pilots. Guard Java and NodeTrace Python remain in the source tree for 4.2.1
+compatibility, but they are not in the 4.3 bundle and are not offered by the
+4.3 deployment UI. Rolling back those legacy agents is **not** part of 4.3.0;
 the supported rollback boundary is the server stack.
 
 ## Before upgrading
@@ -36,9 +37,10 @@ the supported rollback boundary is the server stack.
 
 - The Go agent reports `agent_version=4.3.0` and supports the `sensor`,
   `endpoint` and `unified` profiles.
-- Existing Guard and NodeTrace installations are not silently replaced. A
-  pilot host can migrate its identity with the supported installer flow; the
-  old runtime remains the fallback until the migration is accepted.
+- Existing Guard and NodeTrace installations keep running against the 4.3
+  Brain, but the 4.3 bundle no longer contains their artifacts. A host that
+  must be reinstalled or upgraded moves to the unified agent; there is no
+  artifact-level fallback in this bundle.
 - This release does **not** require or test rollback to the previous Java or
   Python agent. Do not promise that rollback in a pilot.
 
@@ -91,10 +93,11 @@ python scripts/release-smoke.py release --require-agent --require-image-sboms
 The bundle ships `env.example` rather than `.env.example`: GitHub rewrites
 asset names that begin with a dot. The installers accept either name.
 
-The 4.3.0 bundle also ships the Go agent (`unified-latest.zip` on Windows,
-`unified-latest.tar.gz` on Linux) alongside the legacy Guard/NodeTrace
-artifacts. "No agent rollback" means no downgrade to the previous agents;
-it does not remove them from the migration path.
+The 4.3.0 bundle ships only the unified agent: `unified-latest.zip` on Windows
+and `unified-latest.tar.gz` on Linux, plus the versioned `unified-4.3.0.*` OTA
+copies. The Windows archive contains `aegis-agent.exe` and `aegis-etw.exe`; the
+Linux archive contains `aegis-agent`, `aegis-collector` and
+`aegis_exec.bpf.o`. Guard/NodeTrace artifacts are not present.
 
 Cosign signing is a separate step. `v4.3.0` is checksummed and carries a
 build-provenance attestation, but it is **not** described as a signed

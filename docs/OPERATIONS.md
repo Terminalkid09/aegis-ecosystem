@@ -29,11 +29,28 @@ profilo Kraken, `docker compose ps` deve mostrare `aegis-kraken-sensors`
 `healthy`: il healthcheck usa il listener locale `127.0.0.1:8000`, non le porte
 esca, quindi non genera eventi di attacco finti.
 
+## 1a. Primo amministratore (localhost e non)
+
+La registrazione self-service è disattivata per default. Non esiste un admin
+implicito su `localhost`: il ruolo viene concesso dalla shell dell'host, mai da
+una richiesta HTTP. Dopo il primo avvio:
+
+```bash
+docker exec aegis-brain python -m app.admin list
+docker exec aegis-brain python -m app.admin bootstrap admin@aegis.local '<password-forte>'
+```
+
+`bootstrap` registra l'account se non esiste e lo promuove ad admin; se esiste
+già verifica la password e non la resetta. Per un nuovo admin usa
+`create-user <username> <email> <password> --role admin`; per promuovere un
+account di cui conosci la password usa `set-role <email> admin`. Senza almeno
+un admin, isolamento host, approvazione deploy, cancellazione regole/alert e
+assegnazione site rispondono 403 by design.
+
 ## 1b. Enrollment token e servizi host
 
-Da **Deployment Manager** creare un token per `Aegis-Guard`, `NodeTrace` o
-`Both agents`. Il token è breve e monouso per ogni tipo di agent: con `Both`
-Guard e NodeTrace effettuano due enrollment separati sullo stesso host.
+Da **Deployment Manager** creare un token per **AegisAgent (unified)**. Il
+token è breve e monouso; non esistono più token per Guard, NodeTrace o "both".
 
 Per **ri-enrollare** un host già registrato il token deve essere creato con
 `target_hostname` uguale all'hostname esistente. La chiave statica
@@ -44,10 +61,9 @@ solo l'hash e registra l'eventuale cambio identità nell'audit.
 
 Il comando generato:
 
-- scarica l'artefatto dal Brain usando il token bootstrap;
-- configura l'URL del Brain e le URL di enrollment/heartbeat;
-- registra `AegisGuard`/`AegisNodeTrace` come servizi Windows, oppure crea le
-  unità systemd equivalenti su Linux;
+- scarica `unified-latest.zip` (Windows) o `unified-latest.tar.gz` (Linux) dal Brain usando il token bootstrap;
+- configura l'URL del Brain, la manifest pubkey e il file token `0600`;
+- registra `AegisAgent` come servizio Windows, oppure `aegis-unified.service` su Linux;
 - abilita l'avvio automatico, il restart dopo crash e verifica lo stato del
   servizio prima di terminare con successo.
 
@@ -56,22 +72,17 @@ vengono estratti ma i servizi non vengono avviati, perché un agent senza
 endpoint di enrollment configurato non deve partire in modo ambiguo.
 
 **Prima degli installer: pubblicare gli artefatti.** L'one-liner scarica da
-`/deploy/bootstrap-artifacts/<agent>-latest.zip`, quindi il file deve esistere
-in `ARTIFACT_DIR` (gli artefatti sono output di build: non stanno nel repo).
+`/deploy/bootstrap-artifacts/unified-latest.zip` (o `.tar.gz`), quindi il file
+deve esistere in `ARTIFACT_DIR`. Il bundle 4.3 lo pubblica già; per un build da
+sorgente compila il binario Go e i suoi helper kernel e passali a
+`scripts/release-bundle.py --agent-dir <dir> --require-agent`.
 
-```bash
-python scripts/pack-artifacts.py            # ZIP + tar.gz, nomi -latest inclusi
-python scripts/setup.py update --rebuild-agents   # se serve ricostruire prima
-```
-
-Dentro l'artefatto di Guard finiscono `aegis-guard.jar`, il `jre/` incluso
-(se `build.bat` lo ha creato), `aegis-etw.exe` per la telemetria kernel e
-`bin/yara64.exe`. Manca il runtime → lo script fallisce; manca un pezzo
-opzionale (collector ETW, YARA) → lo dichiara e Guard degrada dicendolo
-(`quality=degraded:etw-...`). Sul target serve **admin** (registrazione
-servizio + sessione di trace ETW) e **Java 25+**, incluso nell'artefatto o
-installato lì: la versione viene verificata, non solo la presenza (`java` 8
-avviva un servizio che muore con `UnsupportedClassVersionError`).
+L'archivio Windows contiene `aegis-agent.exe` e `aegis-etw.exe`; quello Linux
+contiene `aegis-agent`, `aegis-collector` e `aegis_exec.bpf.o`. Sul target serve
+**admin** per la registrazione del servizio e per la sessione ETW; su Linux
+l'eBPF richiede `libbpf1` e `CAP_BPF` + `CAP_PERFMON` (oppure root). Se un
+helper manca, l'agente lo dichiara (`quality=degraded:...`) e usa il fallback,
+non finge che il kernel stream sia attivo.
 
 La dashboard locale sull'endpoint non è ancora distribuita: non selezionarla
 come requisito operativo. Per aziende isolate usare una dashboard centrale
