@@ -49,6 +49,9 @@ export const authAPI = {
   // Public policy for the login screen: with self-service off, do not show a
   // Register tab that can only end in 403.
   config: () => apiClient.get('/auth/config'),
+  oidcConfig: () => apiClient.get('/auth/oidc/config'),
+  oidcLoginUrl: (returnTo?: string) =>
+    `${API_BASE_URL}/auth/oidc/login${returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ''}`,
   // remember: "Mantieni l'accesso su questo dispositivo" — il server emette un
   // cookie remember separato (30 gg, revocabile da Settings → Dispositivi).
   login: (email: string, password: string, remember = false) =>
@@ -64,6 +67,27 @@ export const authAPI = {
   // remember-token con una nuova sessione. 401 se non c'e' trust: fallimento
   // normale, non deve sloggare nulla.
   rememberLogin: () => apiClient.post('/auth/remember', null, { __skipAuthWipe: true } as any),
+}
+
+// ─── Utenti (solo admin, gestione completa) ────────────────────────────────
+export interface ManagedUser {
+  id: number
+  username: string
+  email: string
+  role: string
+  active: boolean
+  oidc?: boolean
+  created_at?: string | null
+}
+
+export const usersAPI = {
+  list: () => apiClient.get<{ users: ManagedUser[] }>('/users'),
+  create: (data: { username: string; email: string; password: string; role: string; active?: boolean }) =>
+    apiClient.post<ManagedUser>('/users', data),
+  update: (id: number, data: { role?: string; active?: boolean }) =>
+    apiClient.patch<ManagedUser>(`/users/${id}`, data),
+  resetPassword: (id: number, password: string) =>
+    apiClient.post(`/users/${id}/reset-password`, { password }),
 }
 
 // ─── Dispositivi fidati (remember-me) ──────────────────────────────────────

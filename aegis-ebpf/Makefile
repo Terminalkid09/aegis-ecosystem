@@ -23,10 +23,16 @@ aegis-collector: aegis_collector.c
 
 # Windows (MinGW-w64): user-mode ETW consumer, no driver and no signature.
 # -lws2_32 is not optional: ntohl comes from winsock2.h.
-# Running it requires an admin session (StartTrace -> 5 without elevation).
-CC_WIN ?= gcc
-aegis-etw.exe: aegis_etw.c
-	$(CC_WIN) -O2 -Wall $< -o $@ -ladvapi32 -ltdh -lws2_32
+# Running it requires an admin session. The manifest forces elevation when
+# the helper is opened manually; the service starts it as LocalSystem.
+CC_WIN ?= x86_64-w64-mingw32-gcc
+WINDRES ?= x86_64-w64-mingw32-windres
+# MinGW's default endfile spec injects a second, asInvoker manifest. Disable
+# that object so the requireAdministrator resource is the only manifest.
+WIN_SPECS ?= no-default-manifest.specs
+aegis-etw.exe: aegis_etw.c aegis-etw.rc aegis-etw.manifest $(WIN_SPECS)
+	$(WINDRES) -i aegis-etw.rc -O coff -o aegis-etw.res.o
+	$(CC_WIN) -O2 -Wall -specs=$(WIN_SPECS) $< aegis-etw.res.o -o $@ -ladvapi32 -ltdh -lws2_32
 
 clean:
-	rm -f aegis_exec.bpf.o aegis-collector aegis-etw.exe
+	rm -f aegis_exec.bpf.o aegis-collector aegis-etw.exe aegis-etw.res.o

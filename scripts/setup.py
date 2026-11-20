@@ -28,8 +28,10 @@ Idempotente: rilanciabile quante volte si vuole.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -92,7 +94,8 @@ def preflight() -> int:
 # -------------------------------------------------------------------- .env
 
 REQUIRED_ENV = ("POSTGRES_PASSWORD", "REDIS_PASSWORD", "DATABASE_URL",
-                "AEGIS_API_KEY", "AGENT_ENROLL_KEY", "JWT_SECRET")
+                "AEGIS_API_KEY", "AGENT_ENROLL_KEY", "JWT_SECRET",
+                "MASTER_KEY_B64")
 
 
 def ensure_env() -> str:
@@ -111,6 +114,15 @@ def ensure_env() -> str:
     log(".env assente: lo genero con segreti casuali forti...")
     pw = secrets.token_hex(16)
     redis_pw = secrets.token_hex(16)
+    # The compose file marks MASTER_KEY_B64 as required. A fresh clone must get
+    # a valid 32-byte key here, otherwise `setup.py` generates a .env that
+    # immediately fails at `docker compose up`.
+    master_key = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
+    domain = (os.environ.get("AEGIS_DOMAIN") or "aegis.local").strip()
+    acme_email = (os.environ.get("ACME_EMAIL") or "internal").strip()
+    if domain not in ("aegis.local", "localhost") and acme_email == "internal":
+        log("ATTENZIONE: AEGIS_DOMAIN e' un dominio pubblico ma ACME_EMAIL=internal; "
+            "Caddy userebbe la CA interna. Imposta ACME_EMAIL con un indirizzo reale.")
     values = {
         "POSTGRES_USER": "aegis_user",
         "POSTGRES_PASSWORD": pw,
@@ -127,12 +139,40 @@ def ensure_env() -> str:
         "AEGIS_API_KEY": secrets.token_hex(32),
         "AGENT_ENROLL_KEY": secrets.token_hex(16),
         "JWT_SECRET": secrets.token_hex(32),
+        "MASTER_KEY_B64": master_key,
         "JWT_ALGORITHM": "HS256",
         "JWT_EXPIRE_MINUTES": "60",
-        "ALLOWED_ORIGINS": "http://localhost:3000,http://localhost:5173",
+        # Local dashboard is HTTP on :3000. A real public domain is served
+        # through Caddy over HTTPS, so the session cookie must be Secure.
+        "AEGIS_DEBUG": "false",
+        "AEGIS_ALLOW_OPEN_REGISTRATION": "false",
+        "AEGIS_COOKIE_SECURE": "false" if domain in ("aegis.local", "localhost") else "true",
+        # Caddy domain/TLS. A real FQDN + real ACME email uses Let's Encrypt;
+        # the lab default uses Caddy's internal CA.
+        "AEGIS_DOMAIN": domain,
+        "ACME_EMAIL": acme_email,
+        # Include the Caddy HTTPS origin: without it, cookie-authenticated
+        # POST/PATCH requests through https://<domain> fail CSRF checks with
+        # 403 even though the dashboard loads correctly. PUBLIC_BASE_URL is
+        # used by OIDC callbacks and deployment links and must match.
+        "ALLOWED_ORIGINS": f"https://{domain},http://localhost:3000,http://localhost:5173",
+        "PUBLIC_BASE_URL": f"https://{domain}",
         "VITE_API_URL": "/api/v1",
         "AEGIS_AGENT_ID": "agent-001",
         "AEGIS_SCAN_INTERVAL_MS": "1000",
+        # Kraken is an optional compose profile, but a fresh clone should be
+        # able to start it without hand-editing secrets. These values are
+        # independent from the Brain secrets above.
+        "KRAKEN_DB_PASSWORD": secrets.token_hex(16),
+        "KRAKEN_REDIS_PASSWORD": secrets.token_hex(16),
+        "KRAKEN_SECRET_KEY": secrets.token_hex(32),
+        "KRAKEN_INTERNAL_API_KEY": secrets.token_hex(32),
+        "KRAKEN_SSO_ENABLED": "true",
+        "KRAKEN_SSO_SECRET": secrets.token_hex(32),
+        "KRAKEN_INGEST_ENABLED": "false",
+        "KRAKEN_INGEST_KEY": secrets.token_hex(32),
+        "KRAKEN_INGEST_SECRET": secrets.token_hex(32),
+        "SANDBOX_BROKER_TOKEN": secrets.token_hex(32),
     }
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("# Generato da scripts/setup.py — segreti casuali, non condividere.\n")
@@ -407,6 +447,10 @@ def install_agent_services() -> bool:
 
 
 def run_smoke(base: str, email: str, password: str) -> int:
+    if not email or not password:
+        log("smoke autenticato saltato: password admin non disponibile "
+            "(re-run con AEGIS_ADMIN_PASSWORD_FILE per eseguirlo)", "!")
+        return 0
     r = run([sys.executable, os.path.join(SCRIPTS, "api_smoke.py"), "--base", base,
              "--email", email, "--password", password], timeout=300)
     print(r.stdout[-1500:])
@@ -445,26 +489,67 @@ def write_env_pair(key: str, value: str) -> None:
         f.write("\n".join(lines) + "\n")
 
 
+def _configured_admin_password(env: dict[str, str]) -> str:
+    """Password from --password, environment or a mounted secret file."""
+    password = (env.get("AEGIS_ADMIN_PASSWORD") or "").strip()
+    if password:
+        return password
+    path = (os.environ.get("AEGIS_ADMIN_PASSWORD_FILE") or "").strip()
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def admin_exists() -> bool:
+    """True if at least one admin already exists. Used to keep re-runs non-destructive."""
+    r = run(["docker", "exec", "aegis-brain", "python", "-m", "app.admin", "list"], timeout=60)
+    if r.returncode != 0:
+        return False
+    out = (r.stdout or "") + (r.stderr or "")
+    match = re.search(r"admin:\s*(\d+)", out)
+    return bool(match and int(match.group(1)) > 0)
+
+
 def bootstrap_admin(env: dict[str, str], email: str | None, password: str | None) -> tuple[str, str]:
-    """Crea/promuove l'admin e ritorna (email, password) effettive."""
+    """Create/promote the first admin without persisting its password.
+
+    The password is generated once, printed once and never written to .env.
+    On a re-run an existing admin is left untouched: silently resetting it to a
+    new generated value would lock the operator out of the account they had.
+    For automation, supply AEGIS_ADMIN_PASSWORD or AEGIS_ADMIN_PASSWORD_FILE.
+    """
     email = email or env.get("AEGIS_ADMIN_EMAIL") or "admin@aegis.local"
-    password = password or env.get("AEGIS_ADMIN_PASSWORD") or secrets.token_urlsafe(12)
+    configured = (password or _configured_admin_password(env)).strip()
 
     in_container = run(["docker", "exec", "aegis-brain", "python", "-c", "1"], timeout=30)
-    if in_container.returncode == 0:
-        r = run(["docker", "exec", "aegis-brain", "python", "-m", "app.admin",
-                 "bootstrap", email, password], timeout=120)
-        if r.returncode != 0:
-            log(f"bootstrap fallito:\n{(r.stdout or '')[-500:]}", "!")
-            return "", ""
-    else:
+    if in_container.returncode != 0:
         # Setup senza container attivi (es. prima esecuzione di update): riprova dopo.
         log("container brain non raggiungibile: bootstrap rimandato", "!")
         return "", ""
 
-    # Persisti le credenziali nel .env cosi' il re-run e' idempotente e ritrovabile.
+    if not configured and admin_exists():
+        log("admin già presente: password non modificata e non salvata in .env", "+")
+        write_env_pair("AEGIS_ADMIN_EMAIL", email)
+        return email, ""
+
+    password = configured or secrets.token_urlsafe(18)
+    r = run(["docker", "exec", "aegis-brain", "python", "-m", "app.admin",
+             "bootstrap", email, password], timeout=120)
+    if r.returncode != 0:
+        out = (r.stdout or "") + (r.stderr or "")
+        if "password non corrisponde" in out:
+            log("admin esistente con una password diversa: non la resetto", "!")
+            write_env_pair("AEGIS_ADMIN_EMAIL", email)
+            return email, ""
+        log(f"bootstrap fallito:\n{(r.stdout or '')[-500:]}", "!")
+        return "", ""
+
+    # Solo l'email è configurazione; la password resta fuori dal file.
     write_env_pair("AEGIS_ADMIN_EMAIL", email)
-    write_env_pair("AEGIS_ADMIN_PASSWORD", password)
     return email, password
 
 
@@ -518,7 +603,7 @@ def main() -> int:
     up.add_argument("--password")
 
     ap.add_argument("--email", help="email admin (default: admin@aegis.local o quella nel .env)")
-    ap.add_argument("--password", help="password admin (default: generata e salvata nel .env)")
+    ap.add_argument("--password", help="password admin (default: generata e mostrata una sola volta)")
     args = ap.parse_args()
 
     if args.command == "update":
@@ -559,7 +644,10 @@ def main() -> int:
     print()
     log("=== AEGIS PRONTO ===", "+")
     print(f"  Dashboard:   http://localhost:3000   (login: {email})")
-    print(f"  Password:    {password}   (salvata anche in .env: AEGIS_ADMIN_PASSWORD)")
+    if password:
+        print(f"  Password:    {password}   (mostrata una sola volta, NON salvata in .env)")
+    else:
+        print("  Password:    invariata (admin già esistente); usa AEGIS_ADMIN_PASSWORD_FILE per l'automazione)")
     print(f"  API:         http://127.0.0.1:8000/api/v1")
     print(f"  Aggiornare?  python scripts/setup.py update")
     return 0

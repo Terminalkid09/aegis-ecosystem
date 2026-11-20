@@ -3,10 +3,13 @@
 	auto_https disable_redirects
 }
 
-# For dev: tls internal (auto self-signed)
-# For production: tls your@email.com (Let's Encrypt ACME) with a real domain
-aegis.local {
-	tls internal
+# AEGIS_DOMAIN is the public FQDN, set in .env. The lab default is
+# aegis.local with Caddy's internal CA. For a real deployment set
+# AEGIS_DOMAIN=soc.example.com and ACME_EMAIL=admin@example.com: Caddy then
+# obtains and renews a Let's Encrypt certificate automatically (DNS must point
+# here and ports 80/443 must be reachable for the ACME challenge).
+{$AEGIS_DOMAIN:aegis.local} {
+	tls {$ACME_EMAIL:internal}
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -51,5 +54,5 @@ aegis.local {
 }
 
 :80 {
-	redir https://aegis.local{uri} permanent
+	redir https://{$AEGIS_DOMAIN:aegis.local}{uri} permanent
 }

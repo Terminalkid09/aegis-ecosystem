@@ -2,6 +2,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator, model_validator
 from typing import Optional
 import base64
+import json
+
+from app.core.secrets import apply_secret_sources
+
+# File/Vault sources must populate os.environ before pydantic-settings reads
+# it. This is deliberately before Settings() and never logs a value.
+apply_secret_sources()
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -92,6 +99,30 @@ class Settings(BaseSettings):
     # Audit: registrazione aperta (lab) vs solo-admin (enterprise).
     # False = POST /auth/register richiede JWT admin (niente self-service).
     ALLOW_OPEN_REGISTRATION: bool = True
+
+    # ── OIDC umano (WP-PLAT-01) ────────────────────────────────────────────
+    # Provider-neutral: Entra ID, Okta, Keycloak, Authentik. Local login remains
+    # available by default as the documented break-glass path.
+    OIDC_ENABLED: bool = False
+    OIDC_ISSUER: str = ""
+    OIDC_DISCOVERY_URL: str = ""
+    OIDC_CLIENT_ID: str = ""
+    OIDC_CLIENT_SECRET: str = ""
+    # Empty = PUBLIC_BASE_URL + /api/v1/auth/oidc/callback.
+    OIDC_REDIRECT_URI: str = ""
+    OIDC_SCOPES: str = "openid email profile"
+    OIDC_BUTTON_LABEL: str = "Sign in with SSO"
+    OIDC_GROUPS_CLAIM: str = "groups"
+    # JSON object, e.g. {"aegis-admins":"admin","aegis-analysts":"analyst"}.
+    OIDC_GROUP_ROLE_MAP: str = "{}"
+    OIDC_DEFAULT_ROLE: str = "viewer"
+    OIDC_AUTO_CREATE_USERS: bool = True
+    OIDC_LINK_BY_EMAIL: bool = True
+    OIDC_SYNC_ROLE: bool = True
+    OIDC_REQUIRE_VERIFIED_EMAIL: bool = True
+    OIDC_ALLOW_LOCAL_LOGIN: bool = True
+    OIDC_HTTP_TIMEOUT_S: int = 10
+    OIDC_CLOCK_SKEW_S: int = 60
 
     # Automazione SOAR idempotente (audit L1): un playbook esegue le sue azioni
     # una sola volta per (playbook, alert) entro questa finestra. Evita che un
@@ -286,6 +317,28 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "AEGIS_PROFILE=prod requires RATE_LIMIT_STORAGE_URI (shared Redis)"
                 )
+        if self.OIDC_ENABLED:
+            if not (self.OIDC_ISSUER or "").strip():
+                raise ValueError("OIDC_ENABLED=true requires OIDC_ISSUER")
+            if not (self.OIDC_CLIENT_ID or "").strip():
+                raise ValueError("OIDC_ENABLED=true requires OIDC_CLIENT_ID")
+            if "openid" not in (self.OIDC_SCOPES or "").split():
+                raise ValueError("OIDC_SCOPES must include openid")
+            if self.OIDC_HTTP_TIMEOUT_S <= 0:
+                raise ValueError("OIDC_HTTP_TIMEOUT_S must be positive")
+            if self.OIDC_CLOCK_SKEW_S < 0:
+                raise ValueError("OIDC_CLOCK_SKEW_S must not be negative")
+            allowed_roles = {"viewer", "user", "auditor", "responder", "analyst", "admin"}
+            if (self.OIDC_DEFAULT_ROLE or "").lower() not in allowed_roles:
+                raise ValueError("OIDC_DEFAULT_ROLE is not a known role")
+            try:
+                role_map = json.loads(self.OIDC_GROUP_ROLE_MAP or "{}")
+            except json.JSONDecodeError as exc:
+                raise ValueError("OIDC_GROUP_ROLE_MAP must be valid JSON") from exc
+            if not isinstance(role_map, dict):
+                raise ValueError("OIDC_GROUP_ROLE_MAP must be a JSON object")
+            if any(str(role).lower() not in allowed_roles for role in role_map.values()):
+                raise ValueError("OIDC_GROUP_ROLE_MAP contains an unknown role")
         return self
 
 settings = Settings()

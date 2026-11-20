@@ -217,7 +217,7 @@ class TestDiscoveryDeployment:
     async def test_deployment_plan_manual(self, client: AsyncClient, admin_auth_headers):
         resp = await client.post(
             "/api/v1/discovery/deployment/plan",
-            json={"ip_address": "192.168.1.100", "os_type": "linux", "agent_type": "nodetrace", "method": "manual"},
+            json={"ip_address": "192.168.1.100", "os_type": "linux", "agent_type": "unified", "method": "manual"},
             headers=admin_auth_headers
         )
         assert resp.status_code == 200
@@ -232,18 +232,18 @@ class TestDiscoveryDeployment:
     async def test_deployment_plan_windows(self, client: AsyncClient, admin_auth_headers):
         resp = await client.post(
             "/api/v1/discovery/deployment/plan",
-            json={"ip_address": "192.168.1.200", "os_type": "windows", "agent_type": "aegis-guard", "method": "manual"},
+            json={"ip_address": "192.168.1.200", "os_type": "windows", "agent_type": "unified", "method": "manual"},
             headers=admin_auth_headers
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["method"] == "manual"
-        assert data["agent_type"] == "aegis-guard"
+        assert data["agent_type"] == "unified"
 
     async def test_deployment_plan_invalid_os(self, client: AsyncClient, admin_auth_headers):
         resp = await client.post(
             "/api/v1/discovery/deployment/plan",
-            json={"ip_address": "10.0.0.1", "os_type": "macos", "agent_type": "nodetrace", "method": "manual"},
+            json={"ip_address": "10.0.0.1", "os_type": "macos", "agent_type": "unified", "method": "manual"},
             headers=admin_auth_headers
         )
         assert resp.status_code == 422
@@ -253,7 +253,7 @@ class TestDiscoveryDeployment:
         # /deploy/token + signed enrollment (v4.0.0).
         resp = await client.post(
             "/api/v1/discovery/deploy",
-            json={"ip_address": "192.168.1.100", "agent_type": "nodetrace"},
+            json={"ip_address": "192.168.1.100", "agent_type": "unified"},
             headers=admin_auth_headers
         )
         assert resp.status_code == 410
@@ -263,7 +263,7 @@ class TestDiscoveryDeployment:
         # Anche con credenziali il legacy è rimosso: niente password in chiaro.
         resp = await client.post(
             "/api/v1/discovery/deploy",
-            json={"ip_address": "192.168.1.100", "agent_type": "nodetrace", "username": "admin", "password": "test123"},
+            json={"ip_address": "192.168.1.100", "agent_type": "unified", "username": "admin", "password": "test123"},
             headers=admin_auth_headers
         )
         assert resp.status_code == 410, f"Legacy deploy must stay gone: {resp.json()}"
@@ -271,7 +271,7 @@ class TestDiscoveryDeployment:
     async def test_deploy_requires_auth(self, client: AsyncClient):
         resp = await client.post(
             "/api/v1/discovery/deploy",
-            json={"ip_address": "10.0.0.1", "agent_type": "nodetrace"}
+            json={"ip_address": "10.0.0.1", "agent_type": "unified"}
         )
         assert resp.status_code == 401
 

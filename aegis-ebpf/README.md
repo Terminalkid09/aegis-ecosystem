@@ -7,8 +7,8 @@ shipped in the 4.3 bundle and are not offered by the 4.3 deployment UI.
 
 | Sensor | Source | State |
 |---|---|---|
-| `aegis_exec.bpf.c` + `aegis_collector.c` (Linux) | `sched_process_exec` tracepoint + `do_exit` kprobe + `sock/inet_sock_set_state` tracepoint (ESTABLISHED only), ring buffer | **Verified**: `EBPF_TEST_PASS` + 100/100 benchmark without loss; TCP `127.0.0.1:18923` connections captured |
-| `aegis_etw.c` (Windows) | `Kernel-Process` ID 1/2 + `Kernel-Network` TcpIp Connect via TDH | Builds cleanly (MinGW); runtime requires an admin trace session — lab validation |
+| `aegis_exec.bpf.c` + `aegis_collector.c` (Linux) | `sched_process_exec` tracepoint + `do_exit` kprobe + `sock/inet_sock_set_state` tracepoint (ESTABLISHED only), ring buffer | **Verified on WSL2 Ubuntu/Kali**: `EBPF_TEST_PASS`, 195/126 events, 300/300 benchmark without loss, TCP `127.0.0.1:18923` connections captured |
+| `aegis_etw.c` (Windows) | `Kernel-Process` ID 1/2 + `Kernel-Network` TcpIp connection-attempt ID 12 via TDH | **Verified live elevated** on Windows 11: 95 events (45 created, 47 exited, 3 connections), `JSON_OK`; non-admin exits 2 without starting. Build MinGW 16.2 |
 | macOS | EndpointSecurity (System Extension + Apple entitlement) | **Not implemented here**: requires the `com.apple.developer.endpoint-security.client` entitlement, provisioning and a macOS lab — the `MacOSProcessMonitor` polling fallback (Tier 3) remains |
 | Unified Go agent | `aegis-agent/internal/kernel` + `internal/guard/etw` | Starts `aegis-collector` when eBPF is configured; consumes `aegis-etw.exe` on Windows; falls back to auditd/polling and declares `quality=degraded:...` when a helper is missing |
 | Legacy Guard | `ExternalEventIngester` pipe/file JSON | 4.2.1 source compatibility only; not in the 4.3 bundle |
@@ -28,7 +28,7 @@ The Go agent keeps the same design: it spawns the helper and reads its stdout.
 | OS | Tier 1 kernel events | Tier 2 | Tier 3 fallback | Remediation |
 |---|---|---|---|---|
 | Linux | Verified eBPF → unified Go consumer | — | JNA/proc polling | Unified agent (user-mode) |
-| Windows | ETW Kernel-Process (code ready, admin lab to validate) | Security log 4688 (requires audit policy) | Toolhelp32 polling | Unified agent (user-mode) |
+| Windows | ETW Kernel-Process (live validated elevated; no admin = exit 2) | Security log 4688 (requires audit policy) | Toolhelp32 polling | Unified agent (user-mode) |
 | macOS | EndpointSecurity (Apple entitlement + MDM required) | — | `MacOSProcessMonitor` polling | Unified agent (user-mode) |
 
 All Tier 1 sources speak the **single contract** below: same fields, same
@@ -48,12 +48,18 @@ validates it):
 
 | Field | eBPF Linux | ETW Windows |
 |---|---|---|
-| `ts_ns` | `bpf_ktime_get_ns` (monotonic) | FileTime → Unix ns (wall-clock) |
+| `ts_ns` | `bpf_ktime_get_ns` (monotonic) | QPC monotonic ns |
+| `ts_wall_ns` | wall clock when available | event `FILETIME` → Unix ns |
 | `pid`/`ppid` | tracepoint / `real_parent->tgid` | `ProcessID` / `ParentProcessID` via TDH |
 | `uid` | `bpf_get_current_uid_gid` | always `0` (SIDs are not mapped in the MVP) |
 | `comm` | `bpf_get_current_comm` | basename of `ImageName` |
 | `filename` | `__data_loc` tracepoint | full `ImageName` |
-| `exit_code` | `do_exit` argument | `ExitStatus` (TDH read, best-effort) |
+| `exit_code` | `do_exit` argument | `ExitStatus` (typed TDH `UInt32`) |
+
+ETW `Microsoft-Windows-Kernel-Network` event 12 is *connection attempted*, not
+an established handshake. It is emitted with
+`quality=degraded:etw-connect-attempt`; do not treat it as equivalent to the
+eBPF `ESTABLISHED` tracepoint.
 
 The Go agent converts them into `EventSchema` reports and sends them to the
 Brain as `PROCESS_CREATED`/`PROCESS_EXITED`/`CONNECTION_ESTABLISHED` — the same
@@ -95,19 +101,20 @@ on recent kernels, so exit events use `kprobe/do_exit`.
 
 ## Measured performance (`bench.sh`, 300 executions of `/bin/true`, kernel 6.6)
 
+Last measured on WSL2 Ubuntu, 2026-11-20:
+
 | Metric | Value |
 |---|---|
-| Baseline without the sensor | 214 ms / 300 exec |
-| With the sensor active | 246 ms / 300 exec (+15% wall-clock, ~0.1 ms per exec) |
+| Baseline without the sensor | 245 ms / 300 exec |
+| With the sensor active | 236 ms / 300 exec |
 | Lost events | **0** (created 300/300, exited 300/300) |
-| Total collector CPU | 3 ticks (~30 ms for the whole run) |
+| Collector activity | 3 ticks for the whole run |
 
 This is a worst-case micro-benchmark (`true` does nothing but start and exit, so
-the tracepoint cost dominates); on real workloads it is negligible. The Guard
-user-mode path was also made lighter: a light scan every second (no hashes/paths
-for every process), exe+SHA only for **new** processes, `ss`/`netstat` at most
-every 5 s (`AEGIS_NETSTAT_INTERVAL_MS`), and UID caching (no `/etc/passwd` scan
-per process).
+the tracepoint cost dominates); the difference is within measurement noise, not
+a claimed speedup. On real workloads the relative cost is negligible. ETW is a
+connect-attempt source, not an established-handshake source: events carry
+`quality=degraded:etw-connect-attempt`.
 
 ## Windows (admin lab)
 
@@ -117,12 +124,20 @@ aegis-etw.exe > events.jsonl
 ```
 
 The release CI cross-compiles the same source with
-`x86_64-w64-mingw32-gcc`.
+`x86_64-w64-mingw32-gcc`. The helper creates the fixed session
+`AegisKernelProcess`; if a stale/other session has that name it now fails with
+an actionable message instead of reusing a bogus `HistoricalContext` handle.
+Use `--replace` only when you intend to stop the existing session.
+
+`ts_ns` is QPC monotonic, `ts_wall_ns` is the event FILETIME. Dynamic strings
+(including `C:\\Windows\\...`) are UTF-8 JSON-escaped, not printed with `%s`.
 
 ## Honest limits (this is not a driver yet)
 
 * User-mode remains for remediation/heartbeat/config; the kernel only provides
   event-driven telemetry. Real tamper protection requires a signed driver
-  (WHQL) or a System Extension — out of scope for this phase.
+  (WHQL) or a System Extension — out of scope for this phase. See
+  [`docs/KERNEL_AND_DRIVERS.md`](../docs/KERNEL_AND_DRIVERS.md) for the cost and
+  the decision.
 * Isolation is via the OS firewall, not WFP callouts/eBPF TC.
 * OTA signing is Ed25519; the old symmetric HMAC path is not reintroduced.

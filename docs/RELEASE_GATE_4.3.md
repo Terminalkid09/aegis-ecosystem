@@ -1,9 +1,54 @@
 # Aegis 4.3 — Release Gate
 
-Status: 2026-11-19. **No `v4.3.0` tag has been cut and nothing is published.**
-The five locally executable gates are green; the hosted-CI gate requires the
+Status: 2026-11-20. **No `v4.3.0` tag has been cut and nothing is published.**
+The locally executable gates are green; the hosted-CI gate requires the
 tag push and is the only remaining release action. There is no `4.3.0-rc1`:
 the release is cut directly as `v4.3.0`.
+
+## 2026-11-20 local verification update
+
+A fresh Git-clone style run was performed after the 4.3 security work. The
+following results are local, reproducible evidence and **do not** replace the
+hosted tag workflow:
+
+- Brain: **875 passed, 3 skipped** against disposable PostgreSQL and real Redis
+  (the skips are YARA rules unavailable for Python 3.15/Windows); command queue
+  **8/8** on real Redis, including redelivery and process-restart recovery;
+- Kraken: **154 passed**; frontend: production build **PASS**, lint
+  **0 errors / 27 warnings**;
+- Playwright through Caddy with Kraken seeded: **15 passed, 1 skipped** (the
+  skipped test is the SSO opt-in); Playwright OIDC against Keycloak 26.0.7:
+  **2 passed**; the 15 scenario tests plus the shared setup are run in two
+  configurations because the OIDC state cookie and the Caddy origin cannot
+  share one base URL;
+- ETW live elevated: **95 events** (45 created, 47 exited, 3 connections);
+  non-elevated exit **2**, no session;
+- WSL2 Ubuntu/Kali eBPF: **PASS**, benchmark **300/300**, zero loss (bare-metal
+  remains a release gap);
+- file secrets and Vault KV v2: **PASS**, including precedence and fail-closed
+  empty-file handling;
+- clean install core + Kraken: images rebuilt, admin bootstrap, API smoke
+  **21/21**, Kraken and sensors healthy; signed ingest delivered one event to
+  the Brain (`sent=1`).
+
+Four defects found by this run were fixed: the generated `ALLOWED_ORIGINS`
+omitted `https://aegis.local` (403 on cookie-authenticated POST/PATCH through
+Caddy); compose did not pass `OIDC_*`/`PUBLIC_BASE_URL` to the Brain; the SPA
+did not hydrate an HttpOnly session created by the OIDC callback; and the
+telemetry build tags excluded Darwin, so `SystemInfo`/`LocalMAC` were undefined
+and macOS did not compile. The system-info file now includes darwin and the Go
+matrix includes `macos-latest`. A Kraken startup `NameError` was also fixed.
+Caddy now reads `AEGIS_DOMAIN`/`ACME_EMAIL` instead of a hardcoded domain, the
+optional Prometheus scrape config is documented as a lab-only profile, and the
+YARA engine has a dedicated Python 3.12 CI job (`yara_engine`) because
+`yara-python` has no 3.15 wheel. The 3.15 suite still reports the three declared
+skips; the new job is not a substitute for the hosted tag gate.
+
+Still open: **Gate 5** (hosted tag workflow), macOS CI execution (the
+`macos-latest` build/test job is configured, but no live Mac hardware or
+endpoint telemetry is supported), bare-metal Linux, and Windows Server live
+validation. **Do not publish/tag/push
+as a release on the strength of this local run alone.**
 
 ## Decision
 
@@ -39,12 +84,15 @@ the 4.5 Network Visibility track.
 | Unified agent from bundle | `unified-latest.zip` downloaded from the Brain bootstrap endpoint with a single-use token; binary ran as `agent_type=unified`, telemetry persisted, agent revoked | **PASS** |
 | Version surfaces | Brain `/health/live`, frontend build, Guard POM, NodeTrace, Go agent | `4.3.0` |
 | Go | `go test -count=1 ./...`; `--profile unified --check` | **PASS** |
-| UI | `npm run build`; Playwright with Kraken seed | **13/13** |
+| YARA engine | Python 3.12 container, `yara-python` 4.5.4, 3 engine tests | **PASS locally (3/3)**; hosted `yara_engine` job configured |
+| macOS | `GOOS=darwin GOARCH=arm64/amd64 go build`; Darwin test compile + `go vet` | **PASS locally**; `macos-latest` CI run pending; no endpoint telemetry support |
+| UI | `npm run build`; Playwright Caddy + Kraken, SSO separately | **15 passed + 1 skipped; SSO 2/2** |
 | S3 adapter | Garage v2.5.0 upload/download/delete, two identical samples | **PASS** |
 | Detection baseline | 14 malicious + 14 benign, synthetic | 14 TP, 0 FN, 5 FP, 9 TN |
 | Diagrams | 4 draw.io sources + PNG/SVG, English, dark architecture system, version `4.3.0` | **4/4** |
 
-The bundle ships only the unified Go agent for Windows and Linux. The Windows
+The bundle ships only the unified Go agent for Windows and Linux; macOS is not
+shipped as a supported telemetry target. The Windows
 archive contains `aegis-agent.exe` and `aegis-etw.exe`; the Linux archive
 contains `aegis-agent`, `aegis-collector` and `aegis_exec.bpf.o`. The live test
 downloads the agent from the bundle through the same bootstrap endpoint the

@@ -1,123 +1,135 @@
 # Aegis — Threat Model (M0)
 
-Versione: 1.0 — 2026-09-11 — branch `dev`.
-Scope congelato dalle decisioni approvate: niente Android; target Windows e Linux;
-Windows 11 + Server 2022/2025 primari, Windows 10 solo lab; Ubuntu 22.04/24.04,
-Debian 12, RHEL 9; eBPF completo dove kernel/BTF lo consentono con fallback
-esplicito; on-premise con Docker Compose primario; Cloudflare Tunnel opzionale
-dopo; Kubernetes dopo la stabilizzazione; singola organizzazione per deployment
-con siti/subnet/gruppi; multi-tenant SaaS rimandato; dati consentiti command
-line, username, path, hash, destinazioni di rete; retention configurabile
-telemetria 14gg / alert+incidenti 90gg / audit 365gg / syslog 30gg.
+Version 1.1 — 2026-11-20 — branch `dev`.
 
-Verificato sul codice (non su descrizioni): `aegis-brain/app/main.py`,
-`app/core/{config,deps,security}.py`, `app/api/v1/{router,auth,enroll,deploy}.py`,
-`app/database/models.py`, `docker-compose.yml`, `Caddyfile`, `aegis-ebpf/README.md`.
+Scope frozen by the approved decisions: no Android; Windows and Linux targets;
+Windows 11 + Server 2022/2025 primary, Windows 10 lab-only; Ubuntu 22.04/24.04,
+Debian 12, RHEL 9; full eBPF where kernel/BTF allow it with an explicit
+fallback; on-premise with Docker Compose primary; optional Cloudflare Tunnel
+later; Kubernetes after stabilization; one organization per deployment with
+sites/subnets/groups; multi-tenant SaaS deferred; allowed data includes command
+line, username, path, hash and network destinations; configurable retention:
+telemetry 14 days / alerts+incidents 90 days / audit 365 days / syslog 30 days.
 
-## 1. Asset
+Verified against code (not descriptions): `aegis-brain/app/main.py`,
+`app/core/{config,deps,security,oidc,secrets}.py`,
+`app/api/v1/{router,auth,enroll,deploy}.py`, `app/database/models.py`,
+`docker-compose.yml`, `Caddyfile`, `aegis-ebpf/README.md`.
 
-| # | Asset | Dove vive | Note |
+## 1. Assets
+
+| # | Asset | Where it lives | Notes |
 |---|---|---|---|
-| A1 | Telemetria endpoint / eventi | PG `telemetry`, Redis queue, `aegis-brain/artifacts` no | Dati consentiti: cmdline, username, path, hash, dest rete |
-| A2 | Alert, threat report, incidenti | PG `alerts`, `threat_reports`, `incidents`, `incident_alerts` | Retention target 90gg (da implementare Fase 8/9) |
-| A3 | Credenziali VaultX | PG `notes` (cifrate, `encrypted_dek` su `users`) | Envelope `MASTER_KEY_B64` |
-| A4 | Enroll token monouso | PG `enroll_tokens` (solo hash sha256) | TTL default 15 min, single-use, revocabili; un token con `target_hostname` è l'unica prova accettata per il re-enroll |
-| A5 | Segreti agent (device token) | PG `agents.device_token_hash` (argon2) + `meta.device_token_proof` (SHA-256 legato all'hash), cache locale 60s | Mai plaintext; la proof è legata all'hash, quindi re-enroll/revoca la invalidano; revoca verificata su DB a ogni richiesta |
-| A6 | Artefatti agent / OTA | `ARTIFACT_DIR` (`/app/artifacts`) | Manifest Ed25519 obbligatorio; HMAC OTA rimosso in 4.1.0 |
-| A7 | Comandi agent (incl. `UPDATE_AGENT`, isolate) | Redis queue via `telemetry_service.send_command_to_agent` | Coda con fallback 202 se Redis giù |
-| A8 | Audit log | PG `audit_logs` | Retention target 365gg (da implementare) |
-| A9 | Syslog | PG `syslog_events`, UDP 1514 via aegis-link | Retention target 30gg |
-| A10 | Sessioni dashboard (JWT) | Redis `bl:{jti}` blacklist | Fail-closed se Redis giù |
-| A11 | Backup PG | volume `postgres_backups`, cron 6h, `RETENTION_DAYS=7` | Oggi non cifrato (gap Fase 9) |
-| A12 | Chiavi server (JWT, API, enroll, master) | solo env/file esterno, mai in repo | Validazione placeholder in `config.py` |
+| A1 | Endpoint telemetry / events | PG `telemetry`, Redis queue, `aegis-brain/artifacts` no | Allowed: cmdline, username, path, hash, network destination |
+| A2 | Alerts, threat reports, incidents | PG `alerts`, `threat_reports`, `incidents`, `incident_alerts` | 90-day target retention |
+| A3 | VaultX credentials | PG `notes` (encrypted, `encrypted_dek` on `users`) | `MASTER_KEY_B64` envelope |
+| A4 | Single-use enrollment token | PG `enroll_tokens` (SHA-256 hash only) | Default TTL 15 min, single-use, revocable; a token with `target_hostname` is the only accepted proof for re-enrollment |
+| A5 | Agent secrets (device token) | PG `agents.device_token_hash` (Argon2) + `meta.device_token_proof` (SHA-256 bound to the hash), local 60 s cache | Never plaintext; re-enrollment/revocation invalidate the proof; revocation is checked against the DB on every request |
+| A6 | Agent artifacts / OTA | `ARTIFACT_DIR` (`/app/artifacts`) | Ed25519 manifest required; HMAC OTA removed in 4.1.0 |
+| A7 | Agent commands (including `UPDATE_AGENT`, isolate) | Redis queue through `telemetry_service.send_command_to_agent` | Queue with 202 fallback if Redis is down |
+| A8 | Audit log | PG `audit_logs` | 365-day target retention |
+| A9 | Syslog | PG `syslog_events`, UDP 1514 through aegis-link | 30-day target retention |
+| A10 | Dashboard sessions (JWT) | Redis `bl:{jti}` blacklist | Fail-closed if Redis is down |
+| A11 | PostgreSQL backup | `postgres_backups` volume, 6 h cron, `RETENTION_DAYS=7` | Encrypted when `BACKUP_PASSPHRASE` is configured |
+| A12 | Server keys (JWT, API, enroll, master) | External env/file only, never in repo | Placeholder validation in `config.py` |
 
-## 2. Attori e ruoli (verificati)
+## 2. Actors and roles (verified)
 
-Ruoli DB reali: `user` (default), `admin`, `analyst` (`User.role`).
-Gating reale: `_require_deploy_operator` (deploy), RBAC incidenti/playbook-script,
-bulk alerts. I 5 ruoli roadmap (admin, SOC analyst, responder, auditor, viewer)
-sono obiettivo Fase 8, non stato attuale.
+Real DB roles: `user` (default), `admin`, `analyst` (`User.role`). Additional
+role names exist for OIDC mapping, but only `admin` has `manage`. Real gating:
+`_require_deploy_operator` (deploy), incident/playbook RBAC, bulk alerts. The
+five-role roadmap (admin, SOC analyst, responder, auditor, viewer) is a Phase 8
+target, not the current permission model.
 
-| Attore | Capacità | Trust |
+| Actor | Capabilities | Trust |
 |---|---|---|
-| admin | tutto incl. deploy, regole, isolamento | fidato, auditato |
-| analyst | triage, incidenti, deploy one-liner | fidato, auditato |
-| user/viewer | lettura propria area | semi-fidato |
-| aegis-guard / nodetrace | telemetria, heartbeat, ack comandi | non fidato: ogni chiamata autenticata |
-| operatore deploy | crea token/job, copia one-liner sul target | fidato, transitorio |
-| approvatore remoto | approva via PIN+token su GUI target | semi-fidato, rate-limited |
-| attaccante | rete, endpoint compromesso, malware upload (Total) | non fidato |
+| admin | Everything, including deploy, rules, isolation | Trusted, audited |
+| analyst | Triage, incidents, one-liner deployment | Trusted, audited |
+| user/viewer | Read own area | Semi-trusted |
+| aegis-agent / legacy Guard/NodeTrace | Telemetry, heartbeat, command ack | Untrusted: every call authenticated |
+| deploy operator | Creates tokens/jobs, copies the one-liner to the target | Trusted, transient |
+| remote approver | Approves through PIN+token in the target GUI | Semi-trusted, rate-limited |
+| attacker | Network, compromised endpoint, malware upload (Total) | Untrusted |
 
-## 3. Trust boundary e flussi
+## 3. Trust boundaries and flows
 
+```text
+endpoint (user-mode, NO driver) --TLS (Caddy; `tls internal` in lab)--> Brain :8000
+  | enroll: static key (headless) OR single-use token -> per-agent secret
+  | runtime: device secret (Bearer) + heartbeat/version/capabilities
+  +-- kernel collector (eBPF/ETW) -> JSON pipe/file -> agent -> POST /telemetry/report[/batch]
+
+browser --HttpOnly cookie `aegis_token` + Bearer--> Brain
+  (CSRF origin check on cookie mutations, security headers,
+   CORS allowlist, rate limit)
+
+aegis-link/syslog --X-Api-Key / UDP 1514--> Redis --> Brain consumer --> PG
+Brain --> external OSINT (VT/Shodan/AbuseIPDB, optional) / local Ollama
+deploy: admin/analyst -> short token -> ps1/sh one-liner (TLS transport)
+        -> enroll -> OTA Ed25519 (manifest key)
 ```
-endpoint (user-mode, NO driver) ──TLS(Caddy, oggi `tls internal` dev)──▶ brain :8000
-  │ enroll: static key (headless) OPPURE token monouso → secret per-agent
-  │ runtime: device secret (Bearer) + heartbeat/versione/capabilities
-  └──collector kernel (eBPF/ETW) → pipe/file JSON → Guard ExternalEventIngester → POST /telemetry/report[/batch]
 
-browser ──cookie httpOnly `aegis_token` + Bearer──▶ brain (CSRF origin-check su mutazioni cookie, security headers, CORS allowlist, rate-limit)
-aegis-link/syslog ──X-Api-Key / UDP 1514──▶ Redis ──▶ brain consumer ──▶ PG
-brain ──▶ OSINT esterni (VT/Shodan/AbuseIPDB, opzionali) / Ollama locale (profilo `ollama`)
-deploy: admin/analyst → token breve → one-liner ps1/sh (trasporto TLS) → enroll → OTA Ed25519(manifest key)
-```
+Critical boundaries: kernel→user pipe (telemetry only, never commands); Redis
+(blacklist/queue: failure = deny, never allow); `ARTIFACT_DIR` (basename only,
+no traversal); DB (Alembic migrations `0001..0023`, `CREATE_ALL` only in dev).
 
-Boundary critici: kernel→user pipe (solo telemetria, mai comandi);
-Redis (blacklist/queue: guasto = deny, mai allow); `ARTIFACT_DIR` (solo basename,
-niente traversal); DB (migrazioni Alembic `0001..0010`, bootstrap `CREATE_ALL`
-solo dev).
+## 4. API and authentication inventory (verified by decorator)
 
-## 4. Inventario API e autenticazione (verificato da decorator)
-
-| Prefisso | Rotte principali | Auth |
+| Prefix | Main routes | Auth |
 |---|---|---|
-| `/auth` | `register, login, logout, me` | nessuna / JWT+cookie+blacklist / rate-limit 5-30/m |
-| `/enroll` | `POST /enroll` | static key (compare_digest) o token monouso non riusabile |
-| `/telemetry` | alerts CRUD+resolve-all, agents, recent, activity, stats, `report`, `report/batch`, heartbeat, commands+ack, remediations, threat-reports, process-tree, isolate/release | JWT dashboard; device secret per agent |
-| `/` compat | `register, update, heartbeat, commands[/batch]` (nodetrace) | enroll key / device secret |
-| `/deploy` | token create/list/revoke, install.ps1/sh, artifacts list/get, update-command, jobs CRUD+status, request-approval/approve | analyst/admin; install via `X-Enroll-Token`; artifact via agent auth; approve via PIN+token o analyst/admin, rate-limit |
-| `/soc` | incidents CRUD, attach, auto-group | JWT; scritture analyst/admin |
-| `/rules` | custom CRUD, static, coverage, test | JWT (audit modifica in Fase 5) |
-| `/soar` | playbooks CRUD, executions | JWT; `script` solo admin |
-| `/discovery` | scan, hosts, reputation, demo, deployment plan, deploy legacy, sync-agent-status, scan-via-agent | JWT; demo vietata se `ALLOW_DEMO=false` |
-| `/vault` | notes CRUD cifrate | JWT |
-| `/osint` | ip/domain/batch/enrich/history | JWT + cache 24h |
-| `/ai` | threads, chat, delete | JWT + rate-limit |
+| `/auth` | `register, login, logout, me, oidc/*` | None for login/discovery/oidc; JWT+cookie+blacklist; rate limit 5–30/min; CSRF origin check |
+| `/enroll` | `POST /enroll`, CSR, revoke, CA | Static key (compare_digest) or single-use token, then device secret |
+| `/telemetry` | alerts CRUD+resolve-all, agents, recent, activity, stats, `report`, `report/batch`, heartbeat, commands+ack, remediations, threat reports, process tree, isolate/release | JWT dashboard; device secret per agent |
+| `/` compat | `register, update, heartbeat, commands[/batch]` (NodeTrace legacy) | Enroll key / device secret |
+| `/deploy` | token create/list/revoke, install.ps1/sh, artifacts, update-command, jobs, request-approval/approve | analyst/admin; install via `X-Enroll-Token`; artifact via agent auth; approve via PIN+token or analyst/admin, rate limit |
+| `/soc` | incidents CRUD, attach, auto-group | JWT; writes analyst/admin |
+| `/rules` | custom CRUD, static, coverage, test | JWT |
+| `/soar` | playbooks CRUD, executions | JWT; `script` admin-only |
+| `/discovery` | scan, hosts, reputation, demo, deployment plan, sync-agent-status | JWT; demo denied when `ALLOW_DEMO=false` |
+| `/vault` | encrypted notes CRUD | JWT |
+| `/osint` | IP/domain/batch/enrich/history | JWT + 24 h cache |
+| `/ai` | threads, chat, delete | JWT + rate limit |
 | `/syslog` | events | JWT |
 | `/audit` | logs | JWT |
 | `/total` | disclaimer, reports CRUD, upload | JWT + disclaimer + audit |
-| `/ws` | `overview` | JWT via query param |
-| `/health` | live/ready/startup/circuit-breakers | nessuna (stato, non dati) |
+| `/ws` | `overview` | JWT through query parameter |
+| `/health` | live/ready/startup/circuit-breakers | None (status only, no data) |
 
-## 5. Scenari d'attacco coperti dal modello
+## 5. Attack scenarios covered by the model
 
-T1 replay token enroll; T2 brute-force enroll/login/approve (rate-limit +
-scadenza breve); T3 token JWT rubato (blacklist fail-closed, cookie httpOnly,
-CSRF origin-check); T4 agent compromesso che inietta telemetria (auth per-device,
-validazione schema Fase 2, mai fidarsi del solo IP); T5 tampering coda locale
-(contatori + comportamento offline definito, Fase 2); T6 manifest/artefatto
-alterato (HMAC oggi, PKI Fase 7; niente apply senza firma); T7 cambio server via
-config non autenticata (config firmata/bloccata, Fase 7); T8 priv-esc agent
-(least privilege: helper root solo dove serve, Fase 3/4); T9 cross-site/org
-(Fase 8: siti come boundary autorizzativo); T10 injection log/query (logging
-sicuro + query parametrizzate, test Fase 10); T11 segreti in log/artefatti
-(scan Fase 10, mai plaintext su Redis); T12 DoS coda/DB (backpressure, cap 100
-target/job, worker effimero, Fase 2/9); T13 backup rubato (cifratura Fase 9);
-T14 supply-chain (SBOM/firma/provenance Fase 10).
+T1 enrollment-token replay; T2 brute-force enroll/login/approve (rate limit +
+short expiry); T3 stolen JWT (fail-closed blacklist, HttpOnly cookie, CSRF origin
+check); T4 compromised agent injecting telemetry (per-device auth, schema
+validation, never trust IP alone); T5 local queue tampering (counters + defined
+offline behavior); T6 altered manifest/artifact (Ed25519, no apply without a
+signature); T7 server change through unauthenticated config (signed/pinned
+config); T8 agent privilege escalation (least privilege; root helper only where
+required); T9 cross-site/organization access (sites as an authorization
+boundary); T10 log/query injection (safe logging + parameterized queries); T11
+secrets in logs/artifacts (scanning, never plaintext in Redis); T12 queue/DB DoS
+(backpressure, target cap, ephemeral worker); T13 stolen backup (encryption);
+T14 supply chain (SBOM/signature/provenance).
 
-## 6. Demo / lab / produzione
+## 6. Demo / lab / production
 
-`ALLOW_DEMO=false` in prod, flag `agents.is_demo`, `?include_demo`, endpoint
-demo bloccati; nessuna risposta distruttiva automatica in demo (SOAR Fase 5/6).
-Compose dev espone porte su loopback; `docker-compose.prod.yml` nasconde
-PG/Redis; `DEBUG=false` attiva validazione segreti; TLS prod via Let's Encrypt
-(su Caddy), mai `tls internal` fuori dal lab. File `.env`/`secret.json` mai in
-repo (verificato: ignored, non tracciati — Fase 0).
+`ALLOW_DEMO=false` in production; `agents.is_demo`, `?include_demo` and demo
+endpoints are blocked; no destructive automatic response in demo. The dev
+Compose stack binds ports to loopback; `docker-compose.prod.yml` hides
+PostgreSQL/Redis; `DEBUG=false` enables secret validation; production TLS uses
+Let's Encrypt through Caddy when `ACME_EMAIL` is a real address; `tls internal`
+is lab-only. `.env` / `secret.json` files are never in the repository (ignored
+and untracked).
 
-## 7. Gap espliciti (rinviati alle fasi indicate, non ignorati)
+## 7. Explicit gaps (tracked, not ignored)
 
-mTLS per-device + PKI (Fase 7, oggi HMAC); siti/subnet/gruppi + 5 ruoli
-(Fase 8, oggi 3 ruoli senza siti); enforcement retention 14/90/365/30
-(Fase 8/9, oggi solo config); backup cifrato + restore testato (Fase 9);
-SBOM/firma/provenance/pin (Fase 10); driver firmato/tamper-protection
-(fuori roadmap: solo user-mode + firewall-OS dichiarato in `aegis-ebpf/README`).
+- per-device mTLS and PKI: implemented for pilot; native service packaging
+  remains outside 4.3;
+- sites/subnets/groups and the five-role model: roadmap, not current;
+- retention enforcement 14/90/365/30: configuration target, not a guarantee;
+- encrypted backup + tested restore: present, but the full disaster-recovery
+  drill remains a release gate;
+- SBOM/signature/provenance/pinning: partially implemented; 4.3 is checksummed
+  and provenance-attested, not cosign-signed;
+- signed driver / tamper protection: outside the roadmap; user-mode + OS
+  firewall only. A local administrator can stop ETW or the agent, as documented
+  in `KERNEL_AND_DRIVERS.md`.

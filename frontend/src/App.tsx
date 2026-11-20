@@ -31,6 +31,7 @@ const Suppressions = lazy(() => import('@/components/pages/Suppressions'))
 const Kraken       = lazy(() => import('@/components/pages/Kraken'))
 const YaraManager   = lazy(() => import('@/components/pages/YaraManager'))
 const SettingsPage   = lazy(() => import('@/components/pages/SettingsPage'))
+const UsersPage      = lazy(() => import('@/components/pages/UsersPage'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -86,22 +87,26 @@ class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
 }
 
 function AppShell() {
-  const { user, setUser, currentPage, sessionHint } = useAppStore()
+  const { user, currentPage, login } = useAppStore()
   // Rinnovo silenzioso della sessione (mai piu' kick a meta' lavoro) e cache
   // svuotata al cambio utente (mai piu' dashboard freezata dopo il re-login).
   useSessionRenewal()
 
   // Hydrate the session on app start. The session lives in an HttpOnly cookie,
-  // so it is validated (and the user refreshed) only when this browser has
-  // logged in before: a first-time visitor has nothing to restore and probing
-  // /auth/me would only produce a guaranteed 401. The ref keeps it to one
-  // request per load (React StrictMode runs effects twice in dev).
+  // so the only source of truth is /auth/me. This must run even when the local
+  // sessionHint is false: an OIDC callback creates the cookie on the Brain
+  // origin and the SPA has never stored a local hint. A first-time visitor gets
+  // one harmless 401; keeping the probe unconditional is what makes SSO and
+  // sessions restored after localStorage was cleared actually visible.
+  // The ref keeps it to one request per load (StrictMode runs effects twice).
   const probed = useRef(false)
   useEffect(() => {
-    if (probed.current || user || !sessionHint) return
+    if (probed.current || user) return
     probed.current = true
-    authAPI.me().then(r => setUser(r.data)).catch(() => {})
-  }, [user, sessionHint, setUser])
+    authAPI.me()
+      .then(r => login('cookie-session', r.data))
+      .catch(() => {})
+  }, [user, login])
 
   // Start live WS stats
   useLiveStats()
@@ -132,6 +137,7 @@ function AppShell() {
     kraken:     <Kraken />,
     yara:       <YaraManager />,
     settings:   <SettingsPage />,
+    users:      (user.role || '').toLowerCase() === 'admin' ? <UsersPage /> : <DashboardOverview />,
   }
 
   return (

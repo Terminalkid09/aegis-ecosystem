@@ -1,39 +1,45 @@
-# Alta disponibilità — runbook (audit P4)
+# High availability — runbook (audit P4)
 
-## Stato verificato del codice (multi-replica safe)
-- **Dedup eventi**: Redis SETNX + memoria LRU (`event_dedup.py`) — due consumer
-  non doppiano gli alert.
-- **Rate limit ingest**: Redis-first con fallback locale (`rate_guard.py`).
-- **JWT blacklist / correlation / anomaly**: Redis-condivisi.
-- **SEQ tracker**: memoria per-worker — con 2 consumer i gap possono essere
-  conteggiati due volte (metriche, mai perdita). Accettato e documentato.
-- **Consumer Redis**: `BRPOPLPUSH` + processing + DLQ — kill -9 di un worker =
-  requeue al boot, niente perdita.
-- **Comandi**: Brain e Link usano claim atomico, processing list, visibility
-  timeout, ack idempotente e DLQ. La garanzia è at-least-once: un crash tra
-  esecuzione e ack può duplicare l'azione; non è exactly-once. AP-123 è in
-  **Test**, non Done. Il percorso eventi Link ha ancora il check+push non
-  atomico (AP-122).
+## Verified code state (multi-replica safe)
 
-## Scalare (stesso host, pronto oggi)
+- **Event dedup**: Redis SETNX + in-memory LRU (`event_dedup.py`); two consumers
+  do not duplicate alerts.
+- **Ingest rate limit**: Redis-first with local fallback (`rate_guard.py`).
+- **JWT blacklist / correlation / anomaly**: shared through Redis.
+- **SEQ tracker**: per-worker memory; with two consumers, gaps can be counted
+  twice (metrics only, never data loss). Accepted and documented.
+- **Redis consumer**: `BRPOPLPUSH` + processing + DLQ; killing a worker with
+  `-9` requeues at boot, with no loss.
+- **Commands**: Brain and Link use atomic claim, processing list, visibility
+  timeout, idempotent ack and DLQ. The guarantee is at-least-once: a crash
+  between execution and ack can duplicate the action; it is not exactly-once.
+  AP-123 is in **Test**, not Done. The Link event path still has a non-atomic
+  check+push (AP-122).
+
+## Scaling (same host, available today)
+
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml \
   -f docker-compose.ha.yml up -d --scale aegis-brain=2 --scale aegis-link=2
 ```
-Caddy bilancia via DNS round-robin su `aegis-brain`/`aegis-link` (nessun cambio
-Caddyfile). Verificare: `GET /health/ready` su entrambe, `docker compose ps`.
 
-## Produzione vera (multi-host, da fare)
-1. **Postgres managed con replica** (RDS/Cloud SQL/on-prem Patroni) + backup
-   cifrati verificati (la purge li richiede già).
-2. **Redis Sentinel o Cluster** + `REDIS_URL` dei brain verso il VIP.
-3. **Brain/link su 2+ nodi** (Swarm/K8s o compose su host separati) + Caddy
-   con entrambi gli upstream.
-4. **Backup dir condiviso** (`BACKUP_DIR` su volume condiviso/S3).
-5. **Allarmi**: `sendFailed>0`, DLQ in crescita, `not_ready`, latenza p99.
+Caddy balances through DNS round-robin on `aegis-brain`/`aegis-link` (no
+Caddyfile change). Verify `GET /health/ready` on both and `docker compose ps`.
 
-## Non-HA per scelta (documentato)
-- `aegis-postgres`, `aegis-redis`: single-instance in compose. Sono gli unici
-  SPOF: il piano sopra li rimuove.
-- Ollama: best-effort opzionale (degrada, non blocca readiness).
-- Agenti: uno per host per disegno (PidLock anti-doppio).
+## True production (multi-host, still to do)
+
+1. **Managed PostgreSQL with a replica** (RDS/Cloud SQL/on-prem Patroni) plus
+   verified encrypted backups (purge already requires them).
+2. **Redis Sentinel or Cluster** and `REDIS_URL` on the Brain pointing to the
+   VIP.
+3. **Brain/Link on 2+ nodes** (Swarm/K8s or Compose on separate hosts) with
+   Caddy configured for both upstreams.
+4. **Shared backup directory** (`BACKUP_DIR` on a shared volume/S3).
+5. **Alerts**: `sendFailed>0`, growing DLQ, `not_ready`, p99 latency.
+
+## Non-HA by decision (documented)
+
+- `aegis-postgres`, `aegis-redis`: single-instance in Compose. They are the only
+  SPOFs; the plan above removes them.
+- Ollama: optional best-effort (degrades, does not block readiness).
+- Agents: one per host by design (anti-double PidLock).

@@ -54,7 +54,7 @@ class TestEnrollment:
             self, client: AsyncClient, db_session, test_agent, admin_auth_headers):
         token_resp = await client.post(
             "/api/v1/deploy/token",
-            json={"agent_type": "nodetrace",
+            json={"agent_type": "unified",
                   "target_hostname": test_agent.hostname},
             headers=admin_auth_headers,
         )
@@ -63,7 +63,7 @@ class TestEnrollment:
         response = await client.post("/api/v1/enroll/enroll", json={
             "hostname": test_agent.hostname,
             "os": test_agent.os_type,
-            "agent_type": "nodetrace",
+            "agent_type": "unified",
             "machine_id": "machine-test-host",
             "enroll_key": raw_token,
         })
@@ -88,14 +88,14 @@ class TestEnrollment:
             self, client: AsyncClient, db_session, test_agent, admin_auth_headers):
         token_resp = await client.post(
             "/api/v1/deploy/token",
-            json={"agent_type": "nodetrace"},
+            json={"agent_type": "unified"},
             headers=admin_auth_headers,
         )
         assert token_resp.status_code == 200
         response = await client.post("/api/v1/enroll/enroll", json={
             "hostname": test_agent.hostname,
             "os": test_agent.os_type,
-            "agent_type": "nodetrace",
+            "agent_type": "unified",
             "machine_id": "machine-test-host",
             "enroll_key": token_resp.json()["token"],
         })

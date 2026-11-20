@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
-from sqlalchemy import String, Integer, Boolean, DateTime, Text, ForeignKey, Float, BigInteger, JSON
+from sqlalchemy import String, Integer, Boolean, DateTime, Text, ForeignKey, Float, BigInteger, JSON, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.database.base import Base
@@ -11,12 +11,19 @@ def utc_now():
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("oidc_issuer", "oidc_subject", name="uq_users_oidc_identity"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(500), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="user")
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Identità OIDC: il subject è stabile anche se l'email cambia. Le colonne
+    # restano NULL per gli account locali (break-glass e CLI).
+    oidc_subject: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    oidc_issuer: Mapped[Optional[str]] = mapped_column(String(512), nullable=True, index=True)
     encrypted_dek: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

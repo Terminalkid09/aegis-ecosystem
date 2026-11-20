@@ -113,3 +113,47 @@ async def test_reactivate_user_restores_access(client, admin_auth_headers):
     r = await client.post("/api/v1/auth/login", json={
         "email": "roundtrip@aegis.test", "password": "Str0ngPass!x"})
     assert r.status_code == 200, r.text
+
+
+async def test_admin_creates_account_and_password_reset_takes_effect(client, admin_auth_headers):
+    payload = {
+        "username": "createdbyadmin",
+        "email": "createdbyadmin@aegis.test",
+        "password": "Initial-Pass-123!",
+        "role": "analyst",
+    }
+    r = await client.post("/api/v1/users", json=payload, headers=admin_auth_headers)
+    assert r.status_code == 201, r.text
+    created = r.json()
+    assert created["role"] == "analyst" and created["active"] is True
+
+    r = await client.post("/api/v1/auth/login", json={
+        "email": payload["email"], "password": payload["password"]})
+    assert r.status_code == 200, r.text
+
+    r = await client.post(
+        f"/api/v1/users/{created['id']}/reset-password",
+        json={"password": "Reset-Pass-456!"}, headers=admin_auth_headers)
+    assert r.status_code == 200, r.text
+
+    r = await client.post("/api/v1/auth/login", json={
+        "email": payload["email"], "password": payload["password"]})
+    assert r.status_code == 401
+    r = await client.post("/api/v1/auth/login", json={
+        "email": payload["email"], "password": "Reset-Pass-456!"})
+    assert r.status_code == 200, r.text
+
+
+async def test_user_creation_requires_manage_and_strong_password(client, user_auth_headers, admin_auth_headers):
+    payload = {
+        "username": "forbiddencreate",
+        "email": "forbiddencreate@aegis.test",
+        "password": "Initial-Pass-123!",
+        "role": "user",
+    }
+    r = await client.post("/api/v1/users", json=payload, headers=user_auth_headers)
+    assert r.status_code == 403
+
+    weak = {**payload, "password": "short"}
+    r = await client.post("/api/v1/users", json=weak, headers=admin_auth_headers)
+    assert r.status_code == 422

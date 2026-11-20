@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete as sa_delete, or_
 from app.database.connection import get_db
@@ -9,8 +10,11 @@ from app.api.schemas.common import TokenResponse, UserOut
 from app.core.rate_limit import limiter
 from app.core.deps import get_current_user
 from app.core.config import settings
+from app.core import oidc
+from app.core.audit import log_audit
 from pydantic import BaseModel, Field
 from typing import Optional
+from urllib.parse import quote
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -40,6 +44,8 @@ class APIKeyCreate(BaseModel):
 
 SESSION_COOKIE = "aegis_token"
 SESSION_COOKIE_PATH = "/api/"
+OIDC_STATE_COOKIE = "aegis_oidc_state"
+OIDC_STATE_COOKIE_PATH = "/api/v1/auth/oidc"
 REMEMBER_COOKIE = "aegis_remember"
 # Path ristretto alle rotte di auth: il remember cookie NON viaggia verso gli
 # endpoint dati (e comunque non sarebbe un JWT, quindi inerte).
@@ -213,6 +219,194 @@ async def get_me(request: Request, user: User = Depends(get_current_user)):
         "email": user.email,
         "role": user.role,
     }
+
+
+# ---------------------------------------------------------------------------
+# OIDC umano (generic, provider-neutral)
+# ---------------------------------------------------------------------------
+
+
+def _clear_oidc_state(response: Response) -> None:
+    response.delete_cookie(
+        key=OIDC_STATE_COOKIE,
+        path=OIDC_STATE_COOKIE_PATH,
+        httponly=True,
+        samesite="lax",
+        secure=settings.COOKIE_SECURE,
+    )
+
+
+def _sso_error(message: str) -> RedirectResponse:
+    """Return to the SPA without reflecting provider internals."""
+    response = RedirectResponse(
+        url=oidc.frontend_url(f"/?sso_error={quote(message)}"), status_code=302)
+    _clear_oidc_state(response)
+    return response
+
+
+@router.get("/oidc/config")
+async def oidc_config():
+    """Public login policy: the SPA only renders SSO when it is configured."""
+    return {
+        "enabled": bool(settings.OIDC_ENABLED),
+        "button_label": settings.OIDC_BUTTON_LABEL or "Sign in with SSO",
+        "login_url": "/api/v1/auth/oidc/login",
+        "local_login": bool(settings.OIDC_ALLOW_LOCAL_LOGIN),
+    }
+
+
+@router.get("/oidc/login")
+@limiter.limit("30/minute")
+async def oidc_login(request: Request, return_to: str = "/"):
+    if not settings.OIDC_ENABLED:
+        raise HTTPException(status_code=404, detail="OIDC is not enabled")
+    if not settings.JWT_SECRET:
+        return _sso_error("SSO is not configured")
+
+    try:
+        metadata = await oidc.discover()
+        verifier, challenge = oidc.pkce_pair()
+        state = oidc.new_state()
+        nonce = oidc.new_nonce()
+        target = oidc.safe_return_to(return_to)
+        url = oidc.authorization_url(
+            metadata,
+            state=state,
+            nonce=nonce,
+            challenge=challenge,
+            redirect=oidc.redirect_uri(),
+        )
+    except oidc.OIDCError:
+        return _sso_error("SSO provider unavailable")
+
+    response = RedirectResponse(url=url, status_code=302)
+    response.set_cookie(
+        key=OIDC_STATE_COOKIE,
+        value=oidc.encode_state(
+            state=state, verifier=verifier, nonce=nonce, return_to=target),
+        httponly=True,
+        samesite="lax",
+        secure=settings.COOKIE_SECURE,
+        max_age=oidc.STATE_TTL_S,
+        path=OIDC_STATE_COOKIE_PATH,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.get("/oidc/callback")
+@limiter.limit("30/minute")
+async def oidc_callback(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    code: str | None = None,
+    state: str | None = None,
+):
+    if not settings.OIDC_ENABLED:
+        raise HTTPException(status_code=404, detail="OIDC is not enabled")
+
+    try:
+        state_payload = oidc.decode_state(request.cookies.get(OIDC_STATE_COOKIE))
+        if not state or not secrets.compare_digest(str(state_payload.get("state", "")), state):
+            raise oidc.OIDCError("state mismatch")
+        if not code:
+            raise oidc.OIDCError("missing authorization code")
+        metadata = await oidc.discover()
+        tokens = await oidc.exchange_code(
+            metadata, code=code, verifier=str(state_payload["verifier"]),
+            redirect=oidc.redirect_uri())
+        id_token = tokens.get("id_token")
+        if not isinstance(id_token, str) or not id_token:
+            raise oidc.OIDCError("token response has no id_token")
+        jwks = await oidc.fetch_jwks(metadata)
+        claims = oidc.validate_id_token(
+            id_token, jwks, nonce=str(state_payload.get("nonce") or ""))
+        userinfo = await oidc.fetch_userinfo(
+            metadata, str(tokens.get("access_token") or ""))
+        if userinfo.get("sub") and userinfo.get("sub") != claims.get("sub"):
+            raise oidc.OIDCError("userinfo subject mismatch")
+        merged = {**claims, **userinfo}
+        email = str(merged.get("email") or "").strip().lower()
+        subject = str(claims.get("sub") or "").strip()
+        if not email or not subject:
+            raise oidc.OIDCError("provider did not return email/sub")
+        if settings.OIDC_REQUIRE_VERIFIED_EMAIL and not oidc.email_verified(merged):
+            raise oidc.OIDCError("email is not verified")
+        groups = oidc.groups_from_claims(merged)
+        role = oidc.role_from_groups(groups)
+    except (oidc.OIDCError, ValueError, TypeError):
+        return _sso_error("SSO authentication failed")
+
+    issuer = oidc.issuer()
+    result = await db.execute(select(User).where(
+        User.oidc_issuer == issuer, User.oidc_subject == subject))
+    user = result.scalars().first()
+    linked_local = False
+    if not user and settings.OIDC_LINK_BY_EMAIL:
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalars().first()
+        if user and user.oidc_subject not in (None, subject):
+            return _sso_error("This account is linked to another identity")
+        linked_local = bool(user)
+
+    if user and not user.active:
+        return _sso_error("Account disabled")
+
+    if not user:
+        if not settings.OIDC_AUTO_CREATE_USERS:
+            return _sso_error("No account exists for this identity")
+        base = oidc.username_from_claims(merged)
+        username = base
+        suffix = 1
+        while (await db.execute(select(User).where(User.username == username))).scalars().first():
+            suffix += 1
+            username = f"{base[:140]}-{suffix}"
+        user = User(
+            username=username,
+            email=email,
+            password_hash=hash_password(secrets.token_urlsafe(48)),
+            role=role,
+            active=True,
+            oidc_subject=subject,
+            oidc_issuer=issuer,
+        )
+        db.add(user)
+    else:
+        if user.oidc_subject is None:
+            user.oidc_subject = subject
+            user.oidc_issuer = issuer
+        elif user.oidc_subject == subject and settings.OIDC_SYNC_ROLE:
+            user.role = role
+        # A local account linked by verified email keeps its existing role on
+        # the link operation. Demoting a break-glass admin from an IdP group
+        # mapping would lock the operator out of the local recovery path.
+        if not linked_local and user.email != email:
+            clash = (await db.execute(
+                select(User).where(User.email == email, User.id != user.id)
+            )).scalars().first()
+            if not clash:
+                user.email = email
+
+    await db.commit()
+    await db.refresh(user)
+    await log_audit(
+        db, action="login_oidc", resource="user", resource_id=str(user.id),
+        user_id=user.id, username=user.username,
+        details={"issuer": issuer, "email": email, "role": user.role,
+                 "groups": groups[:50], "linked_local": linked_local},
+        ip_address=request.client.host if request.client else None,
+        user_agent=(request.headers.get("user-agent") or "")[:500],
+    )
+    await db.commit()
+
+    token, _, _ = create_access_token(subject=str(user.id), role=user.role)
+    response = RedirectResponse(
+        url=oidc.frontend_url(str(state_payload.get("return_to") or "/")),
+        status_code=302)
+    _set_auth_cookie(response, token)
+    _clear_oidc_state(response)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 # ---------------------------------------------------------------------------

@@ -83,7 +83,29 @@ services:
       AGENT_ENROLL_KEY: ${AGENT_ENROLL_KEY:?AGENT_ENROLL_KEY must be set}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       MASTER_KEY_B64: ${MASTER_KEY_B64:?MASTER_KEY_B64 must be set}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://aegis.local,http://localhost:3000}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://${AEGIS_DOMAIN:-aegis.local},http://localhost:3000}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://${AEGIS_DOMAIN:-aegis.local}}
+      # Human OIDC/SSO. Local login stays available as the break-glass path.
+      # These were documented in .env.example but were not passed to the
+      # container, so OIDC appeared enabled in .env and stayed off at runtime.
+      OIDC_ENABLED: ${OIDC_ENABLED:-false}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid email profile}
+      OIDC_BUTTON_LABEL: "${OIDC_BUTTON_LABEL:-Sign in with SSO}"
+      OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-groups}
+      OIDC_GROUP_ROLE_MAP: "${OIDC_GROUP_ROLE_MAP:-}"
+      OIDC_DEFAULT_ROLE: ${OIDC_DEFAULT_ROLE:-viewer}
+      OIDC_AUTO_CREATE_USERS: ${OIDC_AUTO_CREATE_USERS:-true}
+      OIDC_LINK_BY_EMAIL: ${OIDC_LINK_BY_EMAIL:-true}
+      OIDC_SYNC_ROLE: ${OIDC_SYNC_ROLE:-true}
+      OIDC_REQUIRE_VERIFIED_EMAIL: ${OIDC_REQUIRE_VERIFIED_EMAIL:-true}
+      OIDC_ALLOW_LOCAL_LOGIN: ${OIDC_ALLOW_LOCAL_LOGIN:-true}
+      OIDC_HTTP_TIMEOUT_S: ${OIDC_HTTP_TIMEOUT_S:-10}
+      OIDC_CLOCK_SKEW_S: ${OIDC_CLOCK_SKEW_S:-60}
       # AI pluggabile: auto = ollama se OLLAMA_URL e' raggiungibile, altrimenti
       # gemini/openai se la chiave esiste, altrimenti disabled (nessun costo).
       # Per usare un server Ollama potente in rete: OLLAMA_URL=http://host:11434/api/generate
@@ -116,10 +138,15 @@ services:
       KRAKEN_SSO_ENABLED: ${KRAKEN_SSO_ENABLED:-false}
       KRAKEN_SSO_SECRET: ${KRAKEN_SSO_SECRET:-}
       KRAKEN_SSO_TTL_SECONDS: ${KRAKEN_SSO_TTL_SECONDS:-60}
+      # Secret file opzionali: ogni file qui dentro diventa una variabile
+      # (es. /run/secrets/DATABASE_URL). I file vincono sulle variabili gia'
+      # presenti; Vault resta opt-in via AEGIS_VAULT_* nel .env.
+      AEGIS_SECRETS_DIR: /run/secrets
     volumes:
       # Post-audit: PKI e artefatti persistenti (mai effimeri nel container).
       - pki_data:/app/pki
       - artifact_data:/app/artifacts
+      - ./secrets:/run/secrets:ro
     depends_on:
       aegis-postgres:
         condition: service_healthy
@@ -176,6 +203,10 @@ services:
     image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     container_name: aegis-caddy
     restart: unless-stopped
+    environment:
+      # Public FQDN and ACME account. Default = lab (internal CA).
+      AEGIS_DOMAIN: ${AEGIS_DOMAIN:-aegis.local}
+      ACME_EMAIL: ${ACME_EMAIL:-internal}
     ports:
       - "80:80"
       - "443:443"
@@ -330,7 +361,7 @@ services:
       DETONATION_TIMEOUT_S: ${KRAKEN_DETONATION_TIMEOUT_S:-120}
       MALWARE_RETENTION_DAYS: ${MALWARE_RETENTION_DAYS:-30}
       MALWARE_MAX_TOTAL_BYTES: ${MALWARE_MAX_TOTAL_BYTES:-5368709120}
-      CORS_ORIGINS: ${ALLOWED_ORIGINS:-https://aegis.local,http://localhost:3000}
+      CORS_ORIGINS: ${ALLOWED_ORIGINS:-https://${AEGIS_DOMAIN:-aegis.local},http://localhost:3000}
       AEGIS_INGEST_ENABLED: ${KRAKEN_INGEST_ENABLED:-false}
       AEGIS_INGEST_URL: http://aegis-brain:8000
       AEGIS_INGEST_KEY: ${KRAKEN_INGEST_KEY:-}

@@ -28,3 +28,38 @@ func TestParseETWRejectsOrphanSequenceAndGarbage(t *testing.T) {
 		}
 	}
 }
+
+func TestParseETWProcessStopLine(t *testing.T) {
+	// ProcessStop v0 carries ImageName as ANSI; the C producer decodes it to
+	// UTF-16 before JSON. This is the exact line emitted after the fix.
+	line := `{"ts_ns":1,"ts_wall_ns":2,"pid":42,"ppid":0,"uid":0,` +
+		`"comm":"cmd.exe","filename":"C:\\Windows\\System32\\cmd.exe",` +
+		`"event_type":"PROCESS_EXITED","exit_code":0}`
+	ev, ok := ParseLine("agent-1", "Windows", "4.3.0", line)
+	if !ok || ev.EventType != "PROCESS_EXITED" || ev.ProcessName != "cmd.exe" {
+		t.Fatalf("process stop not parsed: ok=%v ev=%+v", ok, ev)
+	}
+}
+
+func TestParseETWWindowsPathAndConnectAttemptQuality(t *testing.T) {
+	// The producer used to print C:\\Windows\\... unescaped, so json.Unmarshal
+	// dropped every process event. This is the exact wire shape it now emits.
+	line := `{"ts_ns":1,"ts_wall_ns":2,"pid":42,"ppid":1,"uid":0,` +
+		`"comm":"cmd.exe","filename":"C:\\Windows\\System32\\cmd.exe",` +
+		`"event_type":"PROCESS_CREATED"}`
+	ev, ok := ParseLine("agent-1", "Windows", "4.3.0", line)
+	if !ok {
+		t.Fatal("escaped Windows path rejected")
+	}
+	if ev.ProcessPath != `C:\Windows\System32\cmd.exe` || ev.ProcessName != "cmd.exe" {
+		t.Fatalf("path/name = %q/%q", ev.ProcessPath, ev.ProcessName)
+	}
+
+	netLine := `{"pid":42,"comm":"","filename":"",` +
+		`"event_type":"CONNECTION_ESTABLISHED",` +
+		`"quality":"degraded:etw-connect-attempt","remote":"1.2.3.4:443"}`
+	net, ok := ParseLine("agent-1", "Windows", "4.3.0", netLine)
+	if !ok || net.Quality != "degraded:etw-connect-attempt" {
+		t.Fatalf("network quality not preserved: %+v", net)
+	}
+}

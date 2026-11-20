@@ -17,8 +17,9 @@
 }
 
 # ─── Dashboard e API browser (invariato rispetto al Caddyfile base) ───
-aegis.local {
-	tls internal
+# Dominio e certificato arrivano da AEGIS_DOMAIN / ACME_EMAIL nel .env.
+{$AEGIS_DOMAIN:aegis.local} {
+	tls {$ACME_EMAIL:internal}
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -57,8 +58,8 @@ aegis.local {
 # `trusted_ca_cert_file` emette warning di deprecation su v2.11 ma resta
 # funzionale (verificato live: handshake senza cert e con cert di CA
 # sbagliata vengono rifiutati; vedi report post-audit).
-https://aegis.local:8443 {
-	tls internal {
+https://{$AEGIS_DOMAIN:aegis.local}:8443 {
+	tls {$ACME_EMAIL:internal} {
 		client_auth {
 			mode require_and_verify
 			trusted_ca_cert_file /etc/caddy/pki/ca.crt
@@ -89,5 +90,5 @@ https://aegis.local:8443 {
 }
 
 :80 {
-	redir https://aegis.local{uri} permanent
+	redir https://{$AEGIS_DOMAIN:aegis.local}{uri} permanent
 }

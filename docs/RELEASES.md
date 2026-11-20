@@ -240,6 +240,30 @@ and a 4.2.1 server upgrade preserving **68 agents / 321 alerts** with smoke
 and publication remain the external release step. The release is checksummed,
 not cosign-signed; see `docs/RELEASE_SIGNING.md`.
 
+## Local verification update — 2026-11-20
+
+The clean-install/security pass closed with **875 Brain tests passed, 3 skipped**
+(YARA unavailable on Python 3.15/Windows), **Kraken 154 passed**, **15
+Playwright tests passed + 1 SSO opt-in skipped** through Caddy with Kraken,
+**SSO 2/2** against Keycloak 26.0.7,
+**ETW 95 live events** (non-admin exit 2), WSL Ubuntu/Kali eBPF **PASS** and
+**300/300 zero-loss**, real file/Vault secrets **PASS**, and a clean core+Kraken
+install with API smoke **21/21**. A Python 3.12 container with `yara-python`
+4.5.4 also ran the three YARA engine tests (**3 passed**); the 3.15 suite keeps
+its declared skip. Caddy now takes `AEGIS_DOMAIN`/`ACME_EMAIL` from `.env`, and
+the optional Prometheus profile is documented as lab-only. The fixes include the
+Caddy origin in the
+generated `.env`, the missing `OIDC_*` compose mapping, SPA session hydration
+after OIDC, the Kraken `asyncio` startup import, and the missing Darwin build
+tags for `SystemInfo`/`LocalMAC`. macOS now cross-builds for amd64/arm64 and
+has a `macos-latest` Go CI job; it remains build/CI-only with no endpoint
+telemetry or live hardware validation.
+
+**Release verdict:** local 4.3.0 release candidate is sound, but the hosted tag
+workflow (Gate 5), bare-metal Linux, Windows Server live and macOS live remain
+unverified. Do not push a raw mixed working tree or tag a release today; commit
+the release state, run hosted CI, then tag. See `docs/RELEASE_GATE_4.3.md`.
+
 ## Current version fields
 
 These are the release version fields for the `v4.3.0` release.
