@@ -77,13 +77,13 @@ jobs:
       - name: Secret scan (tracked files only, MUST fail on hits)
         run: |
           fail=0
-          if git grep -n -E -- "-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----$" -- . ':(exclude).github/workflows/ci.yml'; then
+          if git grep -n -E -- "-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----$" -- .; then
             echo "::error::private key material in tracked files"; fail=1
           fi
           if [ -n "$(git ls-files | grep -Eiv '^\.github/workflows/ci\.yml$|(^|/)\.env\.example$' | grep -Ei '\.pem$|\.key$|secret\.json$|(^|/)\.env$|(^|/)\.env\.(local|production|staging|test)$' || true)" ]; then
             echo "::error::key/secret/env files tracked:"; git ls-files | grep -Eiv '^\.github/workflows/ci\.yml$|(^|/)\.env\.example$' | grep -Ei '\.pem$|\.key$|secret\.json$|(^|/)\.env$|(^|/)\.env\.(local|production|staging|test)$'; fail=1
           fi
-          if git grep -n -E "sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|xox[bap]-[A-Za-z0-9-]{10,}" -- . ':(exclude).github/workflows/ci.yml'; then
+          if git grep -n -E "sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|xox[bap]-[A-Za-z0-9-]{10,}" -- .; then
             echo "::error::token pattern in tracked files"; fail=1
           fi
           if [ "$fail" -ne 0 ]; then exit 1; fi
@@ -548,7 +548,10 @@ jobs:
 
   release:
     name: Release Artifacts
-    needs: [build_and_test, supply_chain, e2e]
+    # Never publish while a shipped artifact has red validation: the Go agent,
+    # the YARA engine and the installer/OS checks are release gates, not
+    # optional extras.
+    needs: [lint, contract, aegis_agent, windows_installers, os_compat, build_and_test, yara_engine, supply_chain, e2e]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     # Il minimo indispensabile per creare la release, caricare i file e
@@ -585,10 +588,18 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64
+          sudo apt-get install -y gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
           # ETW: consumer user-mode Windows, nessuna firma e nessun driver.
-          x86_64-w64-mingw32-gcc -O2 -Wall aegis-ebpf/aegis_etw.c \
-            -o release-agent/aegis-etw.exe -ladvapi32 -ltdh -lws2_32
+          # Build through the Makefile so the requireAdministrator manifest is
+          # embedded with windres and MinGW's default asInvoker manifest is
+          # suppressed. Building the .c directly shipped an unelevated helper.
+          make -C aegis-ebpf aegis-etw.exe
+          test -s aegis-ebpf/aegis-etw.exe
+          if ! grep -a -q 'requireAdministrator' aegis-ebpf/aegis-etw.exe; then
+            echo "::error::ETW helper is missing the requireAdministrator manifest"
+            exit 1
+          fi
+          cp aegis-ebpf/aegis-etw.exe release-agent/aegis-etw.exe
           # eBPF: oggetto CO-RE + collector Linux, compilati nel container
           # privilegiato perche' serve il BTF del kernel per vmlinux.h.
           docker run --rm --privileged \

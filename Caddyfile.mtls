@@ -27,6 +27,8 @@
 		X-Frame-Options "DENY"
 		X-XSS-Protection "1; mode=block"
 		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		X-Permitted-Cross-Domain-Policies "none"
 		-Server
 	}
 
@@ -50,19 +52,21 @@
 	}
 
 	handle {
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+		}
 		reverse_proxy aegis-frontend:3000
 	}
 }
 
 # ─── Agent API con mTLS obbligatorio ───
-# `trusted_ca_cert_file` emette warning di deprecation su v2.11 ma resta
-# funzionale (verificato live: handshake senza cert e con cert di CA
-# sbagliata vengono rifiutati; vedi report post-audit).
+# `trust_pool` è la sintassi supportata da Caddy 2.11+; senza ca.crt il
+# caricamento fallisce (fail-closed) e il container non parte.
 https://{$AEGIS_DOMAIN:aegis.local}:8443 {
 	tls {$ACME_EMAIL:internal} {
 		client_auth {
 			mode require_and_verify
-			trusted_ca_cert_file /etc/caddy/pki/ca.crt
+			trust_pool file /etc/caddy/pki/ca.crt
 		}
 	}
 

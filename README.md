@@ -47,6 +47,10 @@ The design goal is **honest operation**: deterministic detections, explicit degr
 YARA is optional and fail-soft: the engine is present only when the platform has
 a `yara-python` wheel, and the API reports the missing engine instead of silently
 skipping it. Its value depends on the SOC's rules, not on the dependency alone.
+Signed feeds are opt-in and fail-closed: rules are imported only from a bundled
+Ed25519-signed manifest with a configured public key, and feed-managed rules
+cannot overwrite local rules. Aegis Total exposes match provenance, severity and
+a confidence signal instead of a flat boolean. See [YARA feeds](docs/YARA_FEEDS.md).
 
 ## Quick Start
 
@@ -84,6 +88,11 @@ certificate is hardcoded in the repository.
 
 The default dashboard is `http://localhost:3000`; the Brain API is `http://localhost:8000`. Never expose the lab stack directly to the Internet.
 
+Caddy is the production TLS/reverse-proxy edge when it runs with a real FQDN,
+ACME and the mTLS overlay; it is not a complete HA or monitoring solution. Run
+at least two replicas behind an external load balancer for availability, and
+monitor certificate renewal and upstream health separately.
+
 ## Platform Support
 
 | Platform | Kernel telemetry | Status |
@@ -111,12 +120,13 @@ Latest local verification: **2026-11-20**.
 
 | Check | Result |
 |---|---|
-| Brain pytest against disposable PostgreSQL + real Redis | **875 passed, 3 skipped** (the 3 skips are YARA rules because `yara-python` is unavailable on Python 3.15/Windows; a dedicated CI job runs them on Python 3.12) |
+| Brain pytest against disposable PostgreSQL + real Redis | **902 passed, 4 skipped** (the skips include YARA engine cases because `yara-python` is unavailable on Python 3.15/Windows; a dedicated CI job runs them on Python 3.12) |
+| Auth hardening, live through Caddy | **PASS**; password reset revokes old JWT and remember devices, SSO-only rejects local login/registration (**403**), OIDC callback without state fails closed, HSTS only on HTTPS, session cookie **HttpOnly/Secure/SameSite=strict** |
 | Command queue on real Redis | **8 passed**, including redelivery and restart recovery |
 | Kraken pytest | **154 passed** |
 | Frontend production build | **PASS** |
-| Frontend lint | **0 errors, 27 warnings** |
-| Playwright through Caddy, including Kraken | **15 passed, 1 skipped** (SSO opt-in skipped in this run) |
+| Frontend lint | **0 errors, 24 warnings** |
+| Playwright pages/session/smoke through Caddy (post-4.3) | **12 passed**; the `users` spec assumes a single-admin database and was not used for this local run |
 | Playwright OIDC against Keycloak 26.0.7 | **2 passed** |
 | ETW live elevated | **PASS**, 95 events; non-admin **exit 2** |
 | WSL2 Ubuntu / Kali eBPF | **PASS**; benchmark **300/300**, zero lost events |
@@ -139,11 +149,14 @@ Not verified locally: hosted CI/tag workflow, bare-metal Linux, Windows Server l
 | [Release gate](docs/RELEASE_GATE_4.3.md) | What is green, what remains, and allowed claims. |
 | [Threat model](docs/THREAT_MODEL.md) | Assets, trust boundaries and mitigations. |
 | [Benchmarks](docs/BENCHMARK.md) | Load methodology and measured numbers. |
+| [YARA feeds](docs/YARA_FEEDS.md) | Signed rule bundles, key rotation and fail-closed import. |
 
 ## Development
 
 ```bash
 # Brain tests (disposable database and Redis required)
+# conftest derives AEGIS_TEST_REDIS_URL (DB 15, same auth) from REDIS_URL so
+# queue tests never flush the application's DB 0.
 cd aegis-brain
 python -m pytest tests/ -q
 

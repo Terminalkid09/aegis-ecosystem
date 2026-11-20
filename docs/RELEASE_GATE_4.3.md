@@ -11,16 +11,14 @@ A fresh Git-clone style run was performed after the 4.3 security work. The
 following results are local, reproducible evidence and **do not** replace the
 hosted tag workflow:
 
-- Brain: **875 passed, 3 skipped** against disposable PostgreSQL and real Redis
-  (the skips are YARA rules unavailable for Python 3.15/Windows); command queue
-  **8/8** on real Redis, including redelivery and process-restart recovery;
+- Brain: **902 passed, 4 skipped** against disposable PostgreSQL and real Redis
+  (the skips include YARA rules unavailable for Python 3.15/Windows); command
+  queue **8/8** on real Redis, including redelivery and process-restart recovery;
 - Kraken: **154 passed**; frontend: production build **PASS**, lint
-  **0 errors / 27 warnings**;
-- Playwright through Caddy with Kraken seeded: **15 passed, 1 skipped** (the
-  skipped test is the SSO opt-in); Playwright OIDC against Keycloak 26.0.7:
-  **2 passed**; the 15 scenario tests plus the shared setup are run in two
-  configurations because the OIDC state cookie and the Caddy origin cannot
-  share one base URL;
+  **0 errors / 24 warnings**;
+- Playwright pages/session/smoke through Caddy: **12 passed**; the `users` spec
+  assumes a single-admin database and was not part of this run; Kraken/SSO
+  specs were not rerun; Playwright OIDC against Keycloak 26.0.7: **2 passed**;
 - ETW live elevated: **95 events** (45 created, 47 exited, 3 connections);
   non-elevated exit **2**, no session;
 - WSL2 Ubuntu/Kali eBPF: **PASS**, benchmark **300/300**, zero loss (bare-metal
@@ -30,6 +28,16 @@ hosted tag workflow:
 - clean install core + Kraken: images rebuilt, admin bootstrap, API smoke
   **21/21**, Kraken and sensors healthy; signed ingest delivered one event to
   the Brain (`sent=1`).
+
+The post-audit hardening was re-verified live through Caddy: password reset
+invalidates every pre-reset JWT and trusted device (DB `token_version`
+incremented), SSO-only mode rejects local login and registration with **403**,
+the OIDC callback without state fails closed without setting a session cookie,
+HSTS is emitted only on HTTPS/trusted forwarded proto, and the session cookie
+is `HttpOnly; Secure; SameSite=strict`. Alembic `0025_user_token_version` was
+also tested with `upgrade head -> downgrade 0024 -> upgrade head` on a
+disposable database. These checks complement, and do not replace, the hosted
+tag workflow.
 
 Four defects found by this run were fixed: the generated `ALLOWED_ORIGINS`
 omitted `https://aegis.local` (403 on cookie-authenticated POST/PATCH through

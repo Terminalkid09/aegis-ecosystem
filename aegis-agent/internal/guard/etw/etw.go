@@ -7,8 +7,11 @@ package etw
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,19 +31,37 @@ type Source struct {
 	Enabled       bool
 	Path          string
 	AllowUnsigned bool
+	SHA256        string
 	AgentID       string
 	OSName        string
 	AgentVersion  string
 }
 
-func New(agentID, osName, agentVersion string, enabled bool, path string, allowUnsigned bool) *Source {
+func New(agentID, osName, agentVersion string, enabled bool, path string, allowUnsigned bool, pinnedSHA256 ...string) *Source {
 	if strings.TrimSpace(path) == "" {
 		path = filepath.Join("bin", "aegis-etw.exe")
 	}
+	pinned := ""
+	if len(pinnedSHA256) > 0 {
+		pinned = pinnedSHA256[0]
+	}
 	return &Source{
-		Enabled: enabled, Path: path, AllowUnsigned: allowUnsigned,
+		Enabled: enabled, Path: path, AllowUnsigned: allowUnsigned, SHA256: pinned,
 		AgentID: agentID, OSName: osName, AgentVersion: agentVersion,
 	}
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func (s *Source) Available(ctx context.Context) (bool, string) {
@@ -57,7 +78,16 @@ func (s *Source) Available(ctx context.Context) (bool, string) {
 	if err != nil || info.IsDir() {
 		return false, "binary-missing"
 	}
-	if !s.AllowUnsigned {
+	if s.AllowUnsigned {
+		pinned := strings.ToLower(strings.TrimSpace(s.SHA256))
+		if pinned == "" {
+			return false, "unsigned-without-pin"
+		}
+		actual, err := fileSHA256(s.Path)
+		if err != nil || !strings.EqualFold(actual, pinned) {
+			return false, "hash-mismatch"
+		}
+	} else {
 		result, err := platform.Authenticode(ctx, platform.ExecRunner{}, s.Path)
 		if err != nil || !result.Signed {
 			return false, "untrusted-binary"
@@ -67,13 +97,18 @@ func (s *Source) Available(ctx context.Context) (bool, string) {
 }
 
 type Stream struct {
-	cmd    *exec.Cmd
-	cancel context.CancelFunc
-	mu     sync.Mutex
-	closed bool
+	cmd      *exec.Cmd
+	cancel   context.CancelFunc
+	mu       sync.Mutex
+	closed   bool
+	done     chan struct{}
+	doneOnce sync.Once
 }
 
 func (s *Stream) Stop() {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -88,9 +123,32 @@ func (s *Stream) Stop() {
 		_ = s.cmd.Process.Kill()
 		_ = s.cmd.Wait()
 	}
+	s.closeDone()
+}
+
+func (s *Stream) closeDone() {
+	if s == nil || s.done == nil {
+		return
+	}
+	s.doneOnce.Do(func() { close(s.done) })
+}
+
+// Done closes when stdout ends and the helper process has been reaped. The
+// supervisor uses it to distinguish a clean stop from a killed/terminated ETW
+// session and to restart the collector.
+func (s *Stream) Done() <-chan struct{} {
+	if s == nil || s.done == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	return s.done
 }
 
 func (s *Stream) Running() bool {
+	if s == nil {
+		return false
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return !s.closed && s.cmd != nil && s.cmd.Process != nil
@@ -112,7 +170,7 @@ func (s *Source) Start(ctx context.Context, emit func(event.Event)) (*Stream, bo
 		cancel()
 		return nil, false
 	}
-	stream := &Stream{cmd: cmd, cancel: cancel}
+	stream := &Stream{cmd: cmd, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer stream.Stop()
 		scanner := bufio.NewScanner(stdout)

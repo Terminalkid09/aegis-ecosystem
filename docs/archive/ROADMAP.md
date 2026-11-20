@@ -70,7 +70,7 @@ La traccia 4.3.x copre quattro debiti indipendenti dalla 4.5:
   e permessi separati.
 
 Piano dettagliato, fasi e criteri di accettazione:
-`docs/PLAN_POST_4.3.md`. I ticket operativi sono AP-118–AP-127.
+`docs/archive/PLAN_POST_4.3.md`. I ticket operativi sono AP-118–AP-127.
 
 La **live validation post-4.3** è in `docs/ROADMAP_LIVE_VALIDATION.md`
 (English): la 4.3 non certifica malware reale, AWS resta opzionale e la
@@ -546,7 +546,7 @@ Problemi aperti: <elenco>
 
 Prompt consigliato:
 
-> Lavora nel repository `aegis-ecosystem` sulla milestone `<X>`. Leggi prima `docs/ROADMAP.md` e lo stato Git. Non fare reset o checkout distruttivi e preserva le modifiche esistenti. Implementa solo il task indicato, aggiungi test, esegui i test pertinenti, controlla il diff e riporta file modificati, rischi residui e risultati esatti dei comandi.
+> Lavora nel repository `aegis-ecosystem` sulla milestone `<X>`. Leggi prima `docs/archive/ROADMAP.md` e lo stato Git. Non fare reset o checkout distruttivi e preserva le modifiche esistenti. Implementa solo il task indicato, aggiungi test, esegui i test pertinenti, controlla il diff e riporta file modificati, rischi residui e risultati esatti dei comandi.
 
 ## Posizionamento del progetto
 

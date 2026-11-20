@@ -7,7 +7,7 @@
 (load, restart, bundle, upgrade/rollback, CI al tag, clean install) sono
 lavoro di release, non nuove feature. Firewall e DNS policy entrano nella 4.5
 (Network Visibility), non nella 4.3.
-**Fonti:** `docs/PLAN_V4.3.md`, `docs/ROADMAP.md`, codice `aegis-agent`,
+**Fonti:** `docs/archive/PLAN_V4.3.md`, `docs/archive/ROADMAP.md`, codice `aegis-agent`,
 `aegis-brain`, `aegis-link`.
 
 ---

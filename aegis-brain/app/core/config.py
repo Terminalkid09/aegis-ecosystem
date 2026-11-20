@@ -190,6 +190,20 @@ class Settings(BaseSettings):
     TOTAL_MAX_FILES_PER_ZIP: int = 2000
     TOTAL_RETENTION_DAYS: int = 7
 
+    # ── YARA feed firmati (aggiornamento firme) ─────────────────────────────
+    # Disabilitato di default: un feed esterno è una supply chain. Quando è
+    # abilitato, il Brain richiede una chiave Ed25519 e verifica la firma sul
+    # corpo grezzo PRIMA di interpretare il JSON. Nessun import unsigned.
+    YARA_FEED_ENABLED: bool = False
+    YARA_FEED_URLS: str = ""
+    YARA_FEED_PUBLIC_KEY_B64: str = ""
+    YARA_FEED_KEY_ID: str = ""
+    YARA_FEED_INTERVAL_S: int = 3600
+    YARA_FEED_TIMEOUT_S: int = 20
+    YARA_FEED_MAX_BYTES: int = 8 * 1024 * 1024
+    # Solo per test/localhost espliciti; in produzione HTTPS obbligatorio.
+    YARA_FEED_ALLOW_HTTP: bool = False
+
     # Data retention in giorni (configurabile — decisioni M0 Fase 1).
     # Enforcement (purge job) in Fase 8/9; qui solo perimetro configurabile.
     RETENTION_TELEMETRY_DAYS: int = 14
@@ -317,6 +331,23 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "AEGIS_PROFILE=prod requires RATE_LIMIT_STORAGE_URI (shared Redis)"
                 )
+        if self.YARA_FEED_ENABLED:
+            urls = [u.strip() for u in (self.YARA_FEED_URLS or "").split(",") if u.strip()]
+            if not urls:
+                raise ValueError("YARA_FEED_ENABLED=true requires YARA_FEED_URLS")
+            if not (self.YARA_FEED_PUBLIC_KEY_B64 or "").strip():
+                raise ValueError("YARA_FEED_ENABLED=true requires YARA_FEED_PUBLIC_KEY_B64")
+            try:
+                if len(base64.b64decode(self.YARA_FEED_PUBLIC_KEY_B64, validate=True)) != 32:
+                    raise ValueError
+            except Exception as exc:
+                raise ValueError("YARA_FEED_PUBLIC_KEY_B64 must decode to exactly 32 bytes") from exc
+            if self.YARA_FEED_INTERVAL_S < 60:
+                raise ValueError("YARA_FEED_INTERVAL_S must be at least 60 seconds")
+            if self.YARA_FEED_TIMEOUT_S <= 0:
+                raise ValueError("YARA_FEED_TIMEOUT_S must be positive")
+            if not 1024 <= self.YARA_FEED_MAX_BYTES <= 64 * 1024 * 1024:
+                raise ValueError("YARA_FEED_MAX_BYTES must be between 1 KB and 64 MB")
         if self.OIDC_ENABLED:
             if not (self.OIDC_ISSUER or "").strip():
                 raise ValueError("OIDC_ENABLED=true requires OIDC_ISSUER")

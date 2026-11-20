@@ -258,7 +258,7 @@ services:
     networks:
       - kraken_internal
     healthcheck:
-      test: ["CMD", "wget", "-q", "http://localhost:9093/-/healthy"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9093/-/healthy"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -108,6 +108,7 @@ type Config struct {
 	ETWEnabled       bool
 	ETWPath          string
 	ETWAllowUnsigned bool
+	ETWSHA256        string
 	SpoolFile        string
 	SpoolMaxBytes    int64
 	QuarantineDir    string
@@ -312,6 +313,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v, ok := envBool("AEGIS_ETW_ALLOW_UNSIGNED"); ok {
 		cfg.ETWAllowUnsigned = v
+	}
+	if v := os.Getenv("AEGIS_ETW_SHA256"); v != "" {
+		cfg.ETWSHA256 = v
 	}
 	if v := os.Getenv("AEGIS_SCAN_INTERVAL_MS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {

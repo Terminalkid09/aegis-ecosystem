@@ -43,11 +43,15 @@ validation.
 
 ### Windows (ETW)
 
-* build with `make aegis-etw.exe` or
-  `gcc -O2 -Wall aegis_etw.c -o aegis-etw.exe -ladvapi32 -ltdh -lws2_32`;
+* build with `make aegis-etw.exe`; the Makefile runs `windres` on
+  `aegis-etw.rc`, embeds `aegis-etw.manifest`, and suppresses MinGW's default
+  `asInvoker` manifest with `-specs=no-default-manifest.specs`;
 * `-lws2_32` is required because `ntohl` comes from `winsock2.h`;
 * the binary has a `requireAdministrator` manifest and a runtime check; without
   elevation it exits **2** and does not open the session;
+* unsigned mode is accepted only with `AEGIS_ETW_SHA256` matching the helper;
+  an empty pin or a replaced binary fails closed (`unsigned-without-pin` /
+  `hash-mismatch`);
 * session `AegisKernelProcess`; an existing name fails with an actionable
   message instead of reusing an invalid handle (`--replace` is explicit);
 * JSONL output to the Go agent consumer, without JNI.
@@ -56,7 +60,10 @@ Validation on 2026-11-20: **95 events** (45 created, 47 exited, 3 connections),
 `remote=127.0.0.1:8000`, `exit_code=0`, `JSON_OK`. The ETW network event is a
 connection attempt, not an established handshake. ETW is telemetry, not tamper
 protection: a local administrator can stop the session or the service. The
-hardening options and their limits are documented in
+unified agent supervises the ETW helper and restarts it with bounded backoff if
+the stream ends; heartbeat capabilities expose `etw_watchdog`, `etw_restarts`
+and `etw_last_reason`. That closes the silent "ETW died once" gap, not the
+administrator boundary. The hardening options and their limits are documented in
 [KERNEL_AND_DRIVERS.md](KERNEL_AND_DRIVERS.md#hardening-that-does-not-require-a-driver).
 
 ### macOS

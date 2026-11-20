@@ -93,8 +93,9 @@ Other limits:
 - kernel providers may be absent or partially available;
 - `Kernel-Network` event 12 is a **connection attempt**, not an established
   handshake; Aegis marks it `degraded:etw-connect-attempt`;
-- ETW does not protect the agent process from being stopped; remediation remains
-  user-mode;
+- ETW does not protect the agent process from being stopped; the agent's ETW
+  supervisor restarts a helper whose stream ends, but this is availability
+  hardening, not a tamper-proof boundary. Remediation remains user-mode;
 - Windows Server and Windows 11 can have different providers and policies. The
   live test was performed on elevated Windows 11, not on Server.
 
@@ -127,9 +128,12 @@ be applied by the operator without writing a kernel driver:
   the Security log, or syslog/TLS to a remote collector, preserves evidence even
   if local logs are deleted. The Brain is already the remote destination for
   Aegis telemetry.
-- **Watch the watcher.** Service recovery restarts a crashed agent; a separate
-  watchdog can alert when the ETW session or helper disappears. This detects
-  tampering, but a local administrator can still stop the watchdog.
+- **Watch the watcher.** Service recovery restarts a crashed agent; the Go
+  agent now supervises the ETW helper and restarts it with bounded exponential
+  backoff when the stream ends. The capability/sensor payload exposes
+  `etw_watchdog`, `etw_restarts` and `etw_last_reason`, so a session loss is
+  visible instead of silently falling back to polling. A local administrator
+  can still stop the watchdog or the agent.
 - **Keep the helper signed and least-privileged.** ETW runs elevated; the binary
   is checked with Authenticode unless explicitly allowed otherwise. OTA is
   Ed25519-signed.

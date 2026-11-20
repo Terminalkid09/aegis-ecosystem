@@ -46,7 +46,7 @@ type Agent struct {
 	guardActions *actions.Executor
 	guardFIM     *fim.Monitor
 	guardMonitor *monitor.Monitor
-	guardETW     *etw.Stream
+	guardETW     *etw.Supervisor
 	guardCaps    map[string]any
 }
 
@@ -502,6 +502,22 @@ func mapInt64(value any) int64 {
 	}
 }
 
+func (a *Agent) sensorState() map[string]any {
+	out := make(map[string]any, len(a.sensorSummary)+4)
+	for key, value := range a.sensorSummary {
+		out[key] = value
+	}
+	if a.guardETW != nil {
+		out["etw"] = a.guardETW.Running()
+		out["etw_watchdog"] = true
+		out["etw_restarts"] = a.guardETW.Restarts()
+		if reason := a.guardETW.LastReason(); reason != "" {
+			out["etw_last_reason"] = reason
+		}
+	}
+	return out
+}
+
 func (a *Agent) sendGuardHeartbeat(ctx context.Context) error {
 	payload := map[string]any{
 		"agent_id":      a.client.AgentID,
@@ -510,7 +526,7 @@ func (a *Agent) sendGuardHeartbeat(ctx context.Context) error {
 		"hostname":      a.cfg.DeviceName,
 		"agent_version": a.cfg.Version,
 		"capabilities":  a.capabilities(),
-		"sensor":        a.sensorSummary,
+		"sensor":        a.sensorState(),
 	}
 	if err := a.enqueueGuard(payload); err != nil {
 		return fmt.Errorf("heartbeat Guard: %w", err)
@@ -539,7 +555,7 @@ func (a *Agent) sendGuardTelemetry(ctx context.Context) error {
 		"network_received": snapshot.NetworkReceived,
 		"agent_version":    a.cfg.Version,
 		"capabilities":     a.capabilities(),
-		"sensor":           a.sensorSummary,
+		"sensor":           a.sensorState(),
 	}
 	if err := a.enqueueGuard(payload); err != nil {
 		return fmt.Errorf("telemetria Guard: %w", err)
@@ -569,6 +585,17 @@ func (a *Agent) capabilities() map[string]any {
 			caps["kernel_profile"] = a.sensorSummary["kernel_profile"]
 			caps["ebpf"] = a.sensorSummary["ebpf"]
 			caps["auditd"] = a.sensorSummary["auditd"]
+		}
+		if a.guardETW != nil {
+			caps["etw_kernel_telemetry"] = a.guardETW.Running()
+			caps["etw_watchdog"] = true
+			caps["etw_restarts"] = a.guardETW.Restarts()
+			if reason := a.guardETW.LastReason(); reason != "" {
+				caps["etw_last_reason"] = reason
+			}
+			if a.guardETW.Running() {
+				caps["process_provenance"] = "etw+toolhelp"
+			}
 		}
 		return caps
 	}
@@ -652,15 +679,15 @@ func (a *Agent) bootstrapGuard(ctx context.Context) {
 	a.guardMonitor.Start(ctx)
 
 	etwSource := etw.New(a.client.AgentID, config.OSName(), a.cfg.Version,
-		a.cfg.ETWEnabled, a.cfg.ETWPath, a.cfg.ETWAllowUnsigned)
-	if available, reason := etwSource.Available(ctx); available {
-		if stream, ok := etwSource.Start(ctx, a.emitGuardEvent); ok {
-			a.guardETW = stream
-		} else {
-			a.log.Warn("ETW non avviato", "reason", reason)
-		}
+		a.cfg.ETWEnabled, a.cfg.ETWPath, a.cfg.ETWAllowUnsigned, a.cfg.ETWSHA256)
+	if a.cfg.ETWEnabled {
+		// The supervisor restarts the helper if its ETW session or process
+		// disappears. It does not make the user-mode agent unkillable; it
+		// closes the silent "ETW died once, polling forever" gap.
+		a.guardETW = etw.NewSupervisor(etwSource, a.emitGuardEvent, a.log)
+		a.guardETW.Start(ctx)
 	} else {
-		a.log.Info("ETW non attivo; polling processi come fallback dichiarato", "reason", reason)
+		a.log.Info("ETW non attivo; polling processi come fallback dichiarato", "reason", "disabled")
 	}
 
 	a.guardCaps = map[string]any{
@@ -670,6 +697,7 @@ func (a *Agent) bootstrapGuard(ctx context.Context) {
 		"fim":                  a.guardFIM != nil && a.guardFIM.Available(),
 		"yara_scan":            yaraScanner.Available(),
 		"etw_kernel_telemetry": a.guardETW != nil && a.guardETW.Running(),
+		"etw_watchdog":         a.guardETW != nil,
 		"device_identity_mtls": true,
 		"registry_snapshot":    runtime.GOOS == "windows",
 		"services_snapshot":    runtime.GOOS == "windows",

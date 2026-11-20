@@ -7,7 +7,7 @@ Goal: Licenza, security policy, release completa, privacy e marchio. Senza Gate 
 
 Exit criteria: Un cliente può ricevere un pacchetto versionato, sa dove segnalare una vulnerabilità e il codice ha una licenza valida.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
 Versioning note: target names are provisional; the ticket ID is stable."
 [EPIC-GATE-A] Gate A — Kraken esiste,"ID: EPIC-GATE-A
 Kind: epic
@@ -17,7 +17,7 @@ Goal: Kraken si avvia, i test girano, la CI esiste e il codice è nel monorepo.
 
 Exit criteria: `pytest` verde su GitHub, immagine che parte, `/health` 200.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
 Versioning note: target names are provisional; the ticket ID is stable."
 [EPIC-GATE-B] Gate B — Kraken non è un rischio,"ID: EPIC-GATE-B
 Kind: epic
@@ -27,7 +27,7 @@ Goal: Chiudere la classe Critical/High di Kraken: privesc, socket, rete sandbox,
 
 Exit criteria: Nessun Critical aperto; privesc e pivot riprodotti e non più possibili; backup restaurabile.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
 Versioning note: target names are provisional; the ticket ID is stable."
 [EPIC-GATE-C] Gate C — Aegis torna verde,"ID: EPIC-GATE-C
 Kind: epic
@@ -37,7 +37,7 @@ Goal: Chiudere i finding Aegis bloccanti e riportare la CI a verde.
 
 Exit criteria: CI verde, 0 High da pip-audit/npm audit, nessun finding Critical/High aperto in Aegis.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
 Versioning note: target names are provisional; the ticket ID is stable."
 [EPIC-GATE-D] Gate D — Integrazione,"ID: EPIC-GATE-D
 Kind: epic
@@ -47,7 +47,7 @@ Goal: Contratto eventi, ingestione Kraken→Aegis e percorso di migrazione senza
 
 Exit criteria: Un attacco su Kraken produce evento, alert e riga nella timeline Aegis.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
 Versioning note: target names are provisional; the ticket ID is stable."
 [EPIC-FOUNDATION] Foundation (target 4.1.0),"ID: EPIC-FOUNDATION
 Kind: epic
@@ -58,7 +58,7 @@ Goal: Rendere vere le cose già scritte: nessuna feature nuova, solo fix bloccan
 
 Exit criteria: Gate 0 + Gate A/B/C/D verdi; tag `v4.1.0` con artefatti completi.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
 Versioning note: target names are provisional; the ticket ID is stable."
 [EPIC-UNIFIED-SOC] Unified SOC (target 4.2.0),"ID: EPIC-UNIFIED-SOC
 Kind: epic
@@ -69,7 +69,7 @@ Goal: Kraken come microservizio separato: ingestione, UI dedicata, vista unifica
 
 Exit criteria: Un attacco SSH produce sessione Kraken, evento, alert e timeline Aegis entro 10 s.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
 Versioning note: target names are provisional; the ticket ID is stable."
 [EPIC-CONTAINMENT] Containment & Deception (target 4.3.0),"ID: EPIC-CONTAINMENT
 Kind: epic
@@ -80,7 +80,7 @@ Goal: Dalla visibilità all’azione: contenimento rete/credenziali, catalogo az
 
 Exit criteria: Catena completa scanner→brute force→login esca→comandi→malware→canary→blocco+report.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
 Versioning note: target names are provisional; the ticket ID is stable."
 [EPIC-PLATFORM] Platform + Range (target 5.0.0),"ID: EPIC-PLATFORM
 Kind: epic
@@ -91,7 +91,7 @@ Goal: IdP enterprise, HA, audit/compliance, intel, performance, SDK e range mult
 
 Exit criteria: Un design partner fa login con il proprio IdP, riceve un report per il revisore e sopravvive alla perdita di un nodo.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §6/§10
 Versioning note: target names are provisional; the ticket ID is stable."
 "[GATE0-PRIVACY] Privacy, GDPR e registro trattamenti","ID: GATE0-PRIVACY
 Kind: task
@@ -101,7 +101,7 @@ Goal: Registro trattamenti, DPA template, retention dichiarata e data residency;
 
 Exit criteria: Documenti firmabili; nessun dato personale nei log.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §6.0"
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §6.0"
 [GATE0-TRADEMARK] Ricerca nome e marchio,"ID: GATE0-TRADEMARK
 Kind: task
 Target: Gate 0
@@ -110,7 +110,7 @@ Goal: Ricerca “Aegis” (molti prodotti omonimi), verifica trademark, dominio 
 
 Exit criteria: Parere o naming alternativo documentato.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §6.0"
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §6.0"
 [AEGIS-SEC-001] Re-enroll senza prova di possesso dell'host,"ID: AEGIS-SEC-001
 Kind: finding
 Severity: High
@@ -128,7 +128,7 @@ Fix: legare l'identità a `machine-id`/TPM/instance-id; re-enroll solo con token
 
 Test / acceptance: due enroll con stesso hostname/os → il secondo deve fallire senza token dedicato; con token dedicato deve funzionare e produrre audit.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-SEC-002] Una chiave per due mestieri: enroll e firma OTA,"ID: AEGIS-SEC-002
 Kind: finding
@@ -147,7 +147,7 @@ Fix: tre chiavi separate (enroll, firma manifest, device secret); Ed25519 obblig
 
 Test / acceptance: agente installato con token riceve update Ed25519 firmato → applicato; HMAC con chiave diversa → rifiutato.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-SEC-003] Playbook `script`: comando arbitrario sul Brain,"ID: AEGIS-SEC-003
 Kind: finding
@@ -166,7 +166,7 @@ Fix: rimuovere l'azione e sostituirla con catalogo di azioni nominate; se deve r
 
 Test / acceptance: `script` → `blocked` con flag off; nessun path che raggiunga `subprocess` (grep test).
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-SEC-004] Decompressione non limitata in Aegis Total,"ID: AEGIS-SEC-004
 Kind: finding
@@ -185,7 +185,7 @@ Fix: `zlib.decompressobj(..., max_length)` incrementale, cap progressivo, rifiut
 
 Test / acceptance: payload 1:1000 oltre il cap → 422 senza superare il limite di memoria (misurare RSS).
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-SEC-005] Rate limit in memoria e IP del proxy,"ID: AEGIS-SEC-005
 Kind: finding
@@ -204,7 +204,7 @@ Fix: nel compose prod `RATE_LIMIT_STORAGE_URI=redis://...` e `RATE_LIMIT_TRUST_F
 
 Test / acceptance: due IP dietro proxy → bucket distinti; Redis down → comportamento dichiarato.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-SEC-006] API key globale unica per l'ingestione,"ID: AEGIS-SEC-006
 Kind: finding
@@ -223,7 +223,7 @@ Fix: tabella `api_keys(id, name, hash, scopes, source, revoked_at, last_used)`; 
 
 Test / acceptance: chiave A non scrive sulla sorgente B; revoca immediata senza impatto sulle altre.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-SEC-007] `REMOVE_PERSISTENCE` distruttivo e disonesto,"ID: AEGIS-SEC-007
 Kind: finding
@@ -242,7 +242,7 @@ Fix: cancellare il singolo valore (`/v <name>`), mai `/va`; se non si rimuove nu
 
 Test / acceptance: chiave Run con due valori → rimosso solo il matching; Linux → ack ≠ ok finché non c'è rimozione reale.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-SEC-008] Postura mTLS permissiva,"ID: AEGIS-SEC-008
 Kind: finding
@@ -261,7 +261,7 @@ Fix: profili espliciti: `lab` (off), `pilot` (optional + log), `prod` (required 
 
 Test / acceptance: `AEGIS_PROFILE=prod` con MTLS_MODE=off → il Brain non parte.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-SEC-009] mTLS via header = certificato come credenziale portabile,"ID: AEGIS-SEC-009
 Kind: finding
@@ -280,7 +280,7 @@ Fix: terminare TLS con client auth in Caddy (`Caddyfile.mtls` già presente) e f
 
 Test / acceptance: header `X-Client-Cert` inviato direttamente al Brain (bypass proxy) → rifiutato.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-SEC-011] Device secret in argv di `curl`,"ID: AEGIS-SEC-011
 Kind: finding
@@ -299,7 +299,7 @@ Fix: preferire `urllib` (già implementato) e usare curl solo con `--config` da 
 
 Test / acceptance: avviare l'agente e verificare che `/proc/<pid>/cmdline` non contenga il token; unit test sul builder di comando.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.1
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-LOGIC-001] `isolate` risponde `agent.isolated` senza aggiornarlo,"ID: AEGIS-LOGIC-001
 Kind: finding
@@ -318,7 +318,7 @@ Fix: aggiornare stato su ack, non su enqueue
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 "[AEGIS-LOGIC-002] Idempotenza playbook (playbook, alert) blocca la riesecuzione dopo riapertura","ID: AEGIS-LOGIC-002
 Kind: finding
@@ -337,7 +337,7 @@ Fix: chiave con `revision`, TTL configurabile
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-LOGIC-003] Coda comandi `ltrim 0..99` perde i più vecchi,"ID: AEGIS-LOGIC-003
 Kind: finding
@@ -356,7 +356,7 @@ Fix: coda per priorità + metrica `commands_dropped`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-LOGIC-004] Revoca agente fail-open su errore DB,"ID: AEGIS-LOGIC-004
 Kind: finding
@@ -375,7 +375,7 @@ Fix: fail-closed: 503 su errore, non `pass`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-LOGIC-005] `queue_depth` legge `aegis:events:pending` ma la coda è `aegis:events`,"ID: AEGIS-LOGIC-005
 Kind: finding
@@ -394,7 +394,7 @@ Fix: usare la chiave vera + `LLEN processing/dlq`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 "[AEGIS-LOGIC-006] 2 test SIEM dipendono dal calendario (corpus 2026-09-15, cap 720 h)","ID: AEGIS-LOGIC-006
 Kind: finding
@@ -413,7 +413,7 @@ Fix: `freezegun` o corpus generato relativo a `now`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-LOGIC-007] 5 test falliscono senza DB invece di skippare,"ID: AEGIS-LOGIC-007
 Kind: finding
@@ -432,7 +432,7 @@ Fix: usare fixture `db_session` o marker `integration`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-LOGIC-008] `pymongo`/`motor` dipendenze mai importate,"ID: AEGIS-LOGIC-008
 Kind: finding
@@ -451,7 +451,7 @@ Fix: rimozione
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-LOGIC-009] PyJWT 2.14.0 con 2 advisory,"ID: AEGIS-LOGIC-009
 Kind: finding
@@ -470,7 +470,7 @@ Fix: bump a 2.15.0 + test token legacy
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-OPS-001] Backup: passphrase in env del container,"ID: AEGIS-OPS-001
 Kind: finding
@@ -489,7 +489,7 @@ Fix: secret file 0400 + `--passphrase-file`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-OPS-002] Nessun test automatico di restore,"ID: AEGIS-OPS-002
 Kind: finding
@@ -508,7 +508,7 @@ Fix: job notturno: restore su DB usa-e-getta + checksum
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-OPS-003] Bundle frontend 682 kB in un chunk,"ID: AEGIS-OPS-003
 Kind: finding
@@ -527,7 +527,7 @@ Fix: `manualChunks` per vendor/pagine
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-OPS-004] 25 warning lint frontend,"ID: AEGIS-OPS-004
 Kind: finding
@@ -546,7 +546,7 @@ Fix: `npm run lint -- --fix` + regola su exhaustive-deps
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-OPS-005] Vite con 3 advisory high (dev-only),"ID: AEGIS-OPS-005
 Kind: finding
@@ -565,7 +565,7 @@ Fix: bump Vite; separare audit dev/prod
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 "[AEGIS-OPS-006] Discovery usa `create_subprocess_shell(""arp -a"")`","ID: AEGIS-OPS-006
 Kind: finding
@@ -584,7 +584,7 @@ Fix: `exec` con argv + parsing
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 "[AEGIS-OPS-007] Stato in-process (dedup, rate limit, cache) e un solo worker","ID: AEGIS-OPS-007
 Kind: finding
@@ -603,7 +603,7 @@ Fix: stato condiviso su Redis + test di concorrenza; worker multipli dietro Cadd
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-OPS-008] Nessun RBAC per sito/tenant,"ID: AEGIS-OPS-008
 Kind: finding
@@ -622,7 +622,7 @@ Fix: tabella `sites`, scope su ogni query, ruolo per sito
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-REL-001] Nessuna licenza,"ID: AEGIS-REL-001
 Kind: finding
@@ -641,7 +641,7 @@ Fix: scegliere il modello (D1), aggiungere `LICENSE`, `NOTICE`, `THIRD_PARTY_NOT
 
 Test / acceptance: check CI che fallisce se `LICENSE` manca; revisione legale prima del tag.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [AEGIS-REL-002] Release incompleta,"ID: AEGIS-REL-002
 Kind: finding
@@ -660,7 +660,7 @@ Fix: release pipeline che builda e firma (cosign) tutte le immagini, allega `doc
 
 Test / acceptance: dry-run di release su tag `v4.1.0-rc1`; smoke test che parte dagli artefatti scaricati, non dal repo.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.2
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-000] Il servizio non si avvia (blocker assoluto),"ID: KRAKEN-SEC-000
 Kind: finding
@@ -679,7 +679,7 @@ Fix: n/a
 
 Test / acceptance: `import app.main`, `alembic upgrade head`, `pytest tests/unit` verdi; immagine che parte.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-001] Registrazione pubblica con ruolo admin dal client,"ID: KRAKEN-SEC-001
 Kind: finding
@@ -698,7 +698,7 @@ Fix: rimuovere `is_admin` da `UserCreate`; `is_admin=False` sempre; register dis
 
 Test / acceptance: register con `is_admin:true` → 422 o utente non admin; register con flag off → 403.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-002] Docker socket nel processo applicativo,"ID: KRAKEN-SEC-002
 Kind: finding
@@ -717,7 +717,7 @@ Fix: rimuovere il socket dall'app; introdurre un `sandbox-broker` (socket-proxy 
 
 Test / acceptance: `/var/run/docker.sock` non esiste nel container app; create/exec/destroy funzionano via broker; tentativo di `POST /containers/create` con `Privileged:true` → 403 dal proxy.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-003] Sandbox con uscita Internet,"ID: KRAKEN-SEC-003
 Kind: finding
@@ -736,7 +736,7 @@ Fix: rete `internal: true` senza gateway, DNS disabilitato, `network_mode: none`
 
 Test / acceptance: dalla sandbox `curl https://example.com` e `getent hosts example.com` falliscono; test in CI con `docker network inspect` che verifica `Internal: true`.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-004] Estrazione sample senza limiti,"ID: KRAKEN-SEC-004
 Kind: finding
@@ -755,7 +755,7 @@ Fix: cap per file (es. 64 MB) e per sessione (256 MB), streaming su disco con ha
 
 Test / acceptance: file 512 MB → scartato, evento registrato, RSS stabile.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-005] Password degli attaccanti in chiaro,"ID: KRAKEN-SEC-005
 Kind: finding
@@ -774,7 +774,7 @@ Fix: salvare solo hash SHA-256 + pattern (lunghezza, classi, top-1000), redactio
 
 Test / acceptance: ingest con password nota → nessun campo in chiaro su DB, export CSV/JSON/PDF, log; il valore originale non è recuperabile.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-006] Segreti di default non validati,"ID: KRAKEN-SEC-006
 Kind: finding
@@ -793,7 +793,7 @@ Fix: `:?` su tutti i segreti (compose non parte senza), validazione in `Settings
 
 Test / acceptance: compose senza `.env` → exit non-zero con messaggio; con password debole → rifiuto all'avvio.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-007] API key interna non constant-time,"ID: KRAKEN-SEC-007
 Kind: finding
@@ -812,7 +812,7 @@ Fix: `hmac.compare_digest`.
 
 Test / acceptance: unit sul comparatore.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-008] Nessuna CI sul repo GitHub,"ID: KRAKEN-SEC-008
 Kind: finding
@@ -831,7 +831,7 @@ Fix: portare i job in `.github/workflows/ci.yml` (ruff, pytest, bandit, pip-audi
 
 Test / acceptance: PR con test rotto → rossa; PR con CVE → rossa.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-009] Refresh token non revocabile,"ID: KRAKEN-SEC-009
 Kind: finding
@@ -850,7 +850,7 @@ Fix: jti del refresh su Redis con single-use e rotazione, revoca globale per ute
 
 Test / acceptance: logout → refresh 401; riuso di un refresh consumato → 401 e revoca famiglia.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-010] TLS self-signed generato a runtime,"ID: KRAKEN-SEC-010
 Kind: finding
@@ -869,7 +869,7 @@ Fix: niente generazione automatica in produzione: fallire con messaggio esplicit
 
 Test / acceptance: avvio prod senza cert → exit non-zero.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
 Versioning note: the target release name may change; the finding ID does not."
 "[KRAKEN-SEC-011] Backup che chiama `docker exec`, non cifrato","ID: KRAKEN-SEC-011
 Kind: finding
@@ -888,7 +888,7 @@ Fix: `pg_dump` diretto via rete con `PGPASSWORD` da file, cifratura GPG AES-256 
 
 Test / acceptance: backup eseguito in CI su compose; restore su DB vuoto; checksum confrontato; nessun file `.sql` in chiaro.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.3
 Versioning note: the target release name may change; the finding ID does not."
 "[KRAKEN-LOGIC-001] Ingest non idempotente (`session_id` UNIQUE, nessun upsert)","ID: KRAKEN-LOGIC-001
 Kind: finding
@@ -907,7 +907,7 @@ Fix: `INSERT ... ON CONFLICT (session_id) DO UPDATE` o upsert applicativo; rispo
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-LOGIC-002] Limite sandbox concorrenti fuori dal lock,"ID: KRAKEN-LOGIC-002
 Kind: finding
@@ -926,7 +926,7 @@ Fix: check+insert sotto `async with self._lock`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-LOGIC-003] Blacklist usata con `token[:32]` invece del jti,"ID: KRAKEN-LOGIC-003
 Kind: finding
@@ -945,7 +945,7 @@ Fix: estrarre jti come in `deps.py`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 "[KRAKEN-LOGIC-004] `SANDBOX_API_URL` inutilizzato, URL hardcoded nei sensori","ID: KRAKEN-LOGIC-004
 Kind: finding
@@ -964,7 +964,7 @@ Fix: usare `settings.SANDBOX_API_URL`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-LOGIC-005] Test unit scrivono in `/app`,"ID: KRAKEN-LOGIC-005
 Kind: finding
@@ -983,7 +983,7 @@ Fix: `tmp_path` + env `DATA_DIR`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-LOGIC-006] Nessun limite a `commands[]` per sessione,"ID: KRAKEN-LOGIC-006
 Kind: finding
@@ -1002,7 +1002,7 @@ Fix: `max_length=200` + troncamento dichiarato
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-OPS-001] Prometheus: label `sha256_prefix` su counter,"ID: KRAKEN-OPS-001
 Kind: finding
@@ -1021,7 +1021,7 @@ Fix: rimuovere la label, usare un counter senza label + esempio nel log
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-OPS-002] `attacks_total{country}` senza cap,"ID: KRAKEN-OPS-002
 Kind: finding
@@ -1040,7 +1040,7 @@ Fix: normalizzare a ISO-3166 e `unknown`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-OPS-003] Nessuna retention sui sample,"ID: KRAKEN-OPS-003
 Kind: finding
@@ -1059,7 +1059,7 @@ Fix: retention 30 giorni, quota volume, cancellazione sicura con audit
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-OPS-004] `eventi`/`comandi` senza paginazione dichiarata oltre 200,"ID: KRAKEN-OPS-004
 Kind: finding
@@ -1078,7 +1078,7 @@ Fix: cursore + streaming CSV
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-012] Sandbox con root filesystem scrivibile,"ID: KRAKEN-SEC-012
 Kind: finding
@@ -1097,7 +1097,7 @@ Fix: `read_only=True` + `tmpfs /tmp` 64 MB + `no-new-privileges`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-SEC-013] `python-jose` 3.3.0 e 30+ advisory,"ID: KRAKEN-SEC-013
 Kind: finding
@@ -1116,7 +1116,7 @@ Fix: migrare a PyJWT (come Aegis) e rimuovere `python-jose`; bump dipendenze
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-LOGIC-007] Import JWT sbagliato e `jti` fallback `token[:32]`,"ID: KRAKEN-LOGIC-007
 Kind: finding
@@ -1135,7 +1135,7 @@ Fix: usare lo stesso decoder di `deps.py`, mai il fallback
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [KRAKEN-REL-001] Commit `7fd50a9` non pushato,"ID: KRAKEN-REL-001
 Kind: finding
@@ -1154,7 +1154,7 @@ Fix: push su `origin/main`, poi subtree; tag `v0.1.0`
 
 Test / acceptance: n/a
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §4.4
 Versioning note: the target release name may change; the finding ID does not."
 [WP-FOUND-01] Kraken si avvia e ha una CI,"ID: WP-FOUND-01
 Plan item: 4.1.1
@@ -1168,7 +1168,7 @@ Details:
 - Accettazione: `pytest` 65/65 su GitHub; `alembic upgrade head` da DB vuoto; `docker build` verde; `ruff` pulito.
 - Effort: 0,5 gg · Dipendenze: nessuna.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-FOUND-02] Kraken non è più una privilege escalation,"ID: WP-FOUND-02
 Plan item: 4.1.2
@@ -1182,7 +1182,7 @@ Details:
 - Accettazione: register non crea admin; il container app non vede `/var/run/docker.sock`; dalla sandbox `wget https://example.com` fallisce; compose senza `.env` non parte; senza certificato non serve TLS finto.
 - Effort: 3 gg · Dipendenze: 4.1.1.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-FOUND-03] Kraken non conserva più dati che non deve,"ID: WP-FOUND-03
 Plan item: 4.1.3
@@ -1196,7 +1196,7 @@ Details:
 - Accettazione: ingest con password → nessun chiaro su DB/log/JSONL/Telegram; file 512 MB scartato; backup GPG + restore testato; retention 30 gg attiva.
 - Effort: 2,5 gg · Dipendenze: 4.1.2.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-FOUND-04] Aegis: integrità degli agenti,"ID: WP-FOUND-04
 Plan item: 4.1.4
@@ -1210,7 +1210,7 @@ Details:
 - Accettazione: re-enroll senza token → 409 con audit; agente installato da one-liner riceve e applica un update Ed25519; `ps` non mostra il device secret; `REMOVE_PERSISTENCE` rimuove solo il valore giusto e dichiara `failed` quando non rimuove nulla.
 - Effort: 3 gg · Dipendenze: nessuna (può procedere in parallelo).
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-FOUND-05] Aegis: postura e DoS,"ID: WP-FOUND-05
 Plan item: 4.1.5
@@ -1224,7 +1224,7 @@ Details:
 - Accettazione: zip bomb respinta senza crescita di RSS oltre il limite; due IP distinti hanno bucket distinti; chiave A non scrive su sorgente B e la revoca è immediata; `AEGIS_PROFILE=prod` con mTLS off non parte; coda comandi espone `commands_dropped`; revoca fail-closed; `/health` mostra la coda vera.
 - Effort: 3 gg · Dipendenze: 4.1.4 (per la parte agenti).
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-FOUND-06] Aegis: CI verde,"ID: WP-FOUND-06
 Plan item: 4.1.6
@@ -1238,7 +1238,7 @@ Details:
 - Accettazione: suite verde a qualunque data (test con `freezegun` a 2026-09-15, 2027-01-01, 2030-06-01); `pip-audit` 0; `npm audit --omit=dev` 0 high; job di restore notturno verde.
 - Effort: 1,5 gg · Dipendenze: 4.1.5.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-FOUND-07] Kraken nel compose root + smoke test end-to-end,"ID: WP-FOUND-07
 Plan item: 4.1.9
@@ -1252,7 +1252,7 @@ Details:
 - Accettazione: `docker compose --profile kraken up` parte da zero; `/kraken/*` serve UI e API; un attacco SSH/HTTP produce evento, alert e incidente Aegis; Brain spento → outbox cresce e si svuota al ritorno; nessuna richiesta esterna necessaria alla UI.
 - Effort: 2 gg · Dipendenze: 4.1.7, 4.1.8.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-SOC-01] Ingestione Kraken→Aegis (verticale 4.1.7),"ID: WP-SOC-01
 Plan item: 4.1.7
@@ -1267,7 +1267,7 @@ Details:
 - Stato 2026-11-15: implementato e verificato (outbox Postgres, retry/stale recovery, 130 test Kraken, prova live con Brain spento e ripresa).
 - Effort: 3 gg · Dipendenze: 4.1.0.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-SOC-10] Kraken→Aegis: hardening canale e replay,"ID: WP-SOC-10
 Plan item: 4.2.1
@@ -1281,7 +1281,7 @@ Details:
 - Accettazione: replay controllato senza duplicati; metriche pending/sent/failed/attempts esposte e documentate; eventi `context=lab` marcati e distinguibili dai `sensor`.
 - Effort: 2 gg · Dipendenze: 4.1.7.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-SOC-02] Regole di detection su deception,"ID: WP-SOC-02
 Plan item: 4.2.2
@@ -1294,7 +1294,7 @@ Details:
 - Accettazione: replay su corpus Kraken sintetico → ogni regola ha almeno un positivo e un negativo; F1 resta 1.0 sul corpus Aegis; nessun alert per traffico scanner ""solo banner"".
 - Effort: 2 gg · Dipendenze: 4.2.1.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-SOC-03] Timeline unificata (§7.3),"ID: WP-SOC-03
 Plan item: 4.2.3
@@ -1307,7 +1307,7 @@ Details:
 - Accettazione: p95 < 400 ms su 10k eventi; ordinamento corretto; link funzionanti.
 - Effort: 3 gg · Dipendenze: 4.2.1.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-SOC-04] UI Kraken base + vista Aegis in sola lettura,"ID: WP-SOC-04
 Plan item: 4.1.8
@@ -1323,7 +1323,7 @@ Details:
 - Stato 2026-11-15: implementato e verificato (SSO monouso, routing Caddy, asset vendorizzati, smoke browser offline).
 - Effort: 5 gg (3 routing/SSO Kraken + 2 vista Aegis) · Dipendenze: 4.1.7.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 "[WP-SOC-11] UI Kraken operativa estesa (campagne, sensori, Lab)","ID: WP-SOC-11
 Plan item: 4.2.4
@@ -1336,7 +1336,7 @@ Details:
 - Accettazione: UI Kraken estesa senza duplicare la gestione nel Brain; SPA Aegis mostra solo collegamento/correlazione; SSO resta funzionante.
 - Effort: 5 gg · Dipendenze: 4.1.8, 4.2.1.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-SOC-05] ATT&CK coverage (§7.4),"ID: WP-SOC-05
 Plan item: 4.2.5
@@ -1348,7 +1348,7 @@ Details:
 - Accettazione: matrice coerente con `coverage()`; buchi visibili; export.
 - Effort: 2 gg · Dipendenze: nessuna.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-SOC-06] Soppressioni governate (§7.9),"ID: WP-SOC-06
 Plan item: 4.2.6
@@ -1360,7 +1360,7 @@ Details:
 - Accettazione: TTL obbligatorio; report mensile; alert alla scadenza.
 - Effort: 2 gg · Dipendenze: nessuna.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-SOC-07] Flotta sensori Kraken (§8.2),"ID: WP-SOC-07
 Plan item: 4.2.7
@@ -1373,7 +1373,7 @@ Details:
 - Accettazione: nodo compromesso non impersona altri; revoca immediata; nessun secret in chiaro.
 - Effort: 3 gg · Dipendenze: 4.1.2 (broker) e 4.2.1.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-SOC-08] Nuovi sensori SMB e RDP (§8.1),"ID: WP-SOC-08
 Plan item: 4.2.8
@@ -1385,7 +1385,7 @@ Details:
 - Accettazione: SMB cattura hash NetNTLMv2 e file esca; RDP registra tentativi e banner; entrambi con health e metriche; nessuna implementazione di relay.
 - Effort: 4 gg · Dipendenze: 4.2.7.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-SOC-09] Hardening mTLS reale (AEGIS-SEC-009) e Brain multi-worker (§7.10),"ID: WP-SOC-09
 Plan item: 4.2.9
@@ -1397,7 +1397,7 @@ Details:
 - Accettazione: header `X-Client-Cert` diretto rifiutato; 2 worker senza duplicati; p95 < 300 ms a 200 rps.
 - Effort: 4 gg · Dipendenze: 4.1.5.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-CONT-01] Contenimento di rete (§7.1),"ID: WP-CONT-01
 Plan item: 4.3.1
@@ -1411,7 +1411,7 @@ Details:
 - Effort: 5 gg · Dipendenze: 4.2.
 - Rischio: un bug qui spegne la rete di un cliente → serve approvazione esplicita, TTL breve, dry-run di default in `pilot`.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-CONT-02] Contenimento credenziali (§7.2),"ID: WP-CONT-02
 Plan item: 4.3.2
@@ -1423,7 +1423,7 @@ Details:
 - Accettazione: disabilitazione con doppia approvazione su AD di test; audit; nessuna credenziale salvata.
 - Effort: 4 gg · Dipendenze: 4.3.1 (stesso motore di azioni).
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-CONT-03] Playbook come catalogo di azioni nominate,"ID: WP-CONT-03
 Plan item: 4.3.3
@@ -1436,7 +1436,7 @@ Details:
 - Accettazione: nessun path raggiunge `subprocess` con input utente; grep test; dry-run non produce effetti.
 - Effort: 3 gg · Dipendenze: 4.3.1/4.3.2.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 "[WP-CONT-04] Detonazione, YARA e analisi sample (§8.3)","ID: WP-CONT-04
 Plan item: 4.3.4
@@ -1449,7 +1449,7 @@ Details:
 - Effort: 6 gg · Dipendenze: 4.1.2/4.1.3.
 - Rischio: alto (malware). Richiede container dedicato, `no-new-privileges`, seccomp, volume separato.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-CONT-05] Canary token e file esca (§8.5),"ID: WP-CONT-05
 Plan item: 4.3.5
@@ -1461,7 +1461,7 @@ Details:
 - Accettazione: apertura PDF → evento con `canary_id`, IP, user-agent; nessuna macro; distribuzione via agente.
 - Effort: 3 gg · Dipendenze: 4.2.1.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-CONT-06] Risposta automatica su deception (§8.6),"ID: WP-CONT-06
 Plan item: 4.3.6
@@ -1473,7 +1473,7 @@ Details:
 - Accettazione: attacco high → incidente + playbook proposto + IP bloccato (target simulato) + audit, in <10 s.
 - Effort: 2 gg · Dipendenze: 4.3.1, 4.3.5.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-CONT-07] Blocklist e export operativo (§8.7),"ID: WP-CONT-07
 Plan item: 4.3.7
@@ -1485,7 +1485,7 @@ Details:
 - Accettazione: 10k IP in <2 s, formati firewall, nessun IP privato, firma e versione.
 - Effort: 2 gg · Dipendenze: 4.2.1.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-CONT-08] Report PDF unificato (§7.6),"ID: WP-CONT-08
 Plan item: 4.3.8
@@ -1497,7 +1497,7 @@ Details:
 - Accettazione: <5 s per 500 eventi; nessun dato sensibile; testo estraibile e testato.
 - Effort: 3 gg · Dipendenze: 4.2.3.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-CONT-09] Alert routing e turni (§7.8),"ID: WP-CONT-09
 Plan item: 4.3.9
@@ -1509,7 +1509,7 @@ Details:
 - Accettazione: escalazione a T+15; ack ferma; MTTA in dashboard; canali Slack/Teams/webhook/PagerDuty-compat.
 - Effort: 4 gg · Dipendenze: nessuna.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-CONT-10] Threat intel feed (§7.7),"ID: WP-CONT-10
 Plan item: 4.3.10
@@ -1521,7 +1521,7 @@ Details:
 - Accettazione: MISP/OTX/abuse.ch; cache 24 h; nessuna query per IP privati; degradazione silenziosa ma misurata.
 - Effort: 4 gg · Dipendenze: 4.2.1.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-CONT-11] Dollhouse (§8.9),"ID: WP-CONT-11
 Plan item: 4.3.11
@@ -1533,7 +1533,7 @@ Details:
 - Accettazione: avvio <2 s, nessun file reale, watcher su file esca.
 - Effort: 4 gg · Dipendenze: 4.3.4.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-CONT-12] Kraken Lab: scenari di verifica detection end-to-end (§8.12),"ID: WP-CONT-12
 Plan item: 4.3.12
@@ -1546,7 +1546,7 @@ Details:
 - Accettazione: suite di scenari base eseguibile → report pass/fail/missed per asserzione con riferimenti a eventi/alert; nessuna azione distruttiva automatica in shadow; esecuzione confinata a reti lab isolate; risultati visibili in UI Kraken e riassunti nella vista unificata Aegis.
 - Effort: 8 gg · Dipendenze: 4.2.1, 4.2.4, 4.3.4 (per scenari con sample).
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-PLAT-01] Identità e accesso enterprise,"ID: WP-PLAT-01
 Plan item: 5.0.1
@@ -1559,7 +1559,7 @@ Details:
 - Accettazione: login con Entra ID di test, mapping corretto, deprovisioning entro 1 min, audit di ogni cambio ruolo.
 - Effort: 8–10 gg.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-PLAT-02] Alta disponibilità vera,"ID: WP-PLAT-02
 Plan item: 5.0.2
@@ -1572,7 +1572,7 @@ Details:
 - Accettazione: uccidere un nodo sotto carico → 0 richieste perse, RTO < 60 s; migrazione con traffico attivo.
 - Effort: 10 gg.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-PLAT-03] Audit e compliance,"ID: WP-PLAT-03
 Plan item: 5.0.3
@@ -1585,7 +1585,7 @@ Details:
 - Accettazione: manomissione di una riga di audit rilevata; export completo in <1 min per 100k righe.
 - Effort: 6 gg.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-PLAT-04] Intelligence e federation (§8.4/8.8),"ID: WP-PLAT-04
 Plan item: 5.0.4
@@ -1597,7 +1597,7 @@ Details:
 - Campagne, fingerprint (HASSH/JA3), STIX/TAXII, MISP push, condivisione opzionale tra tenant (opt-in, anonimizzata).
 - Effort: 8 gg.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-PLAT-05] Performance e scala,"ID: WP-PLAT-05
 Plan item: 5.0.5
@@ -1611,7 +1611,7 @@ Details:
 - Accettazione: benchmark con `k6` o `locust` documentato e riproducibile; nessuna regressione oltre il 10%.
 - Effort: 8 gg.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-PLAT-06] Estensibilità,"ID: WP-PLAT-06
 Plan item: 5.0.6
@@ -1623,7 +1623,7 @@ Details:
 - SDK playbook (Python) con azioni firmate, webhook in uscita con HMAC, API versionata con deprecation policy, plugin di detection in sandbox (nessun import arbitrario nel processo).
 - Effort: 8 gg.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."
 [WP-PLAT-07] Kraken Lab — Range v1 (D9),"ID: WP-PLAT-07
 Plan item: 5.0.7
@@ -1637,5 +1637,5 @@ Details:
 - Effort: 25–35 gg · Dipendenze: 4.2.1, 4.2.4, 4.3.4, 4.3.12.
 - Rischio: è un prodotto nel prodotto; se il tempo non c'è, si riduce lo scenario, non l'isolamento.
 
-Source: docs/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
+Source: docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md §10
 Versioning note: the target release name may change; the work-package ID does not."

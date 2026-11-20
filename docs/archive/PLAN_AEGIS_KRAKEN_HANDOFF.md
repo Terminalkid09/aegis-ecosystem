@@ -5,11 +5,11 @@
 **Decisione 2026-11-17 — agente unico:** Guard e NodeTrace confluiscono in
 un solo agente Go nella 4.3.0; la response intelligence passa alla 4.4.0.
 `aegis-link` resta Spring Boot. La specifica eseguibile aggiornata è
-`docs/PLAN_V4.2.md` §Fase 3-4; la sezione 4.4.0 sotto descrive la response
+`docs/archive/PLAN_V4.2.md` §Fase 3-4; la sezione 4.4.0 sotto descrive la response
 storica e i suoi numeri 4.4.x non sono più numeri di release.
 **Repo Aegis:** `Terminalkid09/aegis-ecosystem`, branch `dev` @ `ea57f08` (codice identico a `c9831c5`; dopo `c9831c5` solo commit documentali. `main` @ `38e245f`)
 **Repo Kraken:** `Terminalkid09/Kraken`, branch `main` locale @ `7fd50a9` (1 commit avanti a `origin/main` @ `d86c8d5`, **non pushato**). Il fix di avvio KRAKEN-SEC-000 è già in `7fd50a9`; su `origin/main` il servizio non parte ancora.
-**Report di analisi precedente:** `docs/ANALISI_AEGIS_KRAKEN_v4.md` (analisi del 2026-11-08; questo documento è la specifica operativa aggiornata)
+**Report di analisi precedente:** `docs/archive/ANALISI_AEGIS_KRAKEN_v4.md` (analisi del 2026-11-08; questo documento è la specifica operativa aggiornata)
 
 **Aggiornamento requisiti (v2.1, vincolante):**
 - **Kraken è e resta un microservizio separato** (`services/kraken`): processo, DB, migrazioni, rete, credenziali e UI propri. **Mai fuso nel Brain** (niente logica, tabelle, socket o privilegi di Kraken nel Brain). Il Brain è piano di controllo/detection; Kraken è servizio di deception e lab.
@@ -1642,7 +1642,7 @@ Regole:
 ### Dove mettere i nuovi file
 
 ```
-docs/PLAN_AEGIS_KRAKEN_HANDOFF.md      # questo documento
+docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md      # questo documento
 SECURITY.md                             # postura, minacce, modello
 docs/runbooks/{agent,brain,kraken,malware,backup}.md
 docs/adr/0001-kraken-as-service.md      # decisione di §5.1
@@ -1681,7 +1681,7 @@ tests/security/                         # test di sicurezza eseguibili
 ```bash
 git checkout dev && git pull
 python -c "import sys; print(sys.version)"   # 3.15
-sed -n '1,60p' docs/PLAN_AEGIS_KRAKEN_HANDOFF.md   # questo documento
+sed -n '1,60p' docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md   # questo documento
 # 1. NON pushare e NON fare subtree senza autorizzazione esplicita.
 #    Chiedi: "Posso pushare 7fd50a9 su origin/main e importare con subtree?"
 #    Solo dopo il sì, nel repo Kraken: git push origin main

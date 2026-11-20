@@ -95,7 +95,8 @@ PostgreSQL overhead.
 Measured peaks: **<10 ev/s** even during an exec storm (eBPF benchmark: 300
 execs in 246 ms). Conclusion: a **single `uvicorn --workers 1` worker and a
 single PostgreSQL instance are sufficient up to ~300 normal hosts**; beyond that,
-async workers and PostgreSQL partitioning are required (see `ARCH_REVIEW`).
+async workers and PostgreSQL partitioning are required (see
+[`archive/ARCH_REVIEW.md`](archive/ARCH_REVIEW.md)).
 
 ## Sensor overhead
 

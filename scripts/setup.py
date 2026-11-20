@@ -142,11 +142,12 @@ def ensure_env() -> str:
         "MASTER_KEY_B64": master_key,
         "JWT_ALGORITHM": "HS256",
         "JWT_EXPIRE_MINUTES": "60",
-        # Local dashboard is HTTP on :3000. A real public domain is served
-        # through Caddy over HTTPS, so the session cookie must be Secure.
+        # Only the direct localhost:3000 dashboard is plain HTTP. aegis.local
+        # is served by Caddy over HTTPS, so its cookie must remain Secure even
+        # though the hostname is not a public FQDN.
         "AEGIS_DEBUG": "false",
         "AEGIS_ALLOW_OPEN_REGISTRATION": "false",
-        "AEGIS_COOKIE_SECURE": "false" if domain in ("aegis.local", "localhost") else "true",
+        "AEGIS_COOKIE_SECURE": "false" if domain == "localhost" else "true",
         # Caddy domain/TLS. A real FQDN + real ACME email uses Let's Encrypt;
         # the lab default uses Caddy's internal CA.
         "AEGIS_DOMAIN": domain,

@@ -70,9 +70,10 @@ MITRE/SOAR rules, no server change.
 The unified release archives carry the helpers with the agent:
 
 - **Windows** `unified-latest.zip`: `aegis-agent.exe`, `aegis-etw.exe`. The
-  one-liner sets `AEGIS_ETW_ENABLED=true`, an absolute `AEGIS_ETW_PATH` and
-  `AEGIS_ETW_ALLOW_UNSIGNED=true` because the locally built helper has no
-  Authenticode signature.
+  one-liner sets `AEGIS_ETW_ENABLED=true`, an absolute `AEGIS_ETW_PATH`,
+  `AEGIS_ETW_ALLOW_UNSIGNED=true` and the pinned `AEGIS_ETW_SHA256` of that
+  exact helper. The agent refuses unsigned mode without a pin or with a hash
+  mismatch, so replacing the helper in its admin-only directory fails closed.
 - **Linux** `unified-latest.tar.gz`: `aegis-agent`, `aegis-collector`,
   `aegis_exec.bpf.o`. When both helpers are present, the one-liner writes
   `NODETRACE_EBPF=1`, `NODETRACE_EBPF_COLLECTOR` and `NODETRACE_EBPF_OBJ` into

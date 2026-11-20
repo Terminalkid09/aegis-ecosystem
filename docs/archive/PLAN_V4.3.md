@@ -64,7 +64,7 @@ Decisioni di perimetro:
 - OpenWrt non è un profilo endpoint. Il network sensor è un binario separato
   (`aegis-net-sensor`) nella traccia 4.5; il profilo `router` resta solo un
   placeholder di laboratorio, da non estendere e da non presentare come
-  network sensor (vedi `docs/PLAN_POST_4.3.md`).
+  network sensor (vedi `docs/archive/PLAN_POST_4.3.md`).
 - La response intelligence resta 4.4: la 4.3 trasporta le azioni di risposta
   esistenti, non ne aggiunge di nuove.
 - Kraken resta un servizio separato con DB, Redis, rete e UI propri.
@@ -131,7 +131,7 @@ Il network sensor che vede la LAN è un **prodotto separato**
 (`aegis-net-sensor`), non un quarto profilo di `aegis-agent`. Il profilo
 `router` attuale è un **placeholder di laboratorio**: ricade nel ramo `sensor`,
 non fa packet capture e non vede il traffico degli altri host. Non va esteso e
-non va venduto come network sensor. Perimetro e fasi: `docs/PLAN_POST_4.3.md`.
+non va venduto come network sensor. Perimetro e fasi: `docs/archive/PLAN_POST_4.3.md`.
 
 Il profilo `router` è un profilo di **laboratorio OpenWrt** per un apparato di
 rete: telemetria minima, nessun FIM/YARA/ETW, nessuna remediation endpoint. Non
@@ -301,7 +301,7 @@ con motivazione. La matrice è un gate, non un documento descrittivo.
 Il profilo `router` nella matrice è solo il placeholder di laboratorio: non
 significa packet capture, visibilità LAN o policy di rete. Il network sensor
 è il binario separato `aegis-net-sensor` descritto in
-`docs/PLAN_POST_4.3.md` (traccia 4.5).
+`docs/archive/PLAN_POST_4.3.md` (traccia 4.5).
 
 Fuori perimetro dichiarato: macOS/EndpointSecurity, driver kernel Windows,
 ETW-TI, inline prevention, Android.

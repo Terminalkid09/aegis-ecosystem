@@ -260,6 +260,80 @@ def _extract_strings(data: bytes, min_len: int = 6, limit: int = 4000) -> List[s
     return result[:limit]
 
 
+def _yara_rule_fingerprint(rules: List[Any]) -> str:
+    """Impronta delle firme attive, per invalidare la cache dei report.
+
+    Prima la cache era legata solo ai pattern statici: cambiare una regola
+    YARA non rigenerava un report già analizzato. L'impronta non contiene
+    segreti, solo nomi e contenuto delle regole (che sono già nel DB).
+    """
+    parts = sorted(f"{getattr(r, 'name', '')}:{getattr(r, 'content', '')}" for r in rules)
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:12]
+
+
+def _build_detection(total_score: int, verdict: str, files_out: List[Dict[str, Any]],
+                     yara_section: Dict[str, Any], all_iocs: Dict[str, List[str]],
+                     all_imports: List[Dict[str, Any]], truncated: bool) -> Dict[str, Any]:
+    """Sintesi leggibile del perché il verdetto è quello che è.
+
+    Non inventa un punteggio per finding che il motore non ha misurato: espone
+    i segnali effettivi (match YARA, finding high/critical, import, IOC) e la
+    confidenza derivata. Il dettaglio completo resta in `files[].findings`.
+    """
+    findings: List[Dict[str, Any]] = []
+    for file in files_out:
+        for finding in file.get("findings") or []:
+            if isinstance(finding, dict):
+                findings.append(finding)
+    high_or_critical = [f for f in findings if str(f.get("severity", "")).lower() in ("high", "critical")]
+    critical = [f for f in findings if str(f.get("severity", "")).lower() == "critical"]
+    yara_matches = yara_section.get("matches") or []
+    yara_critical = [m for m in yara_matches if str(m.get("severity", "")).lower() == "critical"]
+    if critical or yara_critical:
+        confidence = "high"
+    elif total_score >= 60 and len(high_or_critical) >= 2:
+        confidence = "high"
+    elif total_score >= 20:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    top: List[Dict[str, Any]] = []
+    seen = set()
+    for finding in findings:
+        key = (finding.get("type"), finding.get("detail") or finding.get("match"))
+        if key in seen:
+            continue
+        seen.add(key)
+        item = {
+            "type": finding.get("type"),
+            "severity": finding.get("severity"),
+            "detail": (finding.get("detail") or finding.get("match") or "")[:300],
+        }
+        if finding.get("mitre"):
+            item["mitre"] = finding["mitre"]
+        if finding.get("score"):
+            item["score"] = finding["score"]
+        top.append(item)
+        if len(top) >= 8:
+            break
+
+    return {
+        "score": total_score,
+        "verdict": verdict,
+        "confidence": confidence,
+        "signals": {
+            "yara_matches": len(yara_matches),
+            "yara_rules": yara_section.get("rules_total", 0),
+            "high_or_critical_findings": len(high_or_critical),
+            "suspicious_imports": len(all_imports),
+            "ioc_groups": len(all_iocs),
+            "truncated": truncated,
+        },
+        "top_findings": top,
+    }
+
+
 def _engine_signature() -> str:
     """Impronta di regole e pesi, per la validita' della cache.
 
@@ -1438,6 +1512,19 @@ async def upload_analyze(
 
     sha256 = hashlib.sha256(raw).hexdigest()
 
+    # Le regole YARA sono lette prima della cache: la loro impronta entra nella
+    # chiave, altrimenti un feed aggiornato lascerebbe in cache un verdetto
+    # calcolato con firme vecchie. Fail-soft: un DB momentaneamente non
+    # disponibile non impedisce di classificare con l'euristica statica.
+    active_rules: List[Any] = []
+    try:
+        from app.database.models import YaraRule
+        rules_res = await db.execute(select(YaraRule).where(YaraRule.is_active == True))  # noqa: E712
+        active_rules = rules_res.scalars().all()
+    except Exception as exc:
+        logger.warning("YARA active rules not loaded (fail-soft): %s", exc)
+    yara_rules_sha = _yara_rule_fingerprint(active_rules)
+
     # SHA256 dedup (cache) INVALIDATA dal cambio di engine: il report vecchio
     # resta altrimenti servito per sempre, e dopo una correzione delle regole
     # l'utente continuerebbe a vedere il verdetto precedente (notepad.exe
@@ -1446,11 +1533,12 @@ async def upload_analyze(
     cached = existing.scalars().first()
     if cached:
         cached_engine = (cached.engines or {}).get("static_lite", {}).get("version")
-        if cached_engine == engine_signature:
+        cached_yara = (cached.engines or {}).get("yara", {}).get("rules_sha")
+        if cached_engine == engine_signature and cached_yara == yara_rules_sha:
             return {"sha256": sha256, "cached": True, "score": cached.score,
                     "verdict": cached.verdict, "report_id": cached.id}
-        logger.info("total: report %s rigenerato (engine %s -> %s)",
-                    sha256[:12], cached_engine, engine_signature)
+        logger.info("total: report %s rigenerato (engine %s/%s -> %s/%s)",
+                    sha256[:12], cached_engine, cached_yara, engine_signature, yara_rules_sha)
         await db.delete(cached)
         await db.flush()
 
@@ -1538,34 +1626,80 @@ async def upload_analyze(
                       "note": "Crack/keygen pattern — full code viewer disabled by policy. Verdict only."}]
         total_score = 85
 
-    # ── YARA (firme del SOC, tabella yara_rules) ─────────────────────────
-    # La sandbox statica non e' solo euristica: le firme curate dal SOC
-    # alzano lo score per FATTO. Fail-soft: senza yara-python o senza
-    # regole, il report lo dichiara invece di fingere.
-    yara_section: Dict[str, Any] = {"enabled": False, "matches": []}
+    # ── YARA (firme del SOC e feed firmati) ──────────────────────────────
+    # La sandbox statica non e' solo euristica: le firme curate alzano lo
+    # score per FATTO. Fail-soft: senza yara-python, senza regole o con una
+    # regola rotta, il report lo dichiara invece di fingere una scansione.
+    yara_section: Dict[str, Any] = {
+        "enabled": False,
+        "matches": [],
+        "rules_total": len(active_rules),
+        "rules_compiled": 0,
+        "rules_failed": 0,
+        "rules_sha": yara_rules_sha,
+        "errors": [],
+    }
     try:
-        from app.database.models import YaraRule
         from app.services import yara_engine
-        rules_res = await db.execute(select(YaraRule).where(YaraRule.is_active == True))  # noqa: E712
-        active_rules = rules_res.scalars().all()
         if active_rules:
+            rule_meta = {
+                r.name: {
+                    "severity": getattr(r, "severity", None) or "high",
+                    "description": getattr(r, "description", None),
+                    "mitre": getattr(r, "mitre_technique_id", None),
+                    "tags": getattr(r, "tags", None) or [],
+                    "source": getattr(r, "source", None) or "manual",
+                }
+                for r in active_rules
+            }
             compiled, cerrs = yara_engine.compile_rules([(r.name, r.content) for r in active_rules])
+            yara_section["rules_compiled"] = len(compiled)
+            yara_section["rules_failed"] = len(cerrs)
             if compiled:
-                yara_section = yara_engine.scan_bytes(raw, compiled)
-                err_list = yara_section.get("errors") or cerrs
-                if err_list:
-                    yara_section["errors"] = err_list[:10]
-                if yara_section.get("matches"):
-                    total_score, yfindings = yara_engine.score_impact(yara_section, total_score)
-                    for f in files_out:
-                        f.setdefault("findings", []).extend(yfindings)
+                scan = yara_engine.scan_bytes(raw, compiled, rule_meta)
+                yara_section.update(scan)
+                err_list = list(cerrs) + list(scan.get("errors") or [])
+                yara_section["errors"] = err_list[:10]
+                yara_section["feeds"] = sorted({
+                    getattr(r, "source") for r in active_rules
+                    if getattr(r, "managed", False) and getattr(r, "source", None)
+                })
+                if scan.get("matches"):
+                    total_score, yfindings = yara_engine.score_impact(scan, total_score)
+                    # Il match è sul buffer caricato, non su ogni membro di un
+                    # archivio: attribuirlo a tutti i file produceva finding
+                    # duplicati e fuorvianti. Se il file radice non esiste
+                    # (archivio senza entry top-level), si crea una voce
+                    # esplicita di scope "upload".
+                    target = next((f for f in files_out if f.get("path") == filename), None)
+                    if target is None:
+                        target = {
+                            "path": filename, "kind": "binary",
+                            "format": f"YARA/{fmt.upper()}", "size": len(raw),
+                            "sha256": sha256, "score": 0, "findings": [],
+                            "note": "YARA scan on the uploaded buffer (not a per-member attribution).",
+                        }
+                        files_out.insert(0, target)
+                    target.setdefault("findings", []).extend(yfindings)
+                    target["yara_scope"] = "upload"
+                else:
+                    yara_section.setdefault("note", "YARA enabled; no signature matched")
+            else:
+                yara_section["errors"] = cerrs[:10]
+                yara_section["note"] = "YARA enabled; no rule compiled"
         else:
-            yara_section = {"enabled": True, "matches": [], "note": "no active rule"}
+            yara_section["enabled"] = False
+            yara_section["note"] = "no active YARA rule"
     except Exception as exc:
         logger.warning(f"YARA scan on upload failed (fail-soft): {exc}")
-        yara_section = {"enabled": False, "matches": [], "error": str(exc)[:200]}
+        yara_section["error"] = str(exc)[:200]
+        yara_section["enabled"] = False
 
     verdict = "clean" if total_score < 20 else ("suspicious" if total_score < 60 else "malicious")
+    detection = _build_detection(
+        total_score, verdict, files_out, yara_section, all_iocs,
+        all_imports_suspicious, truncated,
+    )
 
     # Stato del disassembler per la barra "Engines": se è spento, il motivo
     # deve essere visibile quanto quello di YARA, non nascosto nel dettaglio.
@@ -1587,13 +1721,14 @@ async def upload_analyze(
         "strings_scan": {"enabled": True},
         "secret_scan": {"enabled": True, "patterns": len(SECRET_PATTERNS)},
         "yara": yara_section,
+        "detection": detection,
         "disasm": {"enabled": disasm_on, "reason": disasm_reason,
                    "engine": disasm.engine_fingerprint()},
         "iocs_found": all_iocs,
         "suspicious_imports": all_imports_suspicious[:20],
         "detected_format": fmt,
         "members_analyzed": total_members or None,
-        "note": "Static sandbox complete: PE/ELF/Mach-O/Office/PDF + entropy + imports + secrets + IOC + YARA (SOC signatures) + entry-point disassembly.",
+        "note": "Static sandbox complete: PE/ELF/Mach-O/Office/PDF + entropy + imports + secrets + IOC + YARA (SOC and signed feeds) + entry-point disassembly.",
     }
 
     rec = TotalReport(

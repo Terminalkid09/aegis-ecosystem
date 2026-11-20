@@ -56,6 +56,12 @@ unknown group grants no privilege; `OIDC_DEFAULT_ROLE` applies instead.
   linked on first login. The local role is **not** downgraded during that
   linking step: a break-glass admin cannot be locked out by a wrong IdP mapping.
 - Later OIDC logins synchronize the role when `OIDC_SYNC_ROLE=true`.
+- A role sync that would remove the last active admin is suppressed: the
+  account stays `admin` and the callback logs `role_sync_suppressed=true`.
+- When OIDC is enabled, `OIDC_ALLOW_LOCAL_LOGIN=false` is enforced by the API:
+  `POST /auth/login` and `POST /auth/register` return 403. It is not just a UI
+  switch. If OIDC is disabled the local path remains available so a
+  misconfigured flag cannot lock the deployment out.
 - Keep `OIDC_ALLOW_LOCAL_LOGIN=true` until at least one tested local admin
   exists. It is the recovery path.
 

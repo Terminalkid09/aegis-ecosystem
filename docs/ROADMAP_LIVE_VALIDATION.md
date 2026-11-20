@@ -2,7 +2,7 @@
 
 Status: decision record, 2026-11-19. This document is the English source of
 truth for the validation work kept **inside the 4.3.0 release cycle**. The
-older Italian `docs/ROADMAP.md` remains the long-term product roadmap.
+older Italian `docs/archive/ROADMAP.md` remains the long-term product roadmap.
 AP-126/AP-127 start only after the 4.3.0 tag; they are not part of the release
 gate.
 
@@ -124,5 +124,5 @@ Not allowed:
 
 - `docs/RELEASE_GATE_4.3.md`
 - `docs/benchmarks/4.3/detection-quality.md`
-- `docs/ARCHITECTURE_AEGIS_KRAKEN.md`
+- `docs/archive/ARCHITECTURE_AEGIS_KRAKEN.md`
 - AP-126, AP-127 in YouTrack

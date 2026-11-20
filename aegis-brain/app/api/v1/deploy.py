@@ -48,14 +48,17 @@ def _hash_token(token: str) -> str:
 # Un PIN di 6 cifre hashato con sha256 nudo si brute-forza offline in
 # millisecondi leggendo il DB; con HMAC keyed serve la chiave server, e il
 # binding su (tipo, job, IP) impedisce il riuso su un altro target.
-_APPROVAL_HMAC_KEY = hashlib.sha256(
-    (settings.JWT_SECRET or "aegis-approval-dev-only").encode()
-).digest()
+def _approval_hmac_key() -> bytes:
+    """Approval MACs must never fall back to a known development key."""
+    secret = (settings.JWT_SECRET or "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="Approval signing key unavailable")
+    return hashlib.sha256(secret.encode()).digest()
 
 
 def _approval_mac(kind: str, job_id: int, ip_address: str, value: str) -> str:
     message = f"{kind}:{job_id}:{ip_address}:{value}".encode()
-    return hmac.new(_APPROVAL_HMAC_KEY, message, hashlib.sha256).hexdigest()
+    return hmac.new(_approval_hmac_key(), message, hashlib.sha256).hexdigest()
 
 
 def _validate_targets(targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -210,6 +213,10 @@ if ($RemoteDashboard) {
         [Environment]::SetEnvironmentVariable("AEGIS_ETW_ENABLED", "true", "Machine")
         [Environment]::SetEnvironmentVariable("AEGIS_ETW_PATH", $etw, "Machine")
         [Environment]::SetEnvironmentVariable("AEGIS_ETW_ALLOW_UNSIGNED", "true", "Machine")
+        # Unsigned is accepted only with a pinned digest; the agent refuses
+        # both an empty pin and a binary whose hash changed after install.
+        $etwHash = (Get-FileHash -Algorithm SHA256 $etw).Hash.ToLower()
+        [Environment]::SetEnvironmentVariable("AEGIS_ETW_SHA256", $etwHash, "Machine")
     } else {
         Write-Host "[aegis] no ETW collector in the artifact: unified will declare quality=degraded:etw-..."
     }

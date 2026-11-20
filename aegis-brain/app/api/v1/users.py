@@ -11,14 +11,14 @@ token validi fino a scadenza naturale). Ora:
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_audit
-from app.core.deps import KNOWN_ROLES, require_perm
+from app.core.deps import KNOWN_ROLES, count_active_admins, require_perm
 from app.core.security import hash_password
 from app.database.connection import get_db
-from app.database.models import User
+from app.database.models import User, RememberDevice
 
 router = APIRouter(tags=["Users"])
 
@@ -42,12 +42,6 @@ class UserPatch(BaseModel):
 
 class PasswordReset(BaseModel):
     password: str = Field(..., min_length=12, max_length=128)
-
-
-async def _count_active_admins(db: AsyncSession) -> int:
-    res = await db.execute(
-        select(func.count(User.id)).where(User.role == "admin", User.active == True))
-    return int(res.scalar() or 0)
 
 
 def _user_out(u: User) -> dict:
@@ -123,6 +117,14 @@ async def reset_user_password(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
     target.password_hash = hash_password(payload.password)
+    # Invalidate every JWT issued before the reset and revoke trusted devices;
+    # changing the hash alone leaves stolen sessions valid until expiry.
+    target.token_version = int(target.token_version or 0) + 1
+    await db.execute(
+        update(RememberDevice)
+        .where(RememberDevice.user_id == target.id)
+        .values(revoked=True)
+    )
     await log_audit(
         db, action="user_password_reset", resource=f"user:{target.id}",
         details={"email": target.email, "via": "api"},
@@ -156,7 +158,7 @@ async def update_user(
     will_stop_being_admin = target.role == "admin" and target.active and (
         payload.active is False or (payload.role is not None and payload.role.lower() != "admin")
     )
-    if will_stop_being_admin and await _count_active_admins(db) <= 1:
+    if will_stop_being_admin and await count_active_admins(db) <= 1:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cannot demote or disable the last active admin",
@@ -173,9 +175,6 @@ async def update_user(
     if not changed:
         return _user_out(target)
 
-    await db.commit()
-    await db.refresh(target)
-
     await log_audit(
         db,
         action="user_update",
@@ -183,5 +182,9 @@ async def update_user(
         details={"changes": changed, "target_email": target.email},
         user_id=admin.id,
         username=admin.username,
+        ip_address=request.client.host if request.client else None,
+        user_agent=(request.headers.get("user-agent") or "")[:500],
     )
+    await db.commit()
+    await db.refresh(target)
     return _user_out(target)

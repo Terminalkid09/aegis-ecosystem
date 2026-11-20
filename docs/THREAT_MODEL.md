@@ -1,6 +1,6 @@
 # Aegis — Threat Model (M0)
 
-Version 1.1 — 2026-11-20 — branch `dev`.
+Version 1.2 — 2026-11-20 — branch `feat/4.3-agent-go`.
 
 Scope frozen by the approved decisions: no Android; Windows and Linux targets;
 Windows 11 + Server 2022/2025 primary, Windows 10 lab-only; Ubuntu 22.04/24.04,
@@ -35,11 +35,12 @@ Verified against code (not descriptions): `aegis-brain/app/main.py`,
 
 ## 2. Actors and roles (verified)
 
-Real DB roles: `user` (default), `admin`, `analyst` (`User.role`). Additional
-role names exist for OIDC mapping, but only `admin` has `manage`. Real gating:
-`_require_deploy_operator` (deploy), incident/playbook RBAC, bulk alerts. The
-five-role roadmap (admin, SOC analyst, responder, auditor, viewer) is a Phase 8
-target, not the current permission model.
+Real DB roles: `viewer`, `user` (legacy alias for viewer), `auditor`,
+`responder`, `analyst`, `admin` (`User.role`). `app/core/deps.py` defines the
+explicit permission matrix and `require_perm`; `admin` is the only role with
+`manage`. Legacy endpoints still use role checks (`_require_deploy_operator`,
+incident/playbook RBAC, bulk alerts), but new endpoints use permissions. The
+last-active-admin invariant applies to the Users API and to OIDC role sync.
 
 | Actor | Capabilities | Trust |
 |---|---|---|
@@ -77,7 +78,7 @@ no traversal); DB (Alembic migrations `0001..0023`, `CREATE_ALL` only in dev).
 
 | Prefix | Main routes | Auth |
 |---|---|---|
-| `/auth` | `register, login, logout, me, oidc/*` | None for login/discovery/oidc; JWT+cookie+blacklist; rate limit 5–30/min; CSRF origin check |
+| `/auth` | `register, login, logout, me, oidc/*` | Local login/register disabled when OIDC is enabled and `OIDC_ALLOW_LOCAL_LOGIN=false`; JWT+cookie+blacklist; rate limit 5–30/min; CSRF origin check |
 | `/enroll` | `POST /enroll`, CSR, revoke, CA | Static key (compare_digest) or single-use token, then device secret |
 | `/telemetry` | alerts CRUD+resolve-all, agents, recent, activity, stats, `report`, `report/batch`, heartbeat, commands+ack, remediations, threat reports, process tree, isolate/release | JWT dashboard; device secret per agent |
 | `/` compat | `register, update, heartbeat, commands[/batch]` (NodeTrace legacy) | Enroll key / device secret |

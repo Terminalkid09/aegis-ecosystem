@@ -142,6 +142,16 @@ services:
       # (es. /run/secrets/DATABASE_URL). I file vincono sulle variabili gia'
       # presenti; Vault resta opt-in via AEGIS_VAULT_* nel .env.
       AEGIS_SECRETS_DIR: /run/secrets
+      # Signed YARA feeds (off by default). The public key is not a secret;
+      # the feed private key must never be mounted in this container.
+      YARA_FEED_ENABLED: ${YARA_FEED_ENABLED:-false}
+      YARA_FEED_URLS: ${YARA_FEED_URLS:-}
+      YARA_FEED_PUBLIC_KEY_B64: ${YARA_FEED_PUBLIC_KEY_B64:-}
+      YARA_FEED_KEY_ID: ${YARA_FEED_KEY_ID:-}
+      YARA_FEED_INTERVAL_S: ${YARA_FEED_INTERVAL_S:-3600}
+      YARA_FEED_TIMEOUT_S: ${YARA_FEED_TIMEOUT_S:-20}
+      YARA_FEED_MAX_BYTES: ${YARA_FEED_MAX_BYTES:-8388608}
+      YARA_FEED_ALLOW_HTTP: ${YARA_FEED_ALLOW_HTTP:-false}
     volumes:
       # Post-audit: PKI e artefatti persistenti (mai effimeri nel container).
       - pki_data:/app/pki
@@ -191,8 +201,6 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000"
-    volumes:
-      - ./frontend/src:/app/src
     environment:
       - VITE_API_URL=${VITE_API_URL:-/api/v1}
     depends_on:
@@ -405,6 +413,7 @@ services:
     command: python honeypot/runner.py
     environment:
       INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set for the kraken profile}
+      SANDBOX_API_URL: http://aegis-kraken:8000/api/v1/containers
       SSH_SENSOR_PORT: 2222
       HTTP_SENSOR_PORT: 8080
       FTP_SENSOR_PORT: 2121
@@ -422,7 +431,10 @@ services:
     depends_on:
       aegis-kraken:
         condition: service_healthy
+    # Published honeypot ports need a non-internal network. The internal
+    # network alone keeps PortBindings configured but never activates them.
     networks:
+      - default
       - kraken_internal
 
   aegis-backup:

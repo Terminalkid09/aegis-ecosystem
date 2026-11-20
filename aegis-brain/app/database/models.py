@@ -20,6 +20,8 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(500), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="user")
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Incrementato al reset password: ogni JWT con un "ver" precedente muore.
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     # Identità OIDC: il subject è stabile anche se l'email cambia. Le colonne
     # restano NULL per gli account locali (break-glass e CLI).
     oidc_subject: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
@@ -337,14 +339,50 @@ class YaraRule(Base):
     Perché in DB e non su filesystem: la regola deve viaggiare sul canale
     comandi (brain -> agente) e vuole ciclo di vita (attiva/disattiva,
     audit, chi l'ha creata) — il DB lo dà gratis.
+
+    Le regole arrivate da un feed firmato restano riconoscibili (`managed`,
+    `source`, `source_version`): un aggiornamento automatico non deve mai
+    sovrascrivere una regola scritta a mano dal SOC.
     """
     __tablename__ = "yara_rules"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), index=True)
     content: Mapped[str] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(default=True)
+    severity: Mapped[str] = mapped_column(String(20), default="high", nullable=False, server_default="high")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tags: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    mitre_technique_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    source: Mapped[str] = mapped_column(String(255), default="manual", nullable=False, server_default="manual", index=True)
+    source_version: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    managed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class YaraFeedState(Base):
+    """Ultimo esito di ogni feed YARA configurato.
+
+    Lo stato è separato dalle regole: un feed irraggiungibile o con firma
+    invalida deve essere visibile in UI senza disattivare le firme già
+    importate. `url` è la chiave stabile; il contenuto delle regole resta in
+    `yara_rules`.
+    """
+    __tablename__ = "yara_feed_state"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    url: Mapped[str] = mapped_column(String(2048), unique=True, nullable=False, index=True)
+    feed_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    key_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    etag: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    last_modified: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    bundle_version: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    rules_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

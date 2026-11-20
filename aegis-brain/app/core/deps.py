@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.core.security import decode_access_token, is_token_blacklisted
 from app.database.connection import get_db
 from app.database.models import User
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 
 def require_roles(*roles: str):
@@ -25,6 +25,14 @@ def require_roles(*roles: str):
 # "user" legge come viewer; le restrizioni esistenti NON si allentano qui,
 # i nuovi endpoint usano require_perm. Enforcement completo viewer/auditor
 # read-only sugli endpoint legacy = hardening Fase 10 (suite congelata).
+async def count_active_admins(db: AsyncSession) -> int:
+    """Numero di admin attivi, usato dal guard last-admin condiviso."""
+    result = await db.execute(
+        select(func.count(User.id)).where(User.role == "admin", User.active == True)
+    )
+    return int(result.scalar() or 0)
+
+
 ROLE_PERMISSIONS = {
     "viewer": frozenset({"read"}),
     "user": frozenset({"read"}),  # legacy = viewer
@@ -83,6 +91,10 @@ async def _validate_token(token: str, db: AsyncSession) -> User:
     user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    # Password reset increments token_version: every token issued before the
+    # reset is invalid immediately, without waiting for its expiry.
+    if int(payload.get("ver", 0)) != int(getattr(user, "token_version", 0) or 0):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
     # Account disattivato dall'admin: il token esistente perde valore subito,
     # senza attendere la sua scadenza naturale.
     if not user.active:

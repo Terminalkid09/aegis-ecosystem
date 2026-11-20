@@ -242,3 +242,58 @@ image mean named volumes are already owned by aegis.
   Debian ships the fix). Everything else remains fail-closed (exit code 1).
 - `apt-get upgrade`/`apk upgrade` run at Dockerfile build time.
 - Maven dependency-check in CI requires `NVD_API_KEY` (fail-closed when absent).
+
+## 10. Signed YARA signature feeds
+
+Feeds are disabled by default. To enable them, set `YARA_FEED_ENABLED=true`,
+`YARA_FEED_URLS` (HTTPS), `YARA_FEED_PUBLIC_KEY_B64` and `YARA_FEED_KEY_ID` in
+`.env` or the secret store. The Brain verifies the detached Ed25519 signature
+over the raw bundle before importing anything; a missing key, bad signature or
+oversized bundle leaves the last good rules in place and the sync fails closed.
+The publisher private key must never be placed on the Brain host.
+
+```bash
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  https://aegis.local/api/v1/yara/feeds/status
+curl -sk -X POST -H "Authorization: Bearer $TOKEN" \
+  https://aegis.local/api/v1/yara/feeds/sync
+```
+
+The UI shows feed state and rule provenance under YARA. Feed rules are marked
+`managed` and cannot overwrite a local rule with the same name; removing a rule
+from a later bundle deactivates it rather than deleting an operator's history.
+Limits: 5,000 rules, 64 KiB per rule and an 8 MiB bundle by default. See
+[YARA_FEEDS.md](YARA_FEEDS.md) for the bundle schema and key rotation.
+
+## 11. Caddy in production
+
+Caddy is suitable as the public TLS/reverse-proxy edge when `AEGIS_DOMAIN` is a
+real FQDN, `ACME_EMAIL` is monitored, ports 80/443 are reachable and the mTLS
+overlay is used for the agent API. It terminates TLS, applies the security
+headers and proxies to the frontend/Brain; it is not an HA controller, a WAF or
+a monitoring stack. Use multiple replicas behind an external load balancer for
+HA, back up `caddy_data`/`caddy_config`, and alert on certificate expiry,
+upstream health and 5xx rates. Validate a changed Caddyfile before reload:
+
+```bash
+docker run --rm -e AEGIS_DOMAIN=aegis.example.com -e ACME_EMAIL=ops@example.com \
+  -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+  caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+## 12. Secret hygiene in a pilot workspace
+
+`.env`, `.env.bak-*`, `secret.json`, `token.json`, `device.key` and similar
+files are excluded from Git, but they are still live secrets on disk. Before
+handing a pilot workspace to another operator or archiving it:
+
+1. rotate `JWT_SECRET`, `AEGIS_API_KEY`, `AGENT_ENROLL_KEY`, `MASTER_KEY_B64`,
+   database/Redis passwords and any OIDC client secret;
+2. revoke enrolled agents and delete `secret.json`/`token.json`/device keys
+   that are no longer needed;
+3. remove `.env.bak-*` copies and any exported `docker inspect` output;
+4. verify that the replacement `.env` is mode `0600` and that backups are
+   encrypted with `BACKUP_PASSPHRASE`.
+
+Never place the YARA feed private key, the manifest private key or a backup
+passphrase in the Brain container or in a release bundle.

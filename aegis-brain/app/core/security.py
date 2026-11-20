@@ -75,6 +75,22 @@ def verify_device_token_proof(token: str, stored_hash: str, proof: str | None) -
     return hmac.compare_digest(device_token_proof(token, stored_hash), proof)
 
 
+_dummy_password_hash: str | None = None
+
+
+def verify_password_dummy(password: str) -> bool:
+    """Esegue una verifica Argon2 anche quando l'email non esiste.
+
+    Senza questo, un login con email inesistente ritorna prima di una KDF e
+    diventa distinguibile per timing da una password sbagliata su un account
+    reale. Il risultato è volutamente ignorato dal chiamante.
+    """
+    global _dummy_password_hash
+    if _dummy_password_hash is None:
+        _dummy_password_hash = hash_password("aegis-not-a-real-password")
+    return verify_password(password, _dummy_password_hash)
+
+
 def needs_rehash(hashed_password: str) -> bool:
     if _HAS_PWDLIB:
         try:
@@ -129,7 +145,8 @@ JWT_AUDIENCE = "aegis-api"
 JWT_LEEWAY_S = 30
 
 
-def create_access_token(subject: str, role: str, expires_minutes: int | None = None) -> tuple[str, str, int]:
+def create_access_token(subject: str, role: str, expires_minutes: int | None = None,
+                        token_version: int = 0) -> tuple[str, str, int]:
     expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes or settings.JWT_EXPIRE_MINUTES)
     jti = str(uuid.uuid4())
     payload = {
@@ -137,6 +154,7 @@ def create_access_token(subject: str, role: str, expires_minutes: int | None = N
         "role": role,
         "exp": expire,
         "jti": jti,
+        "ver": int(token_version or 0),
         "iss": JWT_ISSUER,
         "aud": JWT_AUDIENCE,
     }

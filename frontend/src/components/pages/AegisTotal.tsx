@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { FileSearch, Upload, ShieldAlert, ShieldCheck, FileText, Package, AlertTriangle, Eye, X } from 'lucide-react'
+import { FileSearch, Upload, ShieldAlert, ShieldCheck, FileText, Package, AlertTriangle, X } from 'lucide-react'
 import { totalAPI } from '@/services/api'
 import { cn } from '@/lib/utils'
 
@@ -213,6 +213,27 @@ export default function AegisTotal() {
               <div className="font-mono text-xs text-white bg-[hsl(var(--background))] px-2 py-1 rounded border border-[hsl(var(--border))]">{selectedReport.sha256}</div>
             </div>
           </div>
+
+          {selectedReport.engines?.detection && (
+            <div className="border-b border-[hsl(var(--border))] bg-[hsl(var(--secondary)/0.35)] px-5 py-3">
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
+                <span className="text-[10px] uppercase font-bold tracking-widest text-[hsl(var(--muted-foreground))]">Detection</span>
+                <span className="text-white">confidence <b className={`uppercase ${selectedReport.engines.detection.confidence === 'high' ? 'text-red-400' : selectedReport.engines.detection.confidence === 'medium' ? 'text-yellow-400' : 'text-emerald-400'}`}>{selectedReport.engines.detection.confidence}</b></span>
+                <span className="text-[hsl(var(--muted-foreground))]">YARA <b className="text-white">{selectedReport.engines.detection.signals?.yara_matches ?? 0}</b> match(es) / {selectedReport.engines.detection.signals?.yara_rules ?? 0} rules</span>
+                <span className="text-[hsl(var(--muted-foreground))]">high/critical <b className="text-white">{selectedReport.engines.detection.signals?.high_or_critical_findings ?? 0}</b></span>
+                <span className="text-[hsl(var(--muted-foreground))]">IOC groups <b className="text-white">{selectedReport.engines.detection.signals?.ioc_groups ?? 0}</b></span>
+              </div>
+              {(selectedReport.engines.detection.top_findings || []).length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selectedReport.engines.detection.top_findings.map((f: any, i: number) => (
+                    <span key={i} className={cn('text-[10px] px-2 py-1 rounded border font-mono', f.severity === 'critical' ? 'text-red-300 border-red-500/30 bg-red-500/10' : f.severity === 'high' ? 'text-orange-300 border-orange-500/30 bg-orange-500/10' : 'text-slate-300 border-slate-500/30 bg-slate-500/10')} title={f.detail}>
+                      {f.type}{f.mitre ? ` · ${f.mitre}` : ''}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-4">
             {/* File Tree */}
@@ -492,6 +513,8 @@ export default function AegisTotal() {
                 </span>
               )}
               <span className={cn(selectedReport.engines.secret_scan?.enabled ? 'text-cyan-400' : '')}>[SECRETS: {selectedReport.engines.secret_scan?.patterns || 0}]</span>
+              <span className={cn(selectedReport.engines.yara?.enabled ? 'text-cyan-400' : 'text-yellow-400')}>[YARA: {selectedReport.engines.yara?.enabled ? `${selectedReport.engines.yara?.matches?.length || 0} match / ${selectedReport.engines.yara?.rules_total || 0} rules` : 'OFF'}]</span>
+              {selectedReport.engines.detection && <span className="text-purple-400">[CONFIDENCE: {String(selectedReport.engines.detection.confidence || 'low').toUpperCase()}]</span>}
               {selectedReport.engines.iocs_found && Object.keys(selectedReport.engines.iocs_found).length > 0 && (
                  <span className="text-yellow-400 font-bold">[IOCs: FOUND]</span>
               )}

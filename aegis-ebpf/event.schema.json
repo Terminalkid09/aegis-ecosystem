@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Aegis kernel event v2 (single cross-OS contract)",
-  "description": "One JSON line per event. Produced by the kernel collectors (eBPF on Linux, ETW on Windows) and consumed by the unified Go agent; the legacy Guard and NodeTrace consumers remain for 4.2.1 compatibility. Brain: EventSchema PROCESS_CREATED/PROCESS_EXITED/CONNECTION_ESTABLISHED. Compatibility: v1 = lines without schema_version (only pid/event_type required); consumers MUST accept v1 and v2, v2 producers MUST include schema_version=2, event_id, agent_id, boot_id and seq when available. Details in docs/EVENT_SCHEMA_V2.md.",
+  "description": "One JSON line per event. Produced by the kernel collectors (eBPF on Linux, ETW on Windows) and consumed by the unified Go agent; the legacy Guard and NodeTrace consumers remain for 4.2.1 compatibility. Brain: EventSchema PROCESS_CREATED/PROCESS_EXITED/CONNECTION_ESTABLISHED. Compatibility: v1 = lines without schema_version (only pid/event_type required); consumers MUST accept v1 and v2, v2 producers MUST include schema_version=2, event_id, agent_id, boot_id and seq when available. Details in docs/archive/EVENT_SCHEMA_V2.md.",
   "type": "object",
   "required": ["pid", "event_type"],
   "properties": {

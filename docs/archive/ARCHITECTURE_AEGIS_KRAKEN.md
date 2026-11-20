@@ -10,13 +10,13 @@ detonatore malware di produzione.
 Le quattro figure seguenti sono la versione da leggere. I sorgenti modificabili
 sono in `docs/diagrams/*.drawio`; gli export PNG/SVG sono accanto a loro.
 
-![Aegis + Kraken, flusso completo](diagrams/01-aegis-kraken.png)
+![Aegis + Kraken, flusso completo](../diagrams/01-aegis-kraken.png)
 
-![Kraken standalone, file analysis](diagrams/02-kraken-standalone.png)
+![Kraken standalone, file analysis](../diagrams/02-kraken-standalone.png)
 
-![Kraken → Aegis, sequenza](diagrams/03-kraken-to-aegis.png)
+![Kraken → Aegis, sequenza](../diagrams/03-kraken-to-aegis.png)
 
-![Coda comandi at-least-once](diagrams/04-command-queue.png)
+![Coda comandi at-least-once](../diagrams/04-command-queue.png)
 
 I blocchi Mermaid nelle sezioni successive restano il dettaglio tecnico; le
 figure sono il percorso di lettura.

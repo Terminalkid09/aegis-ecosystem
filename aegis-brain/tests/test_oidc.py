@@ -62,3 +62,52 @@ async def test_oidc_login_is_404_when_disabled(client, monkeypatch):
     monkeypatch.setattr(settings, "OIDC_ENABLED", False, raising=False)
     response = await client.get("/api/v1/auth/oidc/login")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_oidc_callback_rejects_missing_state_cookie(client, monkeypatch):
+    monkeypatch.setattr(settings, "OIDC_ENABLED", True, raising=False)
+    response = await client.get(
+        "/api/v1/auth/oidc/callback?code=abc&state=expected", follow_redirects=False)
+    assert response.status_code == 302
+    assert "sso_error=" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_oidc_callback_rejects_state_mismatch(client, monkeypatch):
+    monkeypatch.setattr(settings, "OIDC_ENABLED", True, raising=False)
+    cookie = oidc.encode_state(
+        state="expected", verifier="verifier", nonce="nonce", return_to="/")
+    client.cookies.set("aegis_oidc_state", cookie, path="/api/v1/auth/oidc")
+    response = await client.get(
+        "/api/v1/auth/oidc/callback?code=abc&state=wrong", follow_redirects=False)
+    assert response.status_code == 302
+    assert "sso_error=" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_oidc_role_sync_cannot_remove_last_active_admin(db_session):
+    from app.api.v1.auth import _safe_oidc_role
+    from app.database.models import User
+
+    admin = User(
+        username="oidc-last-admin", email="oidc-last-admin@aegis.test",
+        password_hash="x", role="admin", active=True,
+    )
+    db_session.add(admin)
+    await db_session.commit()
+    await db_session.refresh(admin)
+
+    role, suppressed = await _safe_oidc_role(db_session, admin, "viewer")
+    assert role == "admin"
+    assert suppressed is True
+
+    db_session.add(User(
+        username="second-admin", email="second-admin@aegis.test",
+        password_hash="x", role="admin", active=True,
+    ))
+    await db_session.commit()
+
+    role, suppressed = await _safe_oidc_role(db_session, admin, "viewer")
+    assert role == "viewer"
+    assert suppressed is False

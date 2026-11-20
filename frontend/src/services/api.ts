@@ -144,10 +144,18 @@ export const integrationsAPI = {
 // ─── YARA & FIM ─────────────────────────────────────────────────────────────
 export const yaraAPI = {
   list: () => apiClient.get('/yara/rules'),
-  create: (data: { name: string; content: string; is_active: boolean }) => apiClient.post('/yara/rules', data),
-  update: (id: number, data: { name?: string; content?: string; is_active?: boolean }) => apiClient.put(`/yara/rules/${id}`, data),
+  create: (data: {
+    name: string; content: string; is_active: boolean; severity?: string;
+    description?: string; tags?: string[]; mitre_technique_id?: string;
+  }) => apiClient.post('/yara/rules', data),
+  update: (id: number, data: {
+    name?: string; content?: string; is_active?: boolean; severity?: string;
+    description?: string; tags?: string[]; mitre_technique_id?: string;
+  }) => apiClient.put(`/yara/rules/${id}`, data),
   remove: (id: number) => apiClient.delete(`/yara/rules/${id}`),
   scan: (agentId: string, targets: string[]) => apiClient.post(`/yara/agents/${agentId}/scan`, { targets }),
+  feedStatus: () => apiClient.get('/yara/feeds/status'),
+  syncFeeds: () => apiClient.post('/yara/feeds/sync'),
 }
 
 export const fimAPI = {

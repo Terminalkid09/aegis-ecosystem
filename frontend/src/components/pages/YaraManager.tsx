@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Binary, Plus, Trash2, Loader2, Eye, EyeOff, FolderSearch, Server } from 'lucide-react'
+import { Binary, Plus, Trash2, Loader2, Eye, EyeOff, FolderSearch, Server, Rss, RefreshCw, ShieldCheck, AlertTriangle } from 'lucide-react'
 import { yaraAPI, fimAPI, statsAPI } from '@/services/api'
 import { useAppStore } from '@/store/appStore'
 import { PermissionGate } from '@/components/common/PermissionGate'
@@ -11,13 +11,28 @@ interface YaraRule {
   name: string
   content: string
   is_active: boolean
+  severity?: string
+  source?: string
+  source_version?: string | null
+  managed?: boolean
+  tags?: string[]
   created_at?: string | null
+}
+
+interface FeedSource {
+  url: string
+  configured: boolean
+  feed_id?: string | null
+  last_success_at?: string | null
+  last_checked_at?: string | null
+  last_error?: string | null
+  bundle_version?: string | null
+  rules_count?: number
 }
 
 export default function YaraManager() {
   const qc = useQueryClient()
   const user = useAppStore((s) => s.user)
-  const canEdit = ['analyst', 'admin'].includes((user?.role || '').toLowerCase())
 
   // ── rules ───────────────────────────────────────────────────────────
   const { data: rules = [], isLoading: rulesLoading } = useQuery({
@@ -30,9 +45,12 @@ export default function YaraManager() {
   const [newContent, setNewContent] = useState(
     'rule Example_Suspicious_String\n{\n  strings:\n    $s = "aegis-demo" nocase\n  condition:\n    $s\n}'
   )
+  const [newSeverity, setNewSeverity] = useState('high')
 
   const createMut = useMutation({
-    mutationFn: () => yaraAPI.create({ name: newName, content: newContent, is_active: true }),
+    mutationFn: () => yaraAPI.create({
+      name: newName, content: newContent, is_active: true, severity: newSeverity,
+    }),
     onSuccess: () => { setNewName(''); qc.invalidateQueries({ queryKey: ['yara-rules'] }) },
   })
   const toggleMut = useMutation({
@@ -43,6 +61,27 @@ export default function YaraManager() {
     mutationFn: (id: number) => yaraAPI.remove(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['yara-rules'] }),
   })
+
+  // ── signed feeds ─────────────────────────────────────────────────────
+  const { data: feedStatus, isLoading: feedsLoading } = useQuery({
+    queryKey: ['yara-feeds'],
+    queryFn: () => yaraAPI.feedStatus().then(r => r.data),
+    refetchInterval: 60000,
+  })
+  const [feedMsg, setFeedMsg] = useState('')
+  const syncFeedsMut = useMutation({
+    mutationFn: () => yaraAPI.syncFeeds(),
+    onSuccess: (r) => {
+      const result = r.data || {}
+      const ok = (result.results || []).filter((x: any) => x.ok).length
+      const total = (result.results || []).length
+      setFeedMsg(result.ok ? `Sync complete: ${ok}/${total} feed(s) updated.` : (result.note || result.skipped || `Sync incomplete: ${ok}/${total} feed(s) updated.`))
+      qc.invalidateQueries({ queryKey: ['yara-rules'] })
+      qc.invalidateQueries({ queryKey: ['yara-feeds'] })
+    },
+    onError: (e: any) => setFeedMsg(e?.response?.data?.detail || 'Feed sync failed.'),
+  })
+  const canManage = (user?.role || '').toLowerCase() === 'admin'
 
   // ── endpoints (for the watchlist) ───────────────────────────────────
   // `asArray` and not `as any[]`: on the first render (and on any failed
@@ -97,6 +136,61 @@ export default function YaraManager() {
         </p>
       </div>
 
+      {/* ── signed feeds ───────────────────────────────────────────── */}
+      <div className="card p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="font-bold flex items-center gap-2 text-white">
+              <Rss size={16} className="text-cyan-400" /> Signed signature feeds
+              {feedStatus?.enabled ? (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">AUTO</span>
+              ) : (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-500/10 text-slate-400 border border-slate-500/20">OFF</span>
+              )}
+            </h3>
+            <p className="text-xs text-[hsl(var(--muted-foreground))] mt-1 max-w-3xl">
+              Ed25519-signed bundles only. A bad signature or a rule-name collision rejects the whole bundle; previously imported rules stay active.
+            </p>
+          </div>
+          {canManage && (
+            <button
+              onClick={() => syncFeedsMut.mutate()}
+              disabled={!feedStatus?.enabled || syncFeedsMut.isPending}
+              className="btn btn-primary bg-cyan-600 hover:bg-cyan-500 border-cyan-500 disabled:opacity-40"
+            >
+              {syncFeedsMut.isPending ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+              Sync now
+            </button>
+          )}
+        </div>
+
+        {feedsLoading ? (
+          <div className="flex justify-center py-4"><Loader2 className="animate-spin" size={18} /></div>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {(feedStatus?.sources || []).length === 0 ? (
+              <p className="text-xs text-[hsl(var(--muted-foreground))] italic">No feed configured. Set YARA_FEED_URLS and YARA_FEED_PUBLIC_KEY_B64 on the Brain.</p>
+            ) : (feedStatus?.sources || []).map((s: FeedSource) => (
+              <div key={s.url} className="flex flex-wrap items-center gap-2 rounded border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] px-3 py-2 text-xs">
+                {s.last_error ? <AlertTriangle size={14} className="text-red-400 shrink-0" /> : <ShieldCheck size={14} className="text-emerald-400 shrink-0" />}
+                <span className="font-mono text-white truncate max-w-[420px]" title={s.url}>{s.url}</span>
+                {s.feed_id && <span className="text-[hsl(var(--muted-foreground))]">feed:{s.feed_id}</span>}
+                <span className="text-[hsl(var(--muted-foreground))]">v{s.bundle_version || '—'} · {s.rules_count ?? 0} rules</span>
+                {!s.configured && <span className="text-orange-400">not configured</span>}
+                {s.last_error && <span className="text-red-400 truncate max-w-[420px]" title={s.last_error}>{s.last_error}</span>}
+                {!s.last_error && s.last_success_at && <span className="text-emerald-400/80">last sync {new Date(s.last_success_at).toLocaleString()}</span>}
+              </div>
+            ))}
+            {feedMsg && <p className="text-xs text-cyan-300">{feedMsg}</p>}
+            {!feedStatus?.enabled && (
+              <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+                Disabled by configuration. The Brain never imports unsigned rules; the public key and feed URL are deployment decisions.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* ── YARA rules ──────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="card p-5">
@@ -110,6 +204,8 @@ export default function YaraManager() {
               {rules.map((r) => (
                 <div key={r.id} className="flex items-center gap-2 rounded bg-[hsl(var(--secondary))] border border-[hsl(var(--border))] px-3 py-2">
                   <span className={cn('text-xs font-semibold flex-1 truncate', r.is_active ? 'text-white' : 'text-[hsl(var(--muted-foreground))]')}>{r.name}</span>
+                  <span className={cn('text-[9px] uppercase font-bold px-1.5 py-0.5 rounded border', r.severity === 'critical' ? 'text-red-300 border-red-500/30 bg-red-500/10' : r.severity === 'high' ? 'text-orange-300 border-orange-500/30 bg-orange-500/10' : 'text-slate-300 border-slate-500/30 bg-slate-500/10')}>{r.severity || 'high'}</span>
+                  {r.managed && <span className="text-[9px] uppercase font-bold text-cyan-400 border border-cyan-500/20 bg-cyan-500/10 px-1.5 py-0.5 rounded" title={r.source || 'feed'}>feed</span>}
                   <PermissionGate perms={['rules']}>
                     <button onClick={() => toggleMut.mutate(r)} title={r.is_active ? 'Disable' : 'Enable'}
                       className={cn('p-1.5 rounded', r.is_active ? 'text-emerald-400' : 'text-[hsl(var(--muted-foreground))]')}>
@@ -130,6 +226,12 @@ export default function YaraManager() {
           <h3 className="font-bold mb-4 flex items-center gap-2 text-white"><Plus size={16} className="text-emerald-400" /> New rule</h3>
           <PermissionGate perms={['rules']}>
             <input className="input mb-2" placeholder="Rule name (e.g. Maze_Ransomware_Note)" value={newName} onChange={e => setNewName(e.target.value)} />
+            <select className="input mb-2" value={newSeverity} onChange={e => setNewSeverity(e.target.value)}>
+              <option value="low">Low — context only (10)</option>
+              <option value="medium">Medium — suspicious (25)</option>
+              <option value="high">High — significant (40)</option>
+              <option value="critical">Critical — direct evidence (60)</option>
+            </select>
             <textarea className="input h-[220px] font-mono text-[11px] text-emerald-400 resize-none bg-[hsl(var(--background))]" value={newContent} onChange={e => setNewContent(e.target.value)} />
             <button onClick={() => createMut.mutate()} disabled={!newName || createMut.isPending}
               className="btn btn-primary w-full mt-3 bg-cyan-600 hover:bg-cyan-500 border-cyan-500">

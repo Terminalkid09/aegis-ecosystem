@@ -205,7 +205,7 @@ mounted UI, read-only Aegis view and the isolated compose profile.
 - Gate 0 licensing groundwork: `LICENSE` (AGPL-3.0-only), `NOTICE`,
   `TRADEMARK.md`, `SECURITY.md`, `CONTRIBUTING.md`, and the
   `THIRD_PARTY_NOTICES.md` placeholder.
-- `docs/PLAN_AEGIS_KRAKEN_HANDOFF.md` v2.7: the 4.1 scope is the complete
+- `docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md` v2.7: the 4.1 scope is the complete
   Kraken vertical (compose, signed ingest with outbox/retry, UI, read-only
   Aegis view, end-to-end smoke test); new sensors, campaigns, Lab and unified
   timeline move to 4.2+.
@@ -213,7 +213,7 @@ mounted UI, read-only Aegis view and the isolated compose profile.
   the release-integrity gate: no user-visible capability is called integrated
   until API, UI, docs and tests ship together. The gate now names the complete
   Kraken vertical as a 4.1 requirement.
-- `docs/ROADMAP.md`: explicit OSINT/SentinelX and deploy/fleet
+- `docs/archive/ROADMAP.md`: explicit OSINT/SentinelX and deploy/fleet
   workstreams, separate from the release hardening checklist.
 - `docs/youtrack_tickets.csv` and `scripts/youtrack_import.py`: import path for
   the findings and roadmap work packages.

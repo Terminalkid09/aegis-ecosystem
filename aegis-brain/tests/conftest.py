@@ -57,6 +57,26 @@ try:
 except Exception:
     pass
 
+# The command-queue tests use AEGIS_TEST_REDIS_URL, not REDIS_URL. Derive a
+# dedicated DB index (15) from the reachable app URL so the documented
+# `REDIS_URL=... pytest` command exercises those tests without flushing the
+# application's DB 0. An explicit AEGIS_TEST_REDIS_URL always wins.
+def _configure_test_redis_url() -> None:
+    if os.getenv("AEGIS_TEST_REDIS_URL"):
+        return
+    base = os.getenv("REDIS_URL", "")
+    if not base:
+        return
+    try:
+        from urllib.parse import urlparse, urlunparse
+        parsed = urlparse(base)
+        os.environ["AEGIS_TEST_REDIS_URL"] = urlunparse(parsed._replace(path="/15"))
+    except Exception:
+        pass
+
+
+_configure_test_redis_url()
+
 # ----------------------------------------------------------------- Database
 # Stesso problema della sezione Redis, stessa cura: se `DATABASE_URL` punta a
 # un hostname non risolvibile dall'host di test (es. `aegis-postgres` di
