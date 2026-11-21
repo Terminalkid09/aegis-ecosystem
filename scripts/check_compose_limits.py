@@ -16,6 +16,9 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 DUMMY_ENV = {
     "POSTGRES_PASSWORD": "ci-dummy",
+    "DATABASE_URL": "postgresql+asyncpg://ci:ci@localhost:5432/ci",
+    "SHODAN_API_KEY": "ci-dummy",
+    "ABUSEIPDB_API_KEY": "ci-dummy",
     "REDIS_PASSWORD": "ci-dummy",
     "AEGIS_API_KEY": "ci-dummy-api-key",
     "AGENT_ENROLL_KEY": "ci-dummy-enroll-key",
