@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from loguru import logger
 from app.core.config import settings
+from honeypot.shell import FakeShell
 
 _http_client: httpx.AsyncClient = None
 _API_BASE = settings.SANDBOX_API_URL.rsplit("/containers", 1)[0]
@@ -132,10 +133,11 @@ async def handle_client(process):
     process.stdout.write("Welcome to Ubuntu 22.04.3 LTS (GNU/Linux 5.15.0-generic x86_64)\n\n")
 
     sandbox = await _sandbox_create(session_id)
+    shell = None if sandbox else FakeShell()
 
     while True:
         try:
-            process.stdout.write("root@ubuntu:~# ")
+            process.stdout.write(shell.prompt() if shell else "root@ubuntu:~# ")
             line = await process.stdin.readline()
             if not line:
                 break
@@ -158,7 +160,11 @@ async def handle_client(process):
                 else:
                     process.stdout.write(f"bash: {cmd}: command not found\n")
             else:
-                process.stdout.write(f"bash: {cmd}: command not found\n")
+                output = shell.execute(cmd)
+                if output:
+                    process.stdout.write(output)
+                    if not output.endswith('\n'):
+                        process.stdout.write("\n")
 
         except asyncssh.BreakReceived:
             break
