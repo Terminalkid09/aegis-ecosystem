@@ -126,9 +126,25 @@ esterno al repository locale.
 
 ### Added
 
+- Production validation harness: `scripts/soak_7d.py` (seven-day endurance with
+  readiness, lost-event and RSS sampling), `scripts/dr_drill.sh` (encrypted DB
+  plus PKI restore), `scripts/ha_failure_drill.sh` (same-host replica loss) and
+  `scripts/multi_host_failure_drill.sh` (external PG/Redis failover trigger).
+  They emit JSON evidence and fail closed on missing inputs; none is a
+  substitute for the real run. `docs/PRODUCTION_VALIDATION.md` defines the
+  operator inputs and the acceptance boundary.
+- AP-126 evidence gate (`scripts/ap126_evidence.py`), a governed
+  detection-candidate pipeline (`scripts/self_improvement.py`: corpus gate,
+  named approval, signed promotion, canary and rollback) and a three-node
+  Kraken lab simulation (`deploy/kraken-lab/`). The last one is explicitly
+  single-host, not a true multi-host or network-partition test.
+- Optional Intune/GPO wrappers for the existing MSI (`deploy/mdm/`). They do not
+  replace the MSI or the default one-liner: they verify the production
+  signature, provision the one-shot token and provide local post-deployment
+  validation. A real tenant is still required for tenant evidence.
 - Test di integrazione live del sensor Go con Brain finto: enrollment, CSR
-firmata da una CA di test, salvataggio identità, heartbeat/telemetria,
-comandi batch, ack, scan Discovery e verifica dell'header `X-Client-Cert-Hash`.
+  firmata da una CA di test, salvataggio identità, heartbeat/telemetria,
+  comandi batch, ack, scan Discovery e verifica dell'header `X-Client-Cert-Hash`.
 - Live reale dei profili `sensor`, `endpoint` e `unified` contro il Brain
   locale: `scripts/live_agent_profiles.py`; primo avvio unified con token
   monouso e install.ps1/install.sh generati e verificati sintatticamente.

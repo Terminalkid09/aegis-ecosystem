@@ -1,11 +1,14 @@
 # Aegis 4.3 — Release Gate
 
 Status: 2026-11-21. **No `v4.3.0` tag has been cut and nothing is published.**
-The 4.3 production-path work is on `release/4.3.0` (PR #18, head `a6b0343`):
+The 4.3 production-path work is on `release/4.3.0` (PR #18):
 provider-agnostic Authenticode signing, production GPG mode, cosign keyless
 release signing, RPM and ipk packages, xrdp log forwarding and AP-126/AP-127
 harnesses. PR #18 is `MERGEABLE/CLEAN`; its branch CI and packaging runs are
-green. The hosted tag run, including the tag-only `release` job, is still
+green. The production validation harnesses are documented in
+[PRODUCTION_VALIDATION.md](PRODUCTION_VALIDATION.md); they are not release
+evidence until executed with the operator's certificate, tenant, lab, corpus
+and seven-day run. The hosted tag run, including the tag-only `release` job, is still
 required before calling the release published. There is no `4.3.0-rc1`: the
 release is cut directly as `v4.3.0`.
 
@@ -59,9 +62,11 @@ skips; the new job is not a substitute for the hosted tag gate.
 
 Still open: **Gate 5** (hosted tag workflow), macOS CI execution (the
 `macos-latest` build/test job is configured, but no live Mac hardware or
-endpoint telemetry is supported), bare-metal Linux, and Windows Server live
-validation. **Do not publish/tag/push
-as a release on the strength of this local run alone.**
+endpoint telemetry is supported), bare-metal Linux, Windows Server live
+validation, the production certificate/key and MDM tenant, the AP-126
+isolated lab with an authorized sample, the AP-127 real corpus, a completed
+seven-day soak, and true multi-host failover. **Do not publish/tag/push as a
+release on the strength of this local run alone.**
 
 ## Decision
 

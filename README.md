@@ -150,6 +150,7 @@ Not verified locally: hosted CI/tag workflow, bare-metal Linux, Windows Server l
 | [Operations](docs/OPERATIONS.md) | Install, upgrade, backup/restore and PKI. |
 | [Pilot runbook](docs/PILOT_RUNBOOK.md) | Pilot deployment and acceptance. |
 | [Release gate](docs/RELEASE_GATE_4.3.md) | What is green, what remains, and allowed claims. |
+| [Production validation](docs/PRODUCTION_VALIDATION.md) | Soak, DR, HA, AP-126/127 and governance harnesses, with external inputs and limits. |
 | [Threat model](docs/THREAT_MODEL.md) | Assets, trust boundaries and mitigations. |
 | [Benchmarks](docs/BENCHMARK.md) | Load methodology and measured numbers. |
 | [YARA feeds](docs/YARA_FEEDS.md) | Signed rule bundles, key rotation and fail-closed import. |

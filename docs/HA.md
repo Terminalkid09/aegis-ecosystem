@@ -39,6 +39,19 @@ Caddyfile change). Verify `GET /health/ready` on both and `docker compose ps`.
 4. **Shared backup directory** (`BACKUP_DIR` on a shared volume/S3).
 5. **Alerts**: `sendFailed>0`, growing DLQ, `not_ready`, p99 latency.
 
+## Failure drill
+
+After starting the HA overlay, run the guarded same-host drill:
+
+```bash
+./scripts/ha_failure_drill.sh --yes
+```
+
+It kills one Brain and one Link replica, requires both to return to two running
+replicas and readiness to recover, and writes `dist/drills/ha-*.json`. It records
+Postgres and Redis failover as **NOT_TESTED_SINGLE_HOST**. See
+[PRODUCTION_VALIDATION.md](PRODUCTION_VALIDATION.md) for the full boundary.
+
 ## Non-HA by decision (documented)
 
 - `aegis-postgres`, `aegis-redis`: single-instance in Compose. They are the only
