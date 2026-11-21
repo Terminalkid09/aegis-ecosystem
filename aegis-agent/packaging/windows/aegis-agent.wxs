@@ -1,0 +1,79 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Aegis Agent"
+    Manufacturer="Aegis"
+    Version="$(var.Version)"
+    UpgradeCode="E1D75D17-77C3-4DE8-BAEC-7EE984BB4CC2"
+    Scope="perMachine"
+    Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Aegis Agent is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Public property: MDM/Intune can pass BRAIN_URL=... to msiexec. -->
+    <Property Id="BRAIN_URL" Value="https://aegis.local" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Aegis">
+        <Component Id="AgentBinary" Guid="1B52FEC7-3F79-4B56-A9C8-B18193E46173">
+          <File Id="AgentExe" Source="$(var.AgentSource)" KeyPath="yes" />
+          <ServiceInstall
+            Id="AgentService"
+            Name="AegisAgent"
+            DisplayName="Aegis Agent"
+            Description="Aegis endpoint and sensor agent"
+            Type="ownProcess"
+            Start="auto"
+            ErrorControl="normal" />
+          <ServiceControl
+            Id="AgentServiceControl"
+            Name="AegisAgent"
+            Stop="both"
+            Remove="uninstall"
+            Wait="yes" />
+        </Component>
+
+        <Component Id="AgentEnv" Guid="9FE416A7-A05A-4869-A5E4-14FBD4FBD53D">
+          <Environment Id="AgentProfile" Name="AEGIS_AGENT_PROFILE" Value="unified"
+                       Action="set" Part="all" System="yes" Permanent="no" />
+          <Environment Id="AgentMode" Name="AEGIS_AGENT_MODE" Value="full"
+                       Action="set" Part="all" System="yes" Permanent="no" />
+          <Environment Id="BrainUrl" Name="AEGIS_BRAIN_URL" Value="[BRAIN_URL]"
+                       Action="set" Part="all" System="yes" Permanent="no" />
+          <Environment Id="IdentityDir" Name="AEGIS_IDENTITY_DIR" Value="[CommonAppDataFolder]Aegis"
+                       Action="set" Part="all" System="yes" Permanent="no" />
+          <Environment Id="EnrollTokenFile" Name="AEGIS_ENROLL_TOKEN_FILE"
+                       Value="[CommonAppDataFolder]Aegis\enroll.token"
+                       Action="set" Part="all" System="yes" Permanent="no" />
+          <RegistryValue Root="HKLM" Key="Software\Aegis\Agent" Name="Installed"
+                         Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+
+        <?ifdef EtwSource?>
+        <Component Id="AgentEtw" Guid="3586669D-6CAF-4356-9FE6-E1C92A1CE149">
+          <File Id="EtwExe" Source="$(var.EtwSource)" />
+        </Component>
+        <?endif?>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DataFolder" Name="Aegis">
+        <Component Id="DataDirectory" Guid="A6E9C0B4-31A7-4B7E-9F4C-5B2D8E6A0C31">
+          <CreateFolder />
+          <RegistryValue Root="HKLM" Key="Software\Aegis\Agent" Name="DataDir"
+                         Type="string" Value="[DataFolder]" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="Aegis Agent" Level="1">
+      <ComponentRef Id="AgentBinary" />
+      <ComponentRef Id="AgentEnv" />
+      <ComponentRef Id="DataDirectory" />
+      <?ifdef EtwSource?>
+      <ComponentRef Id="AgentEtw" />
+      <?endif?>
+    </Feature>
+  </Package>
+</Wix>

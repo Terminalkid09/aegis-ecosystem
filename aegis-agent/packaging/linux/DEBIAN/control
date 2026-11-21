@@ -1,0 +1,13 @@
+Package: aegis-agent
+Version: __VERSION__
+Section: admin
+Priority: optional
+Architecture: amd64
+Maintainer: Aegis <ops@aegis.local>
+Installed-Size: __SIZE__
+Depends: ca-certificates
+Description: Aegis unified endpoint and sensor agent
+ One binary with explicit full, sensor and endpoint modes. The package installs
+ the systemd unit and leaves enrollment token provisioning to the operator or
+ MDM. It does not start the service automatically.
+Homepage: https://github.com/Terminalkid09/aegis-ecosystem
