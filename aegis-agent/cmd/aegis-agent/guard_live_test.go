@@ -32,6 +32,9 @@ type guardLiveCounters struct {
 }
 
 func TestLiveGuardAgainstFakeBrain(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		t.Skip("live telemetry collector is supported on linux and windows only")
+	}
 	caKey, caCert, _ := testCA(t)
 	counters := &guardLiveCounters{}
 	var commandOnce sync.Once

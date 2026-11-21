@@ -815,6 +815,11 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
 
+      - name: Resolve Docker socket group
+        # group_add must match the socket GID on the runner. Hard-coding 0 is
+        # correct on some Docker Desktop hosts but not on GitHub's Linux VM.
+        run: echo "DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)" >> "$GITHUB_ENV"
+
       - name: Start ephemeral Compose stack
         run: |
           set -euo pipefail

@@ -36,6 +36,9 @@ type liveCounters struct {
 }
 
 func TestLiveSensorAgainstFakeBrain(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		t.Skip("live telemetry collector is supported on linux and windows only")
+	}
 	caKey, caCert, caPEM := testCA(t)
 	counters := &liveCounters{}
 	var commandOnce sync.Once

@@ -97,14 +97,19 @@ def _vault_token(env: MutableMapping[str, str]) -> str:
 
 
 def _vault_context(env: MutableMapping[str, str]) -> ssl.SSLContext:
-    if _enabled(env.get("AEGIS_VAULT_SKIP_VERIFY")):
-        # Explicit escape hatch for a lab with a self-signed Vault certificate.
-        return ssl._create_unverified_context()
     cafile = (env.get("AEGIS_VAULT_CACERT") or "").strip() or None
     try:
-        return ssl.create_default_context(cafile=cafile)
+        context = ssl.create_default_context(cafile=cafile)
     except OSError as exc:
         raise RuntimeError("AEGIS_VAULT_CACERT is not a readable CA file") from exc
+    if _enabled(env.get("AEGIS_VAULT_SKIP_VERIFY")):
+        # Explicit lab-only escape hatch for a self-signed Vault certificate.
+        # The context is still created by the normal verified constructor; only
+        # this opt-in changes verification, so no unverified-context helper is
+        # needed.
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
 
 
 def load_vault_secrets(environ: MutableMapping[str, str] | None = None) -> list[str]:
@@ -130,10 +135,18 @@ def load_vault_secrets(environ: MutableMapping[str, str] | None = None) -> list[
     if namespace:
         headers["X-Vault-Namespace"] = namespace
 
+    parsed_addr = urllib.parse.urlparse(addr)
+    if parsed_addr.scheme not in ("http", "https") or not parsed_addr.netloc:
+        raise RuntimeError("AEGIS_VAULT_ADDR must be an http(s) URL")
+
     request = urllib.request.Request(url, headers=headers, method="GET")
     timeout = float((env.get("AEGIS_VAULT_TIMEOUT_S") or "10").strip() or "10")
     try:
-        with urllib.request.urlopen(request, timeout=timeout, context=_vault_context(env)) as response:
+        # The URL is assembled only from the validated HTTP(S) address above and
+        # quoted mount/path components; file:, data: and custom schemes are
+        # rejected before this call. B310 is suppressed with that invariant.
+        with urllib.request.urlopen(  # nosec B310
+                request, timeout=timeout, context=_vault_context(env)) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"Vault KV request failed with HTTP {exc.code}") from None

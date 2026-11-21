@@ -76,6 +76,17 @@ published, and Compose applies CPU/RAM/PID limits, `no-new-privileges` and
 `cap_drop: ALL`. This reduces, but does not eliminate, the risk of a
 Docker-socket compromise; treat the broker as a high-privilege component.
 
+On Linux the socket is usually owned by a non-root `docker` group. Export its
+GID before starting the profile, otherwise the non-root broker cannot open it:
+
+```bash
+export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+```
+
+Docker Desktop may use GID 0. The CI derives the same value instead of
+hard-coding it. The broker must not be switched back to root just to bypass
+this permission.
+
 ## Testing
 
 ```bash

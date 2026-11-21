@@ -3,7 +3,20 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import pytest
+
 from app.core.secrets import load_vault_secrets, resolve_file_secrets
+
+
+def test_vault_rejects_non_http_scheme():
+    env = {
+        "AEGIS_VAULT_ENABLED": "true",
+        "AEGIS_VAULT_ADDR": "file:///etc/passwd",
+        "AEGIS_VAULT_TOKEN": "test-token",
+        "AEGIS_VAULT_PATH": "aegis",
+    }
+    with pytest.raises(RuntimeError, match=r"http\(s\) URL"):
+        load_vault_secrets(env)
 
 
 def test_file_secret_overrides_stale_environment(tmp_path):
