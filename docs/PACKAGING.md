@@ -77,6 +77,10 @@ MSI does not grant broad write access to ProgramData. Uninstall stops and
 removes the service, then removes the installed binaries; the state directory is
 retained unless the operator removes it.
 
+Intune/GPO templates and the local post-deployment validator are in
+[`deploy/mdm/`](../deploy/mdm/README.md). They are not tenant evidence; the
+validator reports `tenant_validation: "not_performed"`.
+
 **MSIX:** not emitted as the service package. MSIX is an application packaging
 format and does not register a Windows service like `AegisAgent`; using it here
 would produce a package that cannot provide the required background service.
