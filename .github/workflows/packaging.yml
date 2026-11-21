@@ -2,9 +2,14 @@ name: Endpoint Packaging
 
 on:
   push:
-    branches: [dev, main, "feat/**"]
+    branches: [dev, main, "feat/**", "release/**"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      production_signing:
+        description: "Build with the production signing secrets (Windows PFX and Linux GPG)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -46,6 +51,50 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
+  packaging_windows_install:
+    name: Clean-host MSI install/uninstall
+    needs: packaging_windows
+    timeout-minutes: 15
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Download MSI
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aegis-agent-msi-test-signed
+          path: dist
+      - name: Install, verify service, uninstall
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem .\dist\*.msi | Select-Object -First 1).FullName
+          if (-not $msi) { throw "MSI artifact missing" }
+          $install = Start-Process msiexec.exe -ArgumentList @(
+            "/i", $msi, "/qn", "/norestart", "/l*v", "$PWD\msi-install.log",
+            "BRAIN_URL=https://aegis.invalid"
+          ) -Wait -PassThru
+          if ($install.ExitCode -ne 0) {
+            Get-Content "$PWD\msi-install.log" -Tail 80
+            throw "MSI install failed (exit $($install.ExitCode))"
+          }
+          if (-not (Test-Path "C:\Program Files\Aegis\aegis-agent.exe")) {
+            throw "agent binary was not installed"
+          }
+          $service = Get-Service -Name AegisAgent -ErrorAction SilentlyContinue
+          if (-not $service) { throw "AegisAgent service was not registered" }
+          $uninstall = Start-Process msiexec.exe -ArgumentList @(
+            "/x", $msi, "/qn", "/norestart"
+          ) -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) {
+            throw "MSI uninstall failed (exit $($uninstall.ExitCode))"
+          }
+          if (Test-Path "C:\Program Files\Aegis\aegis-agent.exe") {
+            throw "agent binary survived uninstall"
+          }
+          if (Get-Service -Name AegisAgent -ErrorAction SilentlyContinue) {
+            throw "AegisAgent service survived uninstall"
+          }
+          Write-Host "MSI install/uninstall PASS"
+
   packaging_linux:
     name: Packaging Linux (test-signed deb)
     timeout-minutes: 20
@@ -69,6 +118,181 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: aegis-agent-deb-test-signed
+          path: |
+            dist/*.deb
+            dist/*.asc
+            dist/*.sha256
+          if-no-files-found: error
+
+  packaging_linux_install:
+    name: Clean-host deb install/uninstall
+    needs: packaging_linux
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download deb
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aegis-agent-deb-test-signed
+          path: dist
+      - name: Install, verify layout, remove
+        run: |
+          set -euo pipefail
+          sudo dpkg -i dist/*.deb
+          test -x /usr/local/bin/aegis-agent
+          test -f /lib/systemd/system/aegis-agent.service
+          test -f /etc/aegis-agent/aegis-agent.env.example
+          sudo dpkg -r aegis-agent
+          test ! -e /usr/local/bin/aegis-agent
+          test ! -e /lib/systemd/system/aegis-agent.service
+          echo "deb install/uninstall PASS"
+
+  packaging_rpm:
+    name: Packaging Linux (RPM)
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: aegis-agent/go.sum
+      - name: Install RPM tooling
+        run: sudo apt-get update && sudo apt-get install -y rpm
+      - name: Build RPM
+        run: VERSION=4.3.0 ./scripts/build-rpm.sh
+      - name: Verify RPM metadata and contents
+        run: |
+          rpm -qip dist/aegis-agent-4.3.0-1.x86_64.rpm
+          rpm -qlp dist/aegis-agent-4.3.0-1.x86_64.rpm
+          (cd dist && sha256sum -c aegis-agent-4.3.0-1.x86_64.rpm.sha256)
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aegis-agent-rpm
+          path: |
+            dist/*.rpm
+            dist/*.sha256
+          if-no-files-found: error
+
+  packaging_rpm_install:
+    name: Clean-host RPM install/uninstall
+    needs: packaging_rpm
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download RPM
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aegis-agent-rpm
+          path: dist
+      - name: Install and remove in a disposable Rocky container
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD/dist:/pkg:ro" rockylinux:9 bash -lc '
+            set -euo pipefail
+            dnf install -y /pkg/*.rpm
+            test -x /usr/local/bin/aegis-agent
+            test -f /lib/systemd/system/aegis-agent.service
+            rpm -q aegis-agent
+            rpm -e aegis-agent
+            test ! -e /usr/local/bin/aegis-agent
+            test ! -e /lib/systemd/system/aegis-agent.service
+            echo "RPM install/uninstall PASS"
+          '
+
+  packaging_opkg:
+    name: Packaging OpenWrt (ipk)
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: aegis-agent/go.sum
+      - name: Install ipk tooling
+        run: sudo apt-get update && sudo apt-get install -y binutils
+      - name: Build ipk
+        run: VERSION=4.3.0 ./scripts/build-opkg.sh
+      - name: Verify ipk structure
+        run: |
+          ar t dist/aegis-agent_4.3.0_x86_64.ipk
+          tar -tzf <(ar p dist/aegis-agent_4.3.0_x86_64.ipk control.tar.gz) | grep -q ./control
+          (cd dist && sha256sum -c aegis-agent_4.3.0_x86_64.ipk.sha256)
+      - name: Upload ipk artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aegis-agent-opkg
+          path: |
+            dist/*.ipk
+            dist/*.sha256
+          if-no-files-found: error
+
+  production_windows:
+    name: Production Windows signature
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.production_signing }}
+    timeout-minutes: 25
+    runs-on: windows-latest
+    environment: production-signing
+    env:
+      AEGIS_WINDOWS_PFX_BASE64: ${{ secrets.AEGIS_WINDOWS_PFX_BASE64 }}
+      AEGIS_MSI_PFX_PASSWORD: ${{ secrets.AEGIS_MSI_PFX_PASSWORD }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: aegis-agent/go.sum
+      - name: Install WiX 5
+        shell: pwsh
+        run: dotnet tool install --tool-path .tmp/wix5 wix --version 5.0.2
+      - name: Build and production-sign MSI
+        shell: pwsh
+        run: |
+          if (-not $env:AEGIS_WINDOWS_PFX_BASE64) { throw "AEGIS_WINDOWS_PFX_BASE64 is not configured" }
+          New-Item -ItemType Directory -Path .tmp -Force | Out-Null
+          $pfx = Join-Path $PWD ".tmp\codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:AEGIS_WINDOWS_PFX_BASE64))
+          try {
+            .\scripts\build-msi.ps1 -Version 4.3.0 -OutDir dist -ProductionSign -PfxPath $pfx
+          } finally {
+            Remove-Item -LiteralPath $pfx -Force -ErrorAction SilentlyContinue
+          }
+      - name: Upload production MSI
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aegis-agent-msi-production
+          path: dist/*.msi
+          if-no-files-found: error
+
+  production_linux:
+    name: Production Linux signature
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.production_signing }}
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    environment: production-signing
+    env:
+      GPG_PRIVATE_KEY: ${{ secrets.AEGIS_GPG_PRIVATE_KEY }}
+      GPG_KEY_ID: ${{ secrets.AEGIS_GPG_KEY_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: aegis-agent/go.sum
+      - name: Import registry key and build production deb
+        run: |
+          set -euo pipefail
+          test -n "$GPG_PRIVATE_KEY"
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          SIGNING_MODE=production VERSION=4.3.0 ./scripts/build-deb.sh
+          gpg --batch --verify dist/aegis-agent_4.3.0_amd64.deb.asc \
+            dist/aegis-agent_4.3.0_amd64.deb
+      - name: Upload production deb
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aegis-agent-deb-production
           path: |
             dist/*.deb
             dist/*.asc

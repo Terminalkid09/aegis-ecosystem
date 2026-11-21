@@ -477,6 +477,15 @@ services:
     mem_limit: ${AEGIS_KRAKEN_RDP_MEM_LIMIT:-1g}
     cpus: "${AEGIS_KRAKEN_RDP_CPUS:-1.0}"
     pids_limit: ${AEGIS_KRAKEN_RDP_PIDS:-300}
+    environment:
+      INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set for the kraken profile}
+      KRAKEN_RDP_INGEST_ENABLED: ${KRAKEN_RDP_INGEST_ENABLED:-true}
+      KRAKEN_RDP_INGEST_URL: ${KRAKEN_RDP_INGEST_URL:-http://aegis-kraken:8000}
+      KRAKEN_RDP_SENSOR_PORT: ${KRAKEN_RDP_SENSOR_PORT:-3389}
+      KRAKEN_RDP_LOG_PATHS: ${KRAKEN_RDP_LOG_PATHS:-/var/log/auth.log,/var/log/xrdp.log,/var/log/xrdp-sesman.log}
+    depends_on:
+      aegis-kraken:
+        condition: service_healthy
     security_opt:
       - no-new-privileges:true
     expose:

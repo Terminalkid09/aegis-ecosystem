@@ -8,7 +8,19 @@ VERSION="${VERSION:-4.3.0}"
 OUT_DIR="${OUT_DIR:-$ROOT/dist}"
 AGENT_BIN="${AGENT_BIN:-$ROOT/.tmp/packaging/aegis-agent-linux}"
 SKIP_SIGN="${SKIP_SIGN:-0}"
+SIGNING_MODE="${SIGNING_MODE:-test}"
 GPG_KEY_ID="${GPG_KEY_ID:-}"
+GPG_PASSPHRASE="${GPG_PASSPHRASE:-}"
+GPG_PASSPHRASE_FILE="${GPG_PASSPHRASE_FILE:-}"
+
+case "$SIGNING_MODE" in
+    test|production) ;;
+    *) echo "SIGNING_MODE must be 'test' or 'production'" >&2; exit 2 ;;
+esac
+if [ "$SIGNING_MODE" = "production" ] && [ "$SKIP_SIGN" = "1" ]; then
+    echo "A production package cannot be built with SKIP_SIGN=1" >&2
+    exit 2
+fi
 
 if ! command -v dpkg-deb >/dev/null 2>&1; then
     echo "dpkg-deb not found. On Windows run this script in debian:bookworm-slim:" >&2
@@ -70,10 +82,19 @@ dpkg-deb --contents "$DEB" >/dev/null
 
 if [ "$SKIP_SIGN" != "1" ]; then
     if ! command -v gpg >/dev/null 2>&1; then
-        echo "gpg not found: cannot produce the test signature" >&2
+        echo "gpg not found: cannot produce the package signature" >&2
         exit 2
     fi
-    if [ -z "$GPG_KEY_ID" ]; then
+    if [ "$SIGNING_MODE" = "production" ]; then
+        if [ -z "$GPG_KEY_ID" ]; then
+            echo "production signing requires GPG_KEY_ID (the private key must already be in GNUPGHOME)" >&2
+            exit 2
+        fi
+        if ! gpg --batch --list-secret-keys "$GPG_KEY_ID" >/dev/null 2>&1; then
+            echo "GPG_KEY_ID has no secret key in GNUPGHOME: $GPG_KEY_ID" >&2
+            exit 2
+        fi
+    elif [ -z "$GPG_KEY_ID" ]; then
         TMP_GPG="$(mktemp -d)"
         export GNUPGHOME="$TMP_GPG"
         chmod 700 "$GNUPGHOME"
@@ -82,10 +103,21 @@ if [ "$SKIP_SIGN" != "1" ]; then
         GPG_KEY_ID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/{print $5; exit}')"
         echo "test signing key: $GPG_KEY_ID (ephemeral, not trusted)"
     fi
-    gpg --batch --yes --armor --detach-sign --local-user "$GPG_KEY_ID" \
-        --output "$DEB.asc" "$DEB"
+
+    sign_args=(gpg --batch --yes --armor --detach-sign --local-user "$GPG_KEY_ID")
+    if [ -n "$GPG_PASSPHRASE_FILE" ]; then
+        sign_args+=(--pinentry-mode loopback --passphrase-file "$GPG_PASSPHRASE_FILE")
+    elif [ -n "$GPG_PASSPHRASE" ]; then
+        sign_args+=(--pinentry-mode loopback --passphrase-fd 0)
+    fi
+    sign_args+=(--output "$DEB.asc" "$DEB")
+    if [ -n "$GPG_PASSPHRASE" ]; then
+        printf '%s' "$GPG_PASSPHRASE" | "${sign_args[@]}"
+    else
+        "${sign_args[@]}"
+    fi
     gpg --batch --verify "$DEB.asc" "$DEB" >/dev/null
-    echo "GPG signature verified: $DEB.asc"
+    echo "GPG signature verified: $DEB.asc (mode=$SIGNING_MODE)"
 fi
 
 (cd "$OUT_DIR" && sha256sum "$(basename "$DEB")" > "$(basename "$DEB").sha256")

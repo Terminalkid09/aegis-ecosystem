@@ -708,10 +708,26 @@ jobs:
             --require-agent \
             --require-image-sboms
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@1fc5bd396d372bee37d608f955b336615edf79c8 # v3.2.0
+        with:
+          cosign-release: 'v2.6.0'
+
+      - name: Sign release checksums (keyless OIDC)
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --bundle release/SHA256SUMS.sigstore.json \
+            release/SHA256SUMS.txt
+          cosign verify-blob \
+            --bundle release/SHA256SUMS.sigstore.json \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/ci.yml@${GITHUB_REF}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            release/SHA256SUMS.txt
+
       # Provenance, non firma: l'attestazione lega gli asset al repository e
-      # al workflow che li ha costruiti. Non sostituisce cosign e non prova
-      # l'identità del publisher; per questo la release resta "checksummed,
-      # not signed" finché non arriva la firma keyless.
+      # al workflow che li ha costruiti. La firma del publisher è prodotta
+      # sopra da cosign keyless e verificata dallo stesso workflow.
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
@@ -764,6 +780,10 @@ jobs:
           docker build -t kraken-ci:${{ github.sha }} .
           docker build -f Dockerfile.broker -t kraken-broker-ci:${{ github.sha }} .
           docker build -f rdp/Dockerfile -t kraken-rdp-ci:${{ github.sha }} .
+          docker build -f Dockerfile.sandbox -t kraken-sandbox-ci:${{ github.sha }} .
+
+      - name: Sandbox isolation policy
+        run: python scripts/test_sandbox_isolation.py --image kraken-sandbox-ci:${{ github.sha }} --skip-build
 
   e2e:
     name: Compose E2E Gate

@@ -1,36 +1,56 @@
-# Release signing decision — 4.3.0
+# Release signing — 4.3.0
 
-Status: 2026-11-19.
+Status: 2026-11-21. `SHA256SUMS.txt` is signed by the tag workflow with
+**cosign keyless OIDC**; the signature bundle is published next to the release
+assets. The endpoint packages are signed separately with Authenticode (MSI) and
+the operator's GPG key (deb). A local bundle built outside the tag workflow is
+still unsigned until that step runs.
 
-## Decision
+## What is signed
 
-`v4.3.0` remains **checksummed, not cosign-signed**. This is an explicit
-limitation, not a claim that the release is signed. `SHA256SUMS.txt` and
-`RELEASE_MANIFEST.json` protect against corruption in transit and let a
-downloader verify the exact bytes; they do not authenticate the publisher.
+| Artifact | Signature |
+|---|---|
+| `SHA256SUMS.txt` | `SHA256SUMS.sigstore.json`, cosign keyless OIDC |
+| Windows MSI | Authenticode with RFC 3161 timestamp |
+| deb | Detached armored GPG `.asc` |
+| RPM | Operator RPM/GPG signature (separate signing step) |
+| ipk | Package checksum; feed-level signing remains the operator's choice |
 
-The GitHub tag workflow produces a build-provenance attestation. That binds the
-assets to the repository, commit and workflow run, but it is not a human
-publisher signature.
+The cosign identity is bound to the workflow and tag:
 
-## Why
+```bash
+cosign verify-blob \
+  --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity \
+    "https://github.com/<owner>/<repo>/.github/workflows/ci.yml@refs/tags/v4.3.0" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS.txt
+sha256sum -c SHA256SUMS.txt
+```
 
-Keyless cosign needs a working OIDC identity, a pinned installer and a
-verification path in the release smoke test. Adding only the signing step
-would produce a signature that nobody verifies, which is worse than an honest
-unsigned release. The clean-install gate and the checksummed bundle are the
-4.3.0 release-integrity priorities.
+The tag job fails if signing or verification fails; it does not publish a
+signature it cannot verify. `RELEASE_MANIFEST.json` records that the tag
+workflow produces the cosign signature.
 
-## Required for the next release
+## Package signing
 
-- sign `SHA256SUMS.txt` with cosign keyless OIDC;
-- publish the signature bundle next to the checksums;
-- verify the signature from the downloaded release, not from the repo;
-- fail the tag job if verification fails;
-- keep the build-provenance attestation and verify it from the downloaded
-  bundle.
+The repository never stores private keys or PFX files. The MSI script accepts a
+PFX path or a certificate thumbprint and uses `signtool.exe` with RFC 3161
+timestamping. The deb script accepts `SIGNING_MODE=production` plus a GPG key
+already present in `GNUPGHOME`; test mode uses an ephemeral key and is clearly
+labelled as test.
 
-Operators can verify the attestation with
-`gh attestation verify <asset> --repo <owner>/<repo>`. The release is still
-described as **checksummed, not signed** until the cosign requirements above
-are met.
+These are deliberate operator-controlled inputs: the product is open source and
+must not force a particular certificate authority. A public CA, an internal CA
+distributed by GPO/Intune, or an HSM-backed key are all valid as long as the
+resulting signature verifies on the target.
+
+## Provenance
+
+The tag workflow also produces a GitHub build-provenance attestation. It binds
+the assets to the repository, commit and workflow run; it does not replace the
+publisher signature. Verify it with:
+
+```bash
+gh attestation verify <asset> --repo <owner>/<repo>
+```
