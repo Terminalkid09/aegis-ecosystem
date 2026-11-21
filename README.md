@@ -126,7 +126,7 @@ Latest local verification: **2026-11-21**.
 | Kraken pytest | **154 passed** |
 | Frontend production build | **PASS** |
 | Frontend lint | **0 errors, 24 warnings** |
-| Playwright pages/session/smoke/Kraken through Caddy (post-4.3) | **13 passed**; the `users` spec assumes a single-admin database and was not used for this local run |
+| Playwright pages/session/smoke/Kraken through Caddy | **13 passed**; the `users` spec assumes a single-admin database and was not used for this local run |
 | Playwright OIDC against Keycloak 26.0.7 | **2 passed** |
 | ETW live elevated | **PASS**, 95 events; non-admin **exit 2** |
 | WSL2 Ubuntu / Kali eBPF | **PASS**; benchmark **300/300**, zero lost events |
@@ -178,6 +178,6 @@ The repository is a monorepo: `aegis-brain` (FastAPI), `aegis-agent` (Go), `aegi
 
 ## License
 
-Aegis Ecosystem is licensed under **AGPL-3.0-only**. See [LICENSE](LICENSE) and [NOTICE](NOTICE). The name and logo are governed by [TRADEMARK.md](TRADEMARK.md). Security reports: [SECURITY.md](SECURITY.md).
+Aegis Ecosystem is licensed under **AGPL-3.0-only** (the root is not Apache). See [LICENSE](LICENSE) and [NOTICE](NOTICE). **Kraken** is a separately licensed **MIT** component: see [services/kraken/LICENSE](services/kraken/LICENSE) and its [README](services/kraken/README.md#license). The MIT component is distributed inside the AGPL bundle and keeps its own notice; it does not relicense the rest of the repository. The name and logo are governed by [TRADEMARK.md](TRADEMARK.md). Security reports: [SECURITY.md](SECURITY.md).
 
 <p align="center"><strong>Authorized use only.</strong> Aegis is a defensive platform for systems you own or have explicit written permission to monitor.</p>

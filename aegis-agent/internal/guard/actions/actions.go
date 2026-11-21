@@ -233,9 +233,13 @@ func (e *Executor) quarantine(command transport.Command) (Result, error) {
 		return Result{}, fmt.Errorf("QUARANTINE_BINARY: copia: %w", err)
 	}
 	if runtime.GOOS == "windows" {
-		_ = e.Runner.Run(context.Background(), "icacls", exe, "/deny", "Everyone:(R,W,X)")
+		if err := e.Runner.Run(context.Background(), "icacls", exe, "/deny", "Everyone:(R,W,X)"); err != nil {
+			return Result{}, fmt.Errorf("QUARANTINE_BINARY: rimozione permessi: %w", err)
+		}
 	} else {
-		_ = os.Chmod(exe, 0o000)
+		if err := os.Chmod(exe, 0o000); err != nil {
+			return Result{}, fmt.Errorf("QUARANTINE_BINARY: rimozione permessi: %w", err)
+		}
 	}
 	return Result{Details: fmt.Sprintf("binario %s copiato in quarantena (%s)", exe, dest)}, nil
 }

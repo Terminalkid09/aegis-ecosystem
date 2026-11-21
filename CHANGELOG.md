@@ -49,8 +49,9 @@ le copie versionate `unified-4.3.0.*`. L'archivio Windows include
 `aegis-agent.exe` e `aegis-etw.exe`; quello Linux include `aegis-agent`,
 `aegis-collector` e `aegis_exec.bpf.o`. `release-smoke.py --require-agent`
 rifiuta un bundle senza questi file e rifiuta esplicitamente Guard/NodeTrace e i
-binari grezzi. Fuori dal perimetro 4.3.0 restano il servizio/installer drop-in
-firmato e il rollback.
+binari grezzi. Il servizio/installer drop-in firmato è nella 4.3; resta fuori
+il rollback Java/JRE/Python, insieme alla certificazione reale di malware e
+corpus.
 
 Evidenza eseguita il 2026-11-18 (fake) e il 2026-11-19 (stack reale):
 
@@ -76,13 +77,13 @@ comparabile a Java e non viene dichiarata più bassa. Durante la misura è stata
 corretta una regressione reale del polling Windows (WMI/Authenticode per tutti
 i processi ogni secondo), che saturava un core.
 
-**Perimetro dichiarato:** packaging firmato MSI/deb/rpm,
-servizio nativo e rollback Java/JRE/Python su host reale non sono parte della
-4.3.0; sono lavoro successivo. Lo smoke contro il Brain reale è reale, ma non è
-un test di flotta né di servizio installato. La 4.3.0 è una release per pilot
-controllati, non una sostituzione production-grade di un servizio endpoint
-firmato; il bundle non contiene più Guard/NodeTrace, che restano solo nel
-sorgente per i 4.2.1 già installati.
+**Perimetro dichiarato:** la 4.3.0 include i percorsi packaging firmati
+MSI/deb/RPM/ipk, il servizio nativo, la firma Authenticode provider-agnostica,
+la modalità GPG production e la firma cosign keyless del tag. Restano fuori il
+rollback Java/JRE/Python e la certificazione reale di malware/corpus, che
+richiede un laboratorio autorizzato. Lo smoke contro il Brain reale è reale, ma
+non è un test di flotta né di servizio installato. Il bundle non contiene più
+Guard/NodeTrace, che restano solo nel sorgente per i 4.2.1 già installati.
 
 **Evidenza di release:** clean install isolata da sorgente senza artefatti
 (`aegis-clean43`) con volumi nuovi, bootstrap admin, enrollment reale,
@@ -143,6 +144,11 @@ comandi batch, ack, scan Discovery e verifica dell'header `X-Client-Cert-Hash`.
   tests skip on Darwin, where the collector is unsupported, while the macOS
   build/vet gate remains. Branch run 44916543187 is green for all non-release
   jobs; the release job remains tag-only.
+- I client legacy NodeTrace e Guard ora inviano solo `X-Client-Cert-Hash`,
+  coerenti con il rifiuto di `X-Client-Cert` nel Brain; il test NodeTrace
+  blocca il ritorno dell'header completo.
+- Gli handler Guard/Go non riportano più `ok` quando la quarantena o il blocco
+  firewall falliscono: l'errore viene propagato all'ack come `failed`.
 - Kraken SSH now advertises an Ubuntu OpenSSH banner instead of the AsyncSSH
   default. FTP passive mode advertises a reachable host and a published passive
   range, and uploads complete on the data channel instead of a fixed sleep.

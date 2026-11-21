@@ -149,10 +149,16 @@ class Agent:
             self.CAPABILITIES = {**self.CAPABILITIES, "ebpf_process_events": True}
 
     def _agent_headers(self, token, device_id):
-        """Header auth + X-Client-Cert quando l'identità esiste."""
+        """Header auth + fingerprint mTLS, mai il certificato completo.
+
+        Il Brain rifiuta ``X-Client-Cert`` quando
+        ``MTLS_REJECT_LEGACY_HEADER`` è attivo: il certificato completo non è
+        prova di possesso della chiave. Il fingerprint è legato all'agent
+        all'emissione e viene verificato dal proxy/Brain.
+        """
         headers = {"Authorization": f"Bearer {token}", "X-Agent-Id": device_id}
-        if self._identity_b64:
-            headers["X-Client-Cert"] = self._identity_b64
+        if self._identity_hash:
+            headers["X-Client-Cert-Hash"] = self._identity_hash
         return headers
 
     def _enroll_token(self):

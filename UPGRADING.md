@@ -99,6 +99,10 @@ copies. The Windows archive contains `aegis-agent.exe` and `aegis-etw.exe`; the
 Linux archive contains `aegis-agent`, `aegis-collector` and
 `aegis_exec.bpf.o`. Guard/NodeTrace artifacts are not present.
 
-Cosign signing is a separate step. `v4.3.0` is checksummed and carries a
-build-provenance attestation, but it is **not** described as a signed
-production artifact. See `docs/RELEASE_SIGNING.md`.
+The tag workflow signs `SHA256SUMS.txt` with cosign keyless OIDC, verifies the
+signature, and attaches the bundle next to the release assets. The package
+signature is separate: the MSI requires the operator's Authenticode
+certificate and the deb requires the operator's GPG key. Until `v4.3.0` is
+tagged, those signatures are an implemented path, not a published artifact.
+The release also carries a build-provenance attestation. See
+`docs/RELEASE_SIGNING.md`.

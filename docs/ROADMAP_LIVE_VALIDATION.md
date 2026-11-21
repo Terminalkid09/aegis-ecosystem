@@ -1,4 +1,4 @@
-# Aegis — Live Validation Roadmap (post-4.3)
+# Aegis — 4.3 Live Validation Roadmap
 
 Status: decision record, 2026-11-19, updated 2026-11-21. This document is the
 English source of truth for the validation work kept **inside the 4.3.0 release
