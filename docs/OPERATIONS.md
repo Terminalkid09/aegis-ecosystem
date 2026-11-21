@@ -34,7 +34,29 @@ Kraken profile, `docker compose ps` must show
 `127.0.0.1:8000` listener, not the honeypot ports, so it cannot create fake
 attack events.
 
-## 1a. First administrator (localhost and remote)
+## 1a. Docker resource limits
+
+Long-running services accept environment overrides with safe defaults in
+`docker-compose.yml`:
+
+```bash
+AEGIS_BRAIN_MEM_LIMIT=750m
+AEGIS_BRAIN_CPUS=0.75
+AEGIS_BRAIN_PIDS=300          # Linux only
+AEGIS_KRAKEN_SENSORS_MEM_LIMIT=384m
+AEGIS_KRAKEN_SENSORS_CPUS=0.40
+AEGIS_KRAKEN_RDP_MEM_LIMIT=896m
+```
+
+`scripts/check_compose_limits.py` verifies that the overrides reach the rendered
+Compose model without starting a container. For a live load test, start the
+stack, then run `scripts/load_limits.sh`: it wraps the existing
+`scripts/pilot_soak.py` and captures `docker stats` before/after. `mem_limit` and
+`cpus` are Compose v2 fields, not Swarm `deploy.resources`; `pids_limit` is
+Linux-only. Size the Brain/Postgres pair together: lowering only the Brain limit
+moves pressure to the DB and does not increase throughput.
+
+## 1b. First administrator (localhost and remote)
 
 Self-service registration is disabled by default. There is no implicit admin on
 `localhost`: the role is granted from the host shell, never from an HTTP request.
