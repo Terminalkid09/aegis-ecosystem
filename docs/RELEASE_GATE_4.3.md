@@ -1,10 +1,12 @@
 # Aegis 4.3 — Release Gate
 
 Status: 2026-11-21. **No `v4.3.0` tag has been cut and nothing is published.**
-The locally executable gates are green and the branch CI is green at
-`d867ef8` (run 44916543187). The hosted tag run, including the tag-only
-`release` job, is still required before calling the release published. There
-is no `4.3.0-rc1`: the release is cut directly as `v4.3.0`.
+The 4.3 production-path work is on `release/4.3.0` (PR #18): provider-agnostic
+Authenticode signing, production GPG mode, cosign keyless release signing, RPM
+and ipk packages, xrdp log forwarding and AP-126/AP-127 harnesses. The hosted
+tag run, including the tag-only `release` job, is still required before calling
+the release published. There is no `4.3.0-rc1`: the release is cut directly as
+`v4.3.0`.
 
 ## 2026-11-20 local verification update
 
@@ -155,32 +157,32 @@ OS compatibility, build/test, YARA, supply chain, NodeTrace Windows, Kraken and
 Compose E2E. `Release Artifacts` was skipped because it is tag-only. A green
 branch run does **not** prove the publishing job; the tag is still required.
 
-## Production gap after 4.3.0
+## Production gaps in 4.3
 
-This is the difference between a controlled-pilot release and production GA:
+The 4.3 branch now contains the executable production paths; these are the
+remaining operator inputs and evidence, not missing packaging code:
 
-- signed MSI/deb/rpm packages and native service drop-in, without `irm|iex` or
-  `curl|bash` as the production path;
+- **Delivered:** signed MSI/deb/rpm/ipk paths, native service drop-in,
+  provider-agnostic Authenticode signing, production GPG mode, cosign keyless
+  release signing and clean-host install/uninstall CI;
+- **External input:** the real Authenticode certificate/key and GPG key must be
+  supplied by the operator; CI uses test signing only;
+- **External input:** MDM/Intune/GPO tenant validation requires the customer's
+  tenant; the clean Windows runner and MSI properties are ready;
 - 7-day soak with memory/leak checks, restart and duplicate-action visibility;
-- real endpoint traffic and a real malware corpus (AP-126);
-- measured detection quality on real benign/malicious data (AP-127);
+- **AP-126:** the bounded sandbox harness is shipped; executing live malware
+  requires an authorized sample and an isolated, snapshot/restore-capable lab;
+- **AP-127:** the labelled-corpus gate with recall/FPR and per-host/day metrics
+  is shipped; a production quality claim requires the real corpus;
 - external security review/pen test and a backup/restore drill;
 - multi-host Redis/Postgres failure tests and a documented support model.
 
-Real detonation and AWS are **not** blockers for 4.3.0:
+AP-126/AP-127 are **inside the 4.3 production gate**. The repository does not
+fabricate real-malware or real-corpus results: it ships the safe harness and
+the gate, and the operator supplies the authorized lab and corpus.
 
-- **AP-126 real detonation is post-4.3 by decision**, not deferred work hidden
-  inside the release. Executing live malware requires an isolated VM/container
-  with snapshot/restore, an authorized sample and a kill switch that this
-  workstation does not provide. The 4.3 claim is the **controlled HTTP
-  detonation integration**, not malware execution. The release gate says so and
-  must not be changed to imply otherwise;
-- **AP-127 production FP/FN is post-4.3 by decision.** The 4.3 evidence is a
-  frozen synthetic baseline; a production rate requires real benign/malicious
-  traffic and per-host/day measurement. The baseline is runnable and honest,
-  but it is not a production quality claim;
-- AWS/MinIO: optional by design; Garage and local storage are supported for
-  the pilot. AWS is not certified.
+AWS/MinIO remains optional by design; Garage and local storage are supported
+for the pilot. AWS is not certified.
 
 ## Allowed claims
 
@@ -196,11 +198,12 @@ Real detonation and AWS are **not** blockers for 4.3.0:
 
 ## Not allowed
 
-- “4.3.0 released” or “production GA” while gate 5 is not green;
+- “4.3.0 released” or “production GA” while gate 5 is not green or while the
+  production certificate/key and real lab/corpus evidence are missing;
 - “real malware detonation certified”;
 - “AWS tested” or “MinIO tested”;
 - “exactly-once”;
-- “production-ready detection quality”;
+- “production-ready detection quality” without the AP-127 real corpus;
 - “agent rollback tested” (it is outside 4.3.0);
 - “the unified service was installed on a target host” (artifact download and
   agent run were tested; service registration is still outside 4.3.0);
@@ -213,5 +216,5 @@ Real detonation and AWS are **not** blockers for 4.3.0:
 3. Run the tag workflow; require gate 5 green and verify the downloaded assets
    and provenance attestation.
 4. Publish `v4.3.0`; do not create `4.3.0-rc1`.
-5. Start AP-126/AP-127 live validation only after the 4.3.0 tag; no new
-   firewall/DNS feature is part of 4.3.
+5. Attach the authorized AP-126/AP-127 lab and corpus evidence as part of the
+   4.3 production gate; no new firewall/DNS feature is part of 4.3.
