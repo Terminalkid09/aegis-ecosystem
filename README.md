@@ -135,7 +135,7 @@ Latest local verification: **2026-11-21**.
 | Clean install from Git clone, core + Kraken | **PASS**; API smoke **21/21**; Kraken healthy |
 | Unified capability modes | `full`, `sensor`, `endpoint` via token/installer/`--mode`; one `agent_type=unified` record in every mode | **PASS locally** |
 | Docker hardening | Compose valid, CPU/RAM/PID limits, `no-new-privileges`, non-root broker, sensors internal by default | **PASS locally** |
-| Branch/PR CI | CI now runs on `dev`, `main`, `feat/**`, pull requests and tags; release job remains tag-only | **configured; hosted run still required** |
+| Branch/PR CI | CI now runs on `dev`, `main`, `feat/**`, pull requests and tags; release job remains tag-only | **PASS — run 44916543187 (non-release jobs); tag job not run** |
 
 Not verified locally: hosted CI/tag workflow, bare-metal Linux, Windows Server live, and macOS live. These are release gates, not claims. See [Release gate 4.3](docs/RELEASE_GATE_4.3.md).
 

@@ -1,9 +1,10 @@
 # Aegis 4.3 — Release Gate
 
 Status: 2026-11-21. **No `v4.3.0` tag has been cut and nothing is published.**
-The locally executable gates are green; the branch CI and the hosted tag run
-are still required before calling the release published. There is no
-`4.3.0-rc1`: the release is cut directly as `v4.3.0`.
+The locally executable gates are green and the branch CI is green at
+`d867ef8` (run 44916543187). The hosted tag run, including the tag-only
+`release` job, is still required before calling the release published. There
+is no `4.3.0-rc1`: the release is cut directly as `v4.3.0`.
 
 ## 2026-11-20 local verification update
 
@@ -148,8 +149,11 @@ both came back byte-identical, and a regression test covers it.
 
 **Gate 5 is the only remaining release blocker.** Do not publish the tag or
 call 4.3.0 released until that hosted run is green and its artifacts are
-verified. The workflow now also runs on branches and pull requests, so the same
-jobs can be exercised before the tag; only the publishing job is tag-only.
+verified. The branch CI at `d867ef8` (run 44916543187) is green for every
+non-release job: lint, contract, Go on Linux/Windows/macOS, Windows installers,
+OS compatibility, build/test, YARA, supply chain, NodeTrace Windows, Kraken and
+Compose E2E. `Release Artifacts` was skipped because it is tag-only. A green
+branch run does **not** prove the publishing job; the tag is still required.
 
 ## Production gap after 4.3.0
 

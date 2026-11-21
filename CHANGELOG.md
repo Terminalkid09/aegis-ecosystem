@@ -137,6 +137,12 @@ comandi batch, ack, scan Discovery e verifica dell'header `X-Client-Cert-Hash`.
 
 ### Fixed
 
+- CI now derives the Docker socket GID for the non-root Kraken broker and
+  validates Vault addresses before `urlopen`; the Vault SSL context still uses
+  the verified constructor with an explicit lab-only opt-out. Live telemetry
+  tests skip on Darwin, where the collector is unsupported, while the macOS
+  build/vet gate remains. Branch run 44916543187 is green for all non-release
+  jobs; the release job remains tag-only.
 - Kraken SSH now advertises an Ubuntu OpenSSH banner instead of the AsyncSSH
   default. FTP passive mode advertises a reachable host and a published passive
   range, and uploads complete on the data channel instead of a fixed sleep.
