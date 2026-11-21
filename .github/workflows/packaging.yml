@@ -143,7 +143,7 @@ jobs:
           unit_path="$(dpkg -L aegis-agent | grep -E '/(usr/)?lib/systemd/system/aegis-agent\.service$')"
           test -n "$unit_path"
           test -f "$unit_path"
-          test -f /etc/aegis-agent/aegis-agent.env.example
+          sudo test -f /etc/aegis-agent/aegis-agent.env.example
           sudo dpkg -r aegis-agent
           test ! -e /usr/local/bin/aegis-agent
           test ! -e "$unit_path"
