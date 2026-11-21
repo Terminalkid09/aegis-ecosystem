@@ -1,12 +1,13 @@
 # Aegis 4.3 — Release Gate
 
 Status: 2026-11-21. **No `v4.3.0` tag has been cut and nothing is published.**
-The 4.3 production-path work is on `release/4.3.0` (PR #18): provider-agnostic
-Authenticode signing, production GPG mode, cosign keyless release signing, RPM
-and ipk packages, xrdp log forwarding and AP-126/AP-127 harnesses. The hosted
-tag run, including the tag-only `release` job, is still required before calling
-the release published. There is no `4.3.0-rc1`: the release is cut directly as
-`v4.3.0`.
+The 4.3 production-path work is on `release/4.3.0` (PR #18, head `a6b0343`):
+provider-agnostic Authenticode signing, production GPG mode, cosign keyless
+release signing, RPM and ipk packages, xrdp log forwarding and AP-126/AP-127
+harnesses. PR #18 is `MERGEABLE/CLEAN`; its branch CI and packaging runs are
+green. The hosted tag run, including the tag-only `release` job, is still
+required before calling the release published. There is no `4.3.0-rc1`: the
+release is cut directly as `v4.3.0`.
 
 ## 2026-11-20 local verification update
 
@@ -122,7 +123,7 @@ Windows/Linux agent service packaging.
 |---|---|---|---|
 | 1 | **AP-122** Link atomic check+push and 50k load | **PASS** | 50k live run above; raw evidence retained |
 | 2 | **AP-123** crash/restart and duplicate visibility | **PASS** | process restart/`attempt=2` and idempotent ack pass; OTA UI says `queued — not executed` and explains the ack/replay boundary |
-| 3 | Release bundle from a clean download | **PASS (local)** | 24-file `v4.3.0` unified-only bundle; manifest/checksums, copied-bundle smoke and `sha256sum -c` (24/24) pass, and `--require-agent` rejects a bundle without the four archives or the kernel helpers and rejects legacy/raw artifacts. GitHub asset download, cosign/provenance verification remain tag-time work; the release is unsigned by decision (`docs/RELEASE_SIGNING.md`) |
+| 3 | Release bundle from a clean download | **PASS (local)** | 24-file `v4.3.0` unified-only bundle; manifest/checksums, copied-bundle smoke and `sha256sum -c` (24/24) pass, and `--require-agent` rejects a bundle without the four archives or the kernel helpers and rejects legacy/raw artifacts. GitHub asset download and cosign/provenance verification remain tag-time work; the tag workflow signs `SHA256SUMS.txt` with cosign keyless OIDC and verifies it before publishing (`docs/RELEASE_SIGNING.md`) |
 | 4 | Upgrade from 4.2.1 | **PASS (server-only)** | 4.2.1 DB restored, 68 agents/321 alerts preserved, Brain 4.3.0 at Alembic head, smoke 21/21. Agent rollback is out of scope by decision |
 | 5 | Hosted CI at the tag | **NOT RUN** | CI is tag/manual only. The `v4.3.0` tag workflow must be green before publishing; a local green run is not a substitute |
 | 6 | **Clean install from the release bundle** | **PASS** | source archive extracted from `v4.3.0`, empty volumes, build + bootstrap + enrollment + event + alert + frontend/Link + smoke 21/21 |
@@ -149,13 +150,16 @@ one-liner could fetch its agent. The endpoint now returns the bounded
 artifact bytes directly; a 14-byte probe and the 3.4 MB `unified-latest.zip`
 both came back byte-identical, and a regression test covers it.
 
-**Gate 5 is the only remaining release blocker.** Do not publish the tag or
-call 4.3.0 released until that hosted run is green and its artifacts are
-verified. The branch CI at `d867ef8` (run 44916543187) is green for every
-non-release job: lint, contract, Go on Linux/Windows/macOS, Windows installers,
-OS compatibility, build/test, YARA, supply chain, NodeTrace Windows, Kraken and
-Compose E2E. `Release Artifacts` was skipped because it is tag-only. A green
-branch run does **not** prove the publishing job; the tag is still required.
+**Gate 5 is the only remaining gate in this document**, but it is not the only
+production input: the real Authenticode certificate, GPG key, MDM tenant and
+authorized AP-126/AP-127 lab/corpus are operator-supplied evidence (see
+“Production gaps in 4.3”). Do not publish the tag or call 4.3.0 released until
+the hosted run is green and its artifacts are verified. The branch CI at
+`a6b0343` (run 44936999687) is green for every non-release job: lint, contract,
+Go on Linux/Windows/macOS, Windows installers, OS compatibility, build/test,
+YARA, supply chain, NodeTrace Windows, Kraken and Compose E2E. `Release
+Artifacts` was skipped because it is tag-only. A green branch run does **not**
+prove the publishing job; the tag is still required.
 
 ## Production gaps in 4.3
 
@@ -211,10 +215,11 @@ for the pilot. AWS is not certified.
 
 ## Release sequence
 
-1. Commit the release state on `feat/4.3-agent-go`.
-2. Create the annotated `v4.3.0` tag and push it only as the release action.
+1. Merge PR #18 into `dev`, then open and merge the release PR into `main`.
+2. Create the annotated `v4.3.0` tag from `main` and push it only as the release action.
 3. Run the tag workflow; require gate 5 green and verify the downloaded assets
-   and provenance attestation.
+   and the cosign/provenance evidence.
 4. Publish `v4.3.0`; do not create `4.3.0-rc1`.
-5. Attach the authorized AP-126/AP-127 lab and corpus evidence as part of the
-   4.3 production gate; no new firewall/DNS feature is part of 4.3.
+5. Attach the authorized AP-126/AP-127 lab and corpus evidence and the real
+   certificate/key/MDM evidence as part of the 4.3 production gate; no new
+   firewall/DNS feature is part of 4.3.
