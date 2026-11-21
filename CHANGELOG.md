@@ -147,8 +147,9 @@ comandi batch, ack, scan Discovery e verifica dell'header `X-Client-Cert-Hash`.
 - I client legacy NodeTrace e Guard ora inviano solo `X-Client-Cert-Hash`,
   coerenti con il rifiuto di `X-Client-Cert` nel Brain; il test NodeTrace
   blocca il ritorno dell'header completo.
-- Gli handler Guard/Go non riportano più `ok` quando la quarantena o il blocco
-  firewall falliscono: l'errore viene propagato all'ack come `failed`.
+- Gli handler Guard/Go non riportano più `ok` quando quarantena, blocco
+  firewall, kill o raccolta IOC non riescono: l'errore viene propagato all'ack
+  come `failed`.
 - Kraken SSH now advertises an Ubuntu OpenSSH banner instead of the AsyncSSH
   default. FTP passive mode advertises a reachable host and a published passive
   range, and uploads complete on the data channel instead of a fixed sleep.

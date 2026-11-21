@@ -387,8 +387,17 @@ public class Main {
         // Audit L8: prima un no-op usciva silenziosamente e il comando veniva
         // ack-ato "ok" al SOC (falso positivo di azione applicata).
         if (pid == 0) { throw new IllegalArgumentException("KILL_PROCESS: no PID provided"); }
-        Optional<ProcessHandle> ph = ProcessHandle.of(pid);
-        ph.ifPresent(ProcessHandle::destroyForcibly);
+        ProcessHandle handle = ProcessHandle.of(pid).orElseThrow(
+                () -> new IllegalArgumentException("KILL_PROCESS: process " + pid + " not found"));
+        if (!handle.isAlive()) {
+            throw new IllegalStateException("KILL_PROCESS: process " + pid + " is not running");
+        }
+        handle.destroyForcibly();
+        try {
+            handle.onExit().get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new IllegalStateException("KILL_PROCESS: process " + pid + " did not terminate", e);
+        }
         log.info("[MITIGATION] KILL_PROCESS: PID {} terminated", pid);
     }
 
@@ -401,16 +410,21 @@ public class Main {
         if (pid == 0) { throw new IllegalArgumentException("KILL_PROCESS_TREE: no PID provided"); }
 
         if (isWindows()) {
-            exec("taskkill", "/F", "/T", "/PID", String.valueOf(pid));
+            ExecResult killed = execResult("taskkill", "/F", "/T", "/PID", String.valueOf(pid));
+            if (killed.exitCode() != 0) {
+                throw new IllegalStateException("KILL_PROCESS_TREE failed: " + killed.output());
+            }
         } else {
             // Kill process group
-            Optional<ProcessHandle> ph = ProcessHandle.of(pid);
-            if (ph.isPresent()) {
-                ph.get().children().forEach(child -> {
-                    child.destroyForcibly();
-                    log.info("[MITIGATION] KILL_PROCESS_TREE: child PID {} terminated", child.pid());
-                });
-                ph.get().destroyForcibly();
+            ProcessHandle handle = ProcessHandle.of(pid).orElseThrow(
+                    () -> new IllegalArgumentException("KILL_PROCESS_TREE: process " + pid + " not found"));
+            handle.children().forEach(child -> {
+                child.destroyForcibly();
+                log.info("[MITIGATION] KILL_PROCESS_TREE: child PID {} terminated", child.pid());
+            });
+            handle.destroyForcibly();
+            if (handle.isAlive()) {
+                throw new IllegalStateException("KILL_PROCESS_TREE: process " + pid + " is still running");
             }
         }
         log.info("[MITIGATION] KILL_PROCESS_TREE: PID {} and children terminated", pid);
@@ -933,7 +947,7 @@ public class Main {
     private static void handleCollectIoc(JsonObject cmd) {
         long pid = getPid(cmd);
         String processName = getProcessName(cmd);
-        if (pid == 0) { log.warn("[MITIGATION] COLLECT_IOC: no PID provided"); return; }
+        if (pid == 0) { throw new IllegalArgumentException("COLLECT_IOC: no PID provided"); }
 
         JsonObject ioc = new JsonObject();
         ioc.addProperty("pid", pid);
