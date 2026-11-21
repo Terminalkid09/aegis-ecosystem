@@ -137,14 +137,16 @@ jobs:
           path: dist
       - name: Install, verify layout, remove
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           sudo dpkg -i dist/*.deb
           test -x /usr/local/bin/aegis-agent
-          test -f /lib/systemd/system/aegis-agent.service
+          unit_path="$(dpkg -L aegis-agent | grep -E '/(usr/)?lib/systemd/system/aegis-agent\.service$')"
+          test -n "$unit_path"
+          test -f "$unit_path"
           test -f /etc/aegis-agent/aegis-agent.env.example
           sudo dpkg -r aegis-agent
           test ! -e /usr/local/bin/aegis-agent
-          test ! -e /lib/systemd/system/aegis-agent.service
+          test ! -e "$unit_path"
           echo "deb install/uninstall PASS"
 
   packaging_rpm:

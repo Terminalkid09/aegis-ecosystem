@@ -100,11 +100,14 @@ mkdir -p "$OUT_DIR"
 printf '2.0\n' > "$STAGE/debian-binary"
 IPK="$OUT_DIR/aegis-agent_${VERSION}_x86_64.ipk"
 (cd "$STAGE" && ar r "$IPK" debian-binary control.tar.gz data.tar.gz >/dev/null)
-ar t "$IPK" | grep -qx debian-binary
-ar t "$IPK" | grep -qx control.tar.gz
-ar t "$IPK" | grep -qx data.tar.gz
-tar -tzf "$STAGE/control.tar.gz" | grep -qx ./control
-tar -tzf "$STAGE/data.tar.gz" | grep -qx ./usr/sbin/aegis-agent
+ar t "$IPK" > "$STAGE/ipk.members"
+grep -qx debian-binary "$STAGE/ipk.members"
+grep -qx control.tar.gz "$STAGE/ipk.members"
+grep -qx data.tar.gz "$STAGE/ipk.members"
+tar -tzf "$STAGE/control.tar.gz" > "$STAGE/control.members"
+tar -tzf "$STAGE/data.tar.gz" > "$STAGE/data.members"
+grep -qx ./control "$STAGE/control.members"
+grep -qx ./usr/sbin/aegis-agent "$STAGE/data.members"
 (cd "$OUT_DIR" && sha256sum "$(basename "$IPK")" > "$(basename "$IPK").sha256")
 echo "OPKG: $IPK"
 echo "SHA256: $(cut -d' ' -f1 "$IPK.sha256")"

@@ -70,6 +70,15 @@ install -m 0755 "$ROOT/aegis-agent/packaging/linux/DEBIAN/postinst" "$STAGE/DEBI
 install -m 0755 "$ROOT/aegis-agent/packaging/linux/DEBIAN/prerm" "$STAGE/DEBIAN/prerm"
 install -m 0755 "$ROOT/aegis-agent/packaging/linux/DEBIAN/postrm" "$STAGE/DEBIAN/postrm"
 
+# Git on Windows can check these files out with CRLF.  A CRLF shebang makes
+# dpkg fail with "No such file or directory" and systemd reads CRLF units
+# badly, so normalize every text file that is copied into the package.
+for text_file in "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/prerm" \
+    "$STAGE/DEBIAN/postrm" "$STAGE/lib/systemd/system/aegis-agent.service" \
+    "$STAGE/etc/aegis-agent/aegis-agent.env.example"; do
+    sed -i 's/\r$//' "$text_file"
+done
+
 SIZE="$(du -sk "$STAGE" | cut -f1)"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__SIZE__/$SIZE/" \
     "$ROOT/aegis-agent/packaging/linux/DEBIAN/control" > "$STAGE/DEBIAN/control"
