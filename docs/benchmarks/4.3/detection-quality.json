@@ -1,7 +1,7 @@
 {
   "schema": "aegis-detection-quality-v1",
   "baseline": "4.3",
-  "generated_at": "2026-11-19T10:06:12.455552+00:00",
+  "generated_at": "2026-11-21T14:31:45.239619+00:00",
   "engine": "HeuristicEngine static rules (no DB/custom rules)",
   "limitations": [
     "Eventi sintetici, non traffico reale: non e' un benchmark di produzione.",

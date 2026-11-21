@@ -1,9 +1,9 @@
 # Aegis 4.3 — Release Gate
 
-Status: 2026-11-20. **No `v4.3.0` tag has been cut and nothing is published.**
-The locally executable gates are green; the hosted-CI gate requires the
-tag push and is the only remaining release action. There is no `4.3.0-rc1`:
-the release is cut directly as `v4.3.0`.
+Status: 2026-11-21. **No `v4.3.0` tag has been cut and nothing is published.**
+The locally executable gates are green; the branch CI and the hosted tag run
+are still required before calling the release published. There is no
+`4.3.0-rc1`: the release is cut directly as `v4.3.0`.
 
 ## 2026-11-20 local verification update
 
@@ -16,9 +16,10 @@ hosted tag workflow:
   queue **8/8** on real Redis, including redelivery and process-restart recovery;
 - Kraken: **154 passed**; frontend: production build **PASS**, lint
   **0 errors / 24 warnings**;
-- Playwright pages/session/smoke through Caddy: **12 passed**; the `users` spec
-  assumes a single-admin database and was not part of this run; Kraken/SSO
-  specs were not rerun; Playwright OIDC against Keycloak 26.0.7: **2 passed**;
+- Playwright pages/session/smoke/Kraken through Caddy: **13 passed**; the
+  `users` spec assumes a single-admin database and was not part of this run;
+  Playwright OIDC against Keycloak 26.0.7: **2 passed**; the manual SSO exchange
+  returned **200** and replay **401**; API smoke **21/21**;
 - ETW live elevated: **95 events** (45 created, 47 exited, 3 connections);
   non-elevated exit **2**, no session;
 - WSL2 Ubuntu/Kali eBPF: **PASS**, benchmark **300/300**, zero loss (bare-metal
@@ -94,7 +95,7 @@ the 4.5 Network Visibility track.
 | Go | `go test -count=1 ./...`; `--profile unified --check` | **PASS** |
 | YARA engine | Python 3.12 container, `yara-python` 4.5.4, 3 engine tests | **PASS locally (3/3)**; hosted `yara_engine` job configured |
 | macOS | `GOOS=darwin GOARCH=arm64/amd64 go build`; Darwin test compile + `go vet` | **PASS locally**; `macos-latest` CI run pending; no endpoint telemetry support |
-| UI | `npm run build`; Playwright Caddy + Kraken, SSO separately | **15 passed + 1 skipped; SSO 2/2** |
+| UI | `npm run build`; Playwright Caddy + Kraken, SSO separately | **13 passed; SSO exchange 200, replay 401** |
 | S3 adapter | Garage v2.5.0 upload/download/delete, two identical samples | **PASS** |
 | Detection baseline | 14 malicious + 14 benign, synthetic | 14 TP, 0 FN, 5 FP, 9 TN |
 | Diagrams | 4 draw.io sources + PNG/SVG, English, dark architecture system, version `4.3.0` | **4/4** |
@@ -147,7 +148,8 @@ both came back byte-identical, and a regression test covers it.
 
 **Gate 5 is the only remaining release blocker.** Do not publish the tag or
 call 4.3.0 released until that hosted run is green and its artifacts are
-verified.
+verified. The workflow now also runs on branches and pull requests, so the same
+jobs can be exercised before the tag; only the publishing job is tag-only.
 
 ## Production gap after 4.3.0
 
@@ -163,7 +165,16 @@ This is the difference between a controlled-pilot release and production GA:
 
 Real detonation and AWS are **not** blockers for 4.3.0:
 
-- real detonation: AP-126, after the 4.3.0 tag;
+- **AP-126 real detonation is post-4.3 by decision**, not deferred work hidden
+  inside the release. Executing live malware requires an isolated VM/container
+  with snapshot/restore, an authorized sample and a kill switch that this
+  workstation does not provide. The 4.3 claim is the **controlled HTTP
+  detonation integration**, not malware execution. The release gate says so and
+  must not be changed to imply otherwise;
+- **AP-127 production FP/FN is post-4.3 by decision.** The 4.3 evidence is a
+  frozen synthetic baseline; a production rate requires real benign/malicious
+  traffic and per-host/day measurement. The baseline is runnable and honest,
+  but it is not a production quality claim;
 - AWS/MinIO: optional by design; Garage and local storage are supported for
   the pilot. AWS is not certified.
 

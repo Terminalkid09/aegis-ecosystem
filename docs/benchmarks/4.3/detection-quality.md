@@ -1,50 +1,50 @@
 # Detection quality baseline — Aegis 4.3
 
-Generated: `2026-11-19T10:06:12.455552+00:00`
+Generato: `2026-11-21T14:31:45.239619+00:00`
 
-> Synthetic, reproducible baseline. This is **not** a production FP/FN rate: the
-> events are constructed and no malware is executed. The 5.0 comparison must use
-> the same set and the same command.
+> Baseline sintetica e riproducibile. **Non** e' un tasso di FP/FN di
+> produzione: gli eventi sono costruiti e nessun malware viene eseguito.
+> Il confronto 5.0 deve usare lo stesso set e lo stesso comando.
 
-## Metrics
+## Metriche
 
-| Metric | Value |
+| Metrica | Valore |
 |---|---:|
-| Malicious cases | 14 |
-| Benign cases | 14 |
-| True positives | 14 |
-| False negatives | 0 |
-| False positives | 5 |
-| True negatives | 9 |
+| Casi malicious | 14 |
+| Casi benigni | 14 |
+| True positive | 14 |
+| False negative | 0 |
+| False positive | 5 |
+| True negative | 9 |
 | Precision | 0.737 |
 | Recall | 1.000 |
 | F1 | 0.848 |
 | False positive rate | 0.357 |
 
-## Cases
+## Casi
 
-| ID | Group | Expected | Detected | Severity | Rules |
+| ID | Gruppo | Atteso | Rilevato | Severita | Regole |
 |---|---|---|---|---|---|
-| `mal-office-powershell` | malicious | yes | yes | CRITICAL | AEGIS-S002, AEGIS-S007, AEGIS-S009, AEGIS-S012 |
-| `mal-encoded-only` | malicious | yes | yes | HIGH | AEGIS-S007, AEGIS-S009, AEGIS-S012 |
-| `mal-certutil-download` | malicious | yes | yes | HIGH | AEGIS-S012 |
-| `mal-renamed-mimikatz` | malicious | yes | yes | CRITICAL | AEGIS-S001, AEGIS-S004, AEGIS-S015 |
-| `mal-chrome-svchost` | malicious | yes | yes | HIGH | AEGIS-S002 |
-| `mal-thread-201` | malicious | yes | yes | MEDIUM | AEGIS-S013 |
-| `mal-thread-300` | malicious | yes | yes | MEDIUM | AEGIS-S013 |
-| `mal-dll-side-load` | malicious | yes | yes | HIGH | AEGIS-S011 |
-| `mal-run-key` | malicious | yes | yes | HIGH | AEGIS-S016 |
-| `mal-schtasks-encoded` | malicious | yes | yes | CRITICAL | AEGIS-S012, AEGIS-S017 |
-| `mal-system-powershell` | malicious | yes | yes | CRITICAL | AEGIS-S002, AEGIS-S009 |
-| `mal-double-extension` | malicious | yes | yes | HIGH | AEGIS-S004, AEGIS-S006 |
-| `hard-rundll32-javascript` | malicious | yes | yes | MEDIUM | AEGIS-S002, AEGIS-S009 |
-| `hard-mshta-url` | malicious | yes | yes | HIGH | AEGIS-S009, AEGIS-S012 |
+| `mal-office-powershell` | malicious | sì | sì | CRITICAL | AEGIS-S002, AEGIS-S007, AEGIS-S009, AEGIS-S012 |
+| `mal-encoded-only` | malicious | sì | sì | HIGH | AEGIS-S007, AEGIS-S009, AEGIS-S012 |
+| `mal-certutil-download` | malicious | sì | sì | HIGH | AEGIS-S012 |
+| `mal-renamed-mimikatz` | malicious | sì | sì | CRITICAL | AEGIS-S001, AEGIS-S004, AEGIS-S015 |
+| `mal-chrome-svchost` | malicious | sì | sì | HIGH | AEGIS-S002 |
+| `mal-thread-201` | malicious | sì | sì | MEDIUM | AEGIS-S013 |
+| `mal-thread-300` | malicious | sì | sì | MEDIUM | AEGIS-S013 |
+| `mal-dll-side-load` | malicious | sì | sì | HIGH | AEGIS-S011 |
+| `mal-run-key` | malicious | sì | sì | HIGH | AEGIS-S016 |
+| `mal-schtasks-encoded` | malicious | sì | sì | CRITICAL | AEGIS-S012, AEGIS-S017 |
+| `mal-system-powershell` | malicious | sì | sì | CRITICAL | AEGIS-S002, AEGIS-S009 |
+| `mal-double-extension` | malicious | sì | sì | HIGH | AEGIS-S004, AEGIS-S006 |
+| `hard-rundll32-javascript` | malicious | sì | sì | MEDIUM | AEGIS-S002, AEGIS-S009 |
+| `hard-mshta-url` | malicious | sì | sì | HIGH | AEGIS-S009, AEGIS-S012 |
 | `benign-chrome` | benign | no | no | NONE | — |
-| `benign-powershell-getchilditem` | benign | no | yes | MEDIUM | AEGIS-S002, AEGIS-S009 |
-| `benign-cmd-dir` | benign | no | yes | MEDIUM | AEGIS-S002, AEGIS-S009 |
-| `benign-python-print` | benign | no | yes | MEDIUM | AEGIS-S009 |
+| `benign-powershell-getchilditem` | benign | no | sì | MEDIUM | AEGIS-S002, AEGIS-S009 |
+| `benign-cmd-dir` | benign | no | sì | MEDIUM | AEGIS-S002, AEGIS-S009 |
+| `benign-python-print` | benign | no | sì | MEDIUM | AEGIS-S009 |
 | `benign-certutil-hash` | benign | no | no | NONE | — |
-| `benign-rundll32-printui` | benign | no | yes | MEDIUM | AEGIS-S009 |
+| `benign-rundll32-printui` | benign | no | sì | MEDIUM | AEGIS-S009 |
 | `benign-svchost-empty-path` | benign | no | no | NONE | — |
 | `benign-explorer-chrome` | benign | no | no | NONE | — |
 | `benign-whoami` | benign | no | no | NONE | — |
@@ -52,48 +52,48 @@ Generated: `2026-11-19T10:06:12.455552+00:00`
 | `benign-schtasks-query` | benign | no | no | NONE | — |
 | `benign-edge-renderer` | benign | no | no | NONE | — |
 | `benign-notepad-temp` | benign | no | no | NONE | — |
-| `benign-signed-installer` | benign | no | yes | LOW | AEGIS-S004 |
+| `benign-signed-installer` | benign | no | sì | LOW | AEGIS-S004 |
 
-## Thread threshold
+## Soglia thread
 
-| Threads | Detected | Severity |
+| Thread | Rilevato | Severita |
 |---:|---|---|
 | 180 | no | NONE |
 | 200 | no | NONE |
-| 201 | yes | MEDIUM |
-| 300 | yes | MEDIUM |
+| 201 | sì | MEDIUM |
+| 300 | sì | MEDIUM |
 
-## Honest reading
+## Lettura onesta
 
-- The benign false positives are almost all interpreters (`powershell`, `cmd`,
-  `python`) and a signed installer in Downloads: these are low/medium alerts, not
-  automatic incidents.
-- The `hard-*` cases measure techniques the current rules can miss; they are the
-  part to improve in 5.0, not a coverage promise.
-- The thread threshold tests the rule, not the sensor: `thread_count` is
-  populated by the collector, but it is simulated here.
+- I falsi positivi benigni sono quasi tutti interpreti (`powershell`, `cmd`,
+  `python`) e installer firmati in Downloads: sono alert a bassa/media
+  severita', non incidenti automatici.
+- I casi `hard-*` misurano tecniche che le regole attuali possono perdere;
+  sono la parte da migliorare nella 5.0, non una promessa di copertura.
+- La soglia thread e' un test della regola, non del sensore: il campo
+  `thread_count` e' popolato dal collector, ma qui viene simulato.
 
-## Use for the 5.0 comparison
+## Uso per il confronto 5.0
 
-- Freeze the set: do not add or remove cases from the 4.3 file, or the
-  comparison loses meaning. New cases belong in a separate set.
-- In this panel: **14 TP, 0 FN, 5 FP, 9 TN**. The 5 FPs are three interpreters
-  (`powershell`, `cmd`, `python`), `rundll32 printui`, and a signed installer in
-  Downloads: they are low/medium alerts, not incidents.
-- `recall=1.000` is not a promise: it says this panel contains no technique that
-  the current rules miss. The real rate must be measured on real hosts and
-  traffic.
-- 5.0 must reuse the same command and the same set, and declare whether the
-  engine or the rules changed.
+- Il set va congelato: non aggiungere o togliere casi dal file 4.3, o il
+  confronto perde senso. Eventuali casi nuovi vanno in un set separato.
+- In questo panel: **14 TP, 0 FN, 5 FP, 9 TN**. I 5 FP sono
+  tre interpreti (`powershell`, `cmd`, `python`), `rundll32 printui` e un
+  installer firmato in Downloads: sono alert bassi/medi, non incidenti.
+- `recall=1.000` non e' una promessa: dice che questo panel non contiene
+  una tecnica che le regole attuali perdono. Il tasso reale va misurato su
+  host e traffico reali.
+- La 5.0 deve riusare lo stesso comando e lo stesso set, e dichiarare se
+  il motore o le regole sono cambiati.
 
-## Next step — AP-127
+## Prossimo passo — AP-127
 
-- This file is the frozen baseline for the 4.3 → 5.0 comparison.
-- AP-127 (post-4.3) adds a benign corpus of administrative tools with unusual
-  arguments, measuring FP/FN per host/day without hiding regressions. It is not
-  a production promise.
+- Questo file e' la baseline congelata per il confronto 4.3 → 5.0.
+- AP-127 (post-4.3) aggiunge un corpus benigno di strumenti
+  amministrativi con argomenti insoliti, misurando FP/FN per host/giorno
+  e senza nascondere regressioni. Non e' una promessa di produzione.
 
-Repeat with:
+Ripetere con:
 
 ```bash
 PYTHONPATH=aegis-brain .venv315/Scripts/python.exe scripts/detection_quality.py

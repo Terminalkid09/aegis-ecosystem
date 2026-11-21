@@ -56,16 +56,23 @@ async def _serve_health() -> None:
 
 async def main():
     logger.info("🦑 Kraken Sensors starting up...")
+    enabled = {
+        item.strip().lower()
+        for item in os.getenv("SENSOR_PROTOCOLS", "ssh,http").split(",")
+        if item.strip()
+    }
+    logger.info(f"Enabled deception protocols: {', '.join(sorted(enabled))}")
     # One failed listener (for example a privileged port already in use) must
     # not silence every other protocol. Each task is supervised independently.
-    sensors = [
-        SSHSensor().start(),
-        HTTPSensor().start(),
-        FTPSensor().start(),
-        TelnetSensor().start(),
-        SMBSensor().start(),
-        RDPSensor().start(),
-    ]
+    factory = {
+        "ssh": SSHSensor,
+        "http": HTTPSensor,
+        "ftp": FTPSensor,
+        "telnet": TelnetSensor,
+        "smb": SMBSensor,
+        "rdp": RDPSensor,
+    }
+    sensors = [cls().start() for name, cls in factory.items() if name in enabled]
     results = await asyncio.gather(
         _serve_health(), *sensors, return_exceptions=True
     )

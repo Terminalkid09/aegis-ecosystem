@@ -1,0 +1,25 @@
+# Explicit honeypot exposure overlay.
+#
+# The base compose file keeps the six deception listeners internal. Publishing
+# SSH/FTP/Telnet/SMB/RDP by default is too much surface for a normal pilot, and
+# high, obvious ports are easy to fingerprint. Use this overlay only on a
+# disposable lab host:
+#
+#   KRAKEN_HONEYPOT_BIND_IP=0.0.0.0 \
+#   KRAKEN_SSH_PORT=22 KRAKEN_HTTP_PORT=80 KRAKEN_FTP_PORT=21 \
+#   KRAKEN_TELNET_PORT=23 KRAKEN_SMB_PORT=445 KRAKEN_RDP_PORT=3389 \
+#   docker compose --profile kraken \
+#     -f docker-compose.yml -f docker-compose.kraken-honeypot.yml up -d
+#
+# The default bind is loopback; exposing the honeypot to the LAN is an explicit
+# operator decision, not a default.
+services:
+  aegis-kraken-sensors:
+    ports:
+      - "${KRAKEN_HONEYPOT_BIND_IP:-127.0.0.1}:${KRAKEN_SSH_PORT:-22}:2222"
+      - "${KRAKEN_HONEYPOT_BIND_IP:-127.0.0.1}:${KRAKEN_HTTP_PORT:-80}:8080"
+      - "${KRAKEN_HONEYPOT_BIND_IP:-127.0.0.1}:${KRAKEN_FTP_PORT:-21}:2121"
+      - "${KRAKEN_HONEYPOT_BIND_IP:-127.0.0.1}:${KRAKEN_FTP_PASV_MIN:-30000}-${KRAKEN_FTP_PASV_MAX:-30009}:30000-30009"
+      - "${KRAKEN_HONEYPOT_BIND_IP:-127.0.0.1}:${KRAKEN_TELNET_PORT:-23}:2323"
+      - "${KRAKEN_HONEYPOT_BIND_IP:-127.0.0.1}:${KRAKEN_SMB_PORT:-445}:445"
+      - "${KRAKEN_HONEYPOT_BIND_IP:-127.0.0.1}:${KRAKEN_RDP_PORT:-3389}:3389"

@@ -3,7 +3,8 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from app.core.config import settings
 from app.core.security import verify_device_token_proof
-from app.database.models import Agent, AuditLog
+from app.database.models import Agent, AuditLog, EnrollToken
+from app.services import pki
 import uuid
 
 
@@ -123,3 +124,79 @@ class TestEnrollment:
         assert "revoked" in again.json()["detail"].lower()
         await db_session.refresh(test_agent)
         assert "device_token_proof" not in (test_agent.meta or {})
+
+    async def test_unified_mode_is_carried_into_token_and_job(
+            self, client: AsyncClient, db_session, admin_auth_headers):
+        """One agent record, but the selected capability is explicit end to end."""
+        pki.ensure_manifest_key(settings.PKI_DIR)
+        last_raw = ""
+        for mode in ("full", "sensor", "endpoint"):
+            response = await client.post(
+                "/api/v1/deploy/token",
+                json={"agent_type": "unified", "agent_mode": mode},
+                headers=admin_auth_headers,
+            )
+            assert response.status_code == 200
+            body = response.json()
+            assert body["agent_type"] == "unified"
+            assert body["agent_mode"] == mode
+            assert f"mode={mode}" in body["oneline_windows"]
+            assert f"mode={mode}" in body["oneline_linux"]
+            if mode == "sensor":
+                last_raw = body["token"]
+
+        install = await client.get(
+            "/api/v1/deploy/install.sh?agent=unified&mode=sensor",
+            headers={"X-Enroll-Token": last_raw},
+        )
+        assert install.status_code == 200
+        assert 'AGENT_MODE="sensor"' in install.text
+        assert "AEGIS_AGENT_MODE=$AGENT_MODE" in install.text
+        wrong_mode = await client.get(
+            "/api/v1/deploy/install.sh?agent=unified&mode=full",
+            headers={"X-Enroll-Token": last_raw},
+        )
+        assert wrong_mode.status_code == 403
+
+        token = (await db_session.execute(
+            select(EnrollToken).order_by(EnrollToken.id.desc()))).scalars().first()
+        assert token is not None and token.install_config["agent_mode"] == "endpoint"
+
+        job = await client.post(
+            "/api/v1/deploy/jobs",
+            json={
+                "agent_type": "unified", "agent_mode": "sensor",
+                "method_default": "oneline",
+                "targets": [{"ip_address": "10.42.0.10"}],
+            },
+            headers=admin_auth_headers,
+        )
+        assert job.status_code == 200
+        data = job.json()
+        assert data["status"] == "manual_required"
+        assert data["agent_mode"] == "sensor"
+        result = data["targets"] and data["targets"][0]
+        assert result["method"] == "oneline"
+
+        fetched = await client.get(
+            f"/api/v1/deploy/jobs/{data['job_id']}",
+            headers=admin_auth_headers,
+        )
+        assert fetched.status_code == 200
+        assert fetched.json()["results"]["10.42.0.10"]["agent_mode"] == "sensor"
+
+    async def test_deploy_rejects_ssh_and_credentials(
+            self, client: AsyncClient, admin_auth_headers):
+        ssh = await client.post(
+            "/api/v1/deploy/jobs",
+            json={"method_default": "ssh", "targets": [{"ip_address": "10.42.0.11"}]},
+            headers=admin_auth_headers,
+        )
+        assert ssh.status_code == 422
+        creds = await client.post(
+            "/api/v1/deploy/jobs",
+            json={"username": "root", "password": "secret",
+                  "targets": [{"ip_address": "10.42.0.11"}]},
+            headers=admin_auth_headers,
+        )
+        assert creds.status_code == 400

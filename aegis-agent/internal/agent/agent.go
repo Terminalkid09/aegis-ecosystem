@@ -269,14 +269,15 @@ func (a *Agent) bootstrapSensors(ctx context.Context) {
 		return
 	}
 	a.streamsReady = true
-	if a.cfg.Profile == config.ProfileEndpoint {
+	// A unified agent in "sensor" mode must not start the endpoint monitor,
+	// FIM, actions or ETW. The reverse is true for "endpoint" mode: no host
+	// telemetry stream and no network scan command.
+	if a.cfg.EndpointEnabled() {
 		a.bootstrapGuard(ctx)
-		return
 	}
-	if a.cfg.Profile == config.ProfileUnified {
-		a.bootstrapGuard(ctx)
+	if a.cfg.SensorEnabled() {
+		a.bootstrapSensorStreams(ctx)
 	}
-	a.bootstrapSensorStreams(ctx)
 }
 
 func (a *Agent) bootstrapSensorStreams(ctx context.Context) {
@@ -329,7 +330,7 @@ func (a *Agent) PollCommands(ctx context.Context) error {
 }
 
 func (a *Agent) execute(ctx context.Context, command transport.Command) error {
-	if a.cfg.Profile == config.ProfileEndpoint || a.cfg.Profile == config.ProfileUnified {
+	if a.cfg.EndpointEnabled() {
 		return a.executeGuard(ctx, command)
 	}
 	switch command.Command {
@@ -540,22 +541,26 @@ func (a *Agent) sendGuardTelemetry(ctx context.Context) error {
 		return fmt.Errorf("raccolta telemetria Guard: %w", err)
 	}
 	payload := map[string]any{
-		"agent_id":         a.client.AgentID,
-		"timestamp":        time.Now().UTC().Format(time.RFC3339Nano),
-		"event_type":       "METRICS_REPORT",
-		"cpu_usage":        snapshot.CPUUsage,
-		"ram_usage":        snapshot.RAMUsage,
-		"processes":        snapshot.Processes,
-		"users":            snapshot.Users,
-		"network_flows":    snapshot.NetworkFlows,
-		"anomalies":        snapshot.Anomalies,
-		"disk_free":        snapshot.DiskFree,
-		"disk_total":       snapshot.DiskTotal,
-		"network_sent":     snapshot.NetworkSent,
-		"network_received": snapshot.NetworkReceived,
-		"agent_version":    a.cfg.Version,
-		"capabilities":     a.capabilities(),
-		"sensor":           a.sensorState(),
+		"agent_id":      a.client.AgentID,
+		"timestamp":     time.Now().UTC().Format(time.RFC3339Nano),
+		"event_type":    "METRICS_REPORT",
+		"cpu_usage":     snapshot.CPUUsage,
+		"ram_usage":     snapshot.RAMUsage,
+		"disk_free":     snapshot.DiskFree,
+		"disk_total":    snapshot.DiskTotal,
+		"agent_version": a.cfg.Version,
+		"capabilities":  a.capabilities(),
+	}
+	if a.cfg.SensorEnabled() {
+		payload["network_sent"] = snapshot.NetworkSent
+		payload["network_received"] = snapshot.NetworkReceived
+		payload["sensor"] = a.sensorState()
+	}
+	if a.cfg.EndpointEnabled() {
+		payload["processes"] = snapshot.Processes
+		payload["users"] = snapshot.Users
+		payload["network_flows"] = snapshot.NetworkFlows
+		payload["anomalies"] = snapshot.Anomalies
 	}
 	if err := a.enqueueGuard(payload); err != nil {
 		return fmt.Errorf("telemetria Guard: %w", err)
@@ -564,28 +569,25 @@ func (a *Agent) sendGuardTelemetry(ctx context.Context) error {
 }
 
 func (a *Agent) capabilities() map[string]any {
-	if a.cfg.Profile == config.ProfileEndpoint || a.cfg.Profile == config.ProfileUnified {
-		caps := a.guardCaps
-		if caps == nil {
-			caps = map[string]any{
-				"agent_type":           a.cfg.AgentType(),
-				"process_monitor":      a.guardMonitor != nil,
-				"response_actions":     a.guardActions != nil,
-				"fim":                  a.guardFIM != nil && a.guardFIM.Available(),
-				"yara_scan":            false,
-				"etw_kernel_telemetry": false,
-				"device_identity_mtls": true,
-				"profile":              string(a.cfg.Profile),
-			}
+	caps := map[string]any{
+		"agent_type":   a.cfg.AgentType(),
+		"profile":      string(a.cfg.Profile),
+		"mode":         string(a.cfg.Mode),
+		"telemetry":    a.cfg.SensorEnabled(),
+		"network_scan": a.cfg.SensorEnabled(),
+	}
+	if a.cfg.EndpointEnabled() {
+		for key, value := range a.guardCaps {
+			caps[key] = value
 		}
-		if a.cfg.Profile == config.ProfileUnified {
-			caps["telemetry"] = true
-			caps["network_scan"] = true
-			caps["sensor_mode"] = a.sensorSummary["mode"]
-			caps["kernel_profile"] = a.sensorSummary["kernel_profile"]
-			caps["ebpf"] = a.sensorSummary["ebpf"]
-			caps["auditd"] = a.sensorSummary["auditd"]
+		if a.guardCaps == nil {
+			caps["process_monitor"] = a.guardMonitor != nil
+			caps["response_actions"] = a.guardActions != nil
+			caps["fim"] = a.guardFIM != nil && a.guardFIM.Available()
+			caps["yara_scan"] = false
+			caps["etw_kernel_telemetry"] = false
 		}
+		caps["device_identity_mtls"] = true
 		if a.guardETW != nil {
 			caps["etw_kernel_telemetry"] = a.guardETW.Running()
 			caps["etw_watchdog"] = true
@@ -597,23 +599,22 @@ func (a *Agent) capabilities() map[string]any {
 				caps["process_provenance"] = "etw+toolhelp"
 			}
 		}
-		return caps
 	}
-	mode := "fallback"
-	if value, ok := a.sensorSummary["mode"].(string); ok && value != "" {
-		mode = value
+	if a.cfg.SensorEnabled() {
+		mode := "fallback"
+		if value, ok := a.sensorSummary["mode"].(string); ok && value != "" {
+			mode = value
+		}
+		caps["sensor_mode"] = mode
+		caps["kernel_profile"] = a.sensorSummary["kernel_profile"]
+		caps["kernel_reason"] = a.sensorSummary["kernel_reason"]
+		caps["auditd"] = a.sensorSummary["auditd"]
+		caps["ebpf"] = a.sensorSummary["ebpf"]
+	} else {
+		caps["sensor_mode"] = "disabled"
 	}
-	return map[string]any{
-		"telemetry":      true,
-		"network_scan":   true,
-		"update":         a.cfg.ManifestPubKey != "",
-		"sensor_mode":    mode,
-		"kernel_profile": a.sensorSummary["kernel_profile"],
-		"kernel_reason":  a.sensorSummary["kernel_reason"],
-		"auditd":         a.sensorSummary["auditd"],
-		"ebpf":           a.sensorSummary["ebpf"],
-		"profile":        string(a.cfg.Profile),
-	}
+	caps["update"] = a.cfg.ManifestPubKey != ""
+	return caps
 }
 
 func (a *Agent) tailAuditd(ctx context.Context, path string) {

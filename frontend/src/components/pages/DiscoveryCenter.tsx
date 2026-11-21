@@ -366,7 +366,7 @@ export default function DiscoveryCenter() {
 
               <div className="p-3 rounded-lg border border-purple-500/20 bg-purple-500/10 text-xs text-purple-200">
                 <p className="font-semibold mb-1">Recommended: Mass Deploy</p>
-                <p className="opacity-80 mb-3">Use the Deployment Manager to roll out via SSH/WinRM safely without saving credentials.</p>
+                <p className="opacity-80 mb-3">Use the Deployment Manager to generate a short-lived token and copy its one-liner to the target. No SSH/WinRM credential is used.</p>
                 <button onClick={() => {
                   localStorage.setItem('aegis-deploy-targets', JSON.stringify([deployModal.ip_address]))
                   setDeployModal(null)

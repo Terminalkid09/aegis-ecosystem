@@ -24,18 +24,14 @@ export default function DeployManager() {
 
   // Token Form
   const [tokenLabel, setTokenLabel] = useState('')
-  const [tokenAgent, setTokenAgent] = useState('unified')
+  const [tokenMode, setTokenMode] = useState('full')
   const [tokenTargetHost, setTokenTargetHost] = useState('')
-  const [dashboardRemote, setDashboardRemote] = useState(true)
   const [lastToken, setLastToken] = useState<any>(null)
   const [copied, setCopied] = useState('')
 
   // Job Form
-  const [agentType, setAgentType] = useState('unified')
-  const [method, setMethod] = useState('oneline')
+  const [agentMode, setAgentMode] = useState('full')
   const [ipText, setIpText] = useState('')
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
 
   // OTA Form
   const [otaAgent, setOtaAgent] = useState('')
@@ -53,9 +49,10 @@ export default function DeployManager() {
   const createTokenMut = useMutation({
     mutationFn: () => deployAPI.createToken({
       label: tokenLabel || undefined,
-      agent_type: tokenAgent,
+      agent_type: 'unified',
+      agent_mode: tokenMode,
       target_hostname: tokenTargetHost.trim() || undefined,
-      dashboard_remote: dashboardRemote,
+      dashboard_remote: true,
     }),
     onSuccess: (res) => {
       setLastToken(res.data)
@@ -74,16 +71,14 @@ export default function DeployManager() {
 
   const createJobMut = useMutation({
     mutationFn: (ips: string[]) => deployAPI.createJob({
-      agent_type: agentType,
+      agent_type: 'unified',
+      agent_mode: agentMode,
       agent_version: 'latest',
-      method_default: method,
-      targets: ips.map(ip => ({ ip_address: ip, method })),
-      username: username || undefined,
-      password: password || undefined,
+      method_default: 'oneline',
+      targets: ips.map(ip => ({ ip_address: ip, method: 'oneline' })),
     }),
     onSuccess: (res, ips) => {
-      setPassword('') // wipe password
-      setMsg(`Job #${res.data.job_id} queued for ${ips.length} hosts. Passwords were NOT saved.`)
+      setMsg(`Job #${res.data.job_id} recorded for ${ips.length} hosts in mode=${agentMode}. Now copy the token one-liner to each target.`)
       qc.invalidateQueries({ queryKey: ['deploy-jobs'] })
     },
     onError: (e: any) => setMsg(e?.response?.data?.detail || 'Job creation failed.')
@@ -131,7 +126,7 @@ export default function DeployManager() {
       <div className="flex justify-between items-end">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2"><Rocket className="text-cyan-400" /> Deployment Manager</h1>
-          <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">Enterprise rollout via job queues, SSH/WinRM, and one-liners</p>
+          <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">Manual token-based rollout — one unified agent, no SSH/WinRM credentials</p>
         </div>
       </div>
 
@@ -147,19 +142,19 @@ export default function DeployManager() {
           <h3 className="text-xs font-bold uppercase tracking-widest text-[hsl(var(--muted-foreground))] flex items-center gap-2"><KeyRound size={14} /> One-time Enrollment Token</h3>
           <div className="flex gap-2">
             <input value={tokenLabel} onChange={e => setTokenLabel(e.target.value)} placeholder="Label (e.g. office-rollout)" className="input flex-1" />
-            <select value={tokenAgent} onChange={e => setTokenAgent(e.target.value)} className="input">
-              <option value="unified">AegisAgent (unified)</option>
+            <select value={tokenMode} onChange={e => setTokenMode(e.target.value)} className="input" aria-label="Agent capabilities">
+              <option value="full">Unified — sensor + endpoint</option>
+              <option value="sensor">Unified — sensor only</option>
+              <option value="endpoint">Unified — endpoint only</option>
             </select>
           </div>
+          <p className="text-[10px] text-[hsl(var(--muted-foreground))]">One agent and one enrollment. The mode only selects which capabilities start on the host; it does not create a second agent.</p>
           <div className="space-y-1">
             <input value={tokenTargetHost} onChange={e => setTokenTargetHost(e.target.value)} placeholder="Target hostname (re-enrollment only)" className="input w-full" />
             <p className="text-[10px] text-[hsl(var(--muted-foreground))]">Leave empty for a first install. Set it to the existing hostname when replacing an already-enrolled device.</p>
           </div>
-          <div className="space-y-2 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] p-3 text-xs">
-            <label className="flex items-center gap-2 text-white">
-              <input type="checkbox" checked={dashboardRemote} onChange={e => setDashboardRemote(e.target.checked)} />
-              Connect agents to the remote dashboard
-            </label>
+          <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 p-3 text-xs text-cyan-300">
+            The target must reach this Aegis URL to download the signed artifact, enroll and heartbeat. Offline staging is not a deployment.
           </div>
           <PermissionGate perms={['deploy']}>
             <button onClick={() => createTokenMut.mutate()} disabled={createTokenMut.isPending} className="btn btn-primary w-full">
@@ -170,6 +165,7 @@ export default function DeployManager() {
           {lastToken && (
             <div className="space-y-3 text-xs bg-[hsl(var(--secondary))] p-3 rounded-lg border border-[hsl(var(--border))] animate-fade-in">
               <div className="font-mono text-emerald-400 break-all bg-[hsl(var(--background))] p-2 rounded border border-[hsl(var(--border))]">{lastToken.token}</div>
+              <div className="text-[hsl(var(--muted-foreground))]">Mode: <span className="text-white font-semibold">{lastToken.agent_mode}</span> · single agent, single use</div>
               <div>
                 <p className="text-[hsl(var(--muted-foreground))] uppercase font-semibold mb-1 text-[10px]">Windows PowerShell</p>
                 <code className="block rounded bg-[hsl(var(--background))] p-2 font-mono text-cyan-400 break-all border border-[hsl(var(--border))]">{lastToken.oneline_windows}</code>
@@ -195,7 +191,7 @@ export default function DeployManager() {
                   )}
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-[hsl(var(--muted-foreground))]">
-                  <span className="uppercase">{t.agent_type}{t.target_hostname ? ` · ${t.target_hostname}` : ''}</span>
+                  <span className="uppercase">{t.agent_type} · {t.agent_mode || 'full'}{t.target_hostname ? ` · ${t.target_hostname}` : ''}</span>
                   <span className={cn('px-1.5 py-0.5 rounded font-bold uppercase', t.revoked ? 'bg-red-500/10 text-red-400' : t.used_at ? 'bg-blue-500/10 text-blue-400' : 'bg-emerald-500/10 text-emerald-400')}>
                     {t.revoked ? 'Revoked' : t.used_at ? 'Used' : 'Active'}
                   </span>
@@ -209,15 +205,12 @@ export default function DeployManager() {
         <div className="card p-5 space-y-4">
           <h3 className="text-xs font-bold uppercase tracking-widest text-[hsl(var(--muted-foreground))] flex items-center gap-2"><Play size={14} /> Manual Rollout Tracking</h3>
           <div className="flex gap-2">
-            <select value={agentType} onChange={e => setAgentType(e.target.value)} className="input flex-1">
-              <option value="unified">AegisAgent (unified)</option>
+            <select value={agentMode} onChange={e => setAgentMode(e.target.value)} className="input flex-1" aria-label="Rollout capabilities">
+              <option value="full">Unified — sensor + endpoint</option>
+              <option value="sensor">Unified — sensor only</option>
+              <option value="endpoint">Unified — endpoint only</option>
             </select>
-            <select value={method} onChange={e => setMethod(e.target.value)} className="input">
-              <option value="ssh" disabled>SSH (executor pending)</option>
-              <option value="winrm" disabled>WinRM (executor pending)</option>
-              <option value="interactive" disabled>Interactive (executor pending)</option>
-              <option value="oneline">One-liner (Manual)</option>
-            </select>
+            <div className="input flex items-center text-xs text-[hsl(var(--muted-foreground))]">One-liner only</div>
           </div>
           
           <textarea 
@@ -228,19 +221,10 @@ export default function DeployManager() {
             className="input font-mono text-sm resize-none" 
           />
           
-          {(method === 'ssh' || method === 'winrm' || method === 'interactive') && (
-            <div className="space-y-2 bg-[hsl(var(--secondary))] p-3 rounded-lg border border-[hsl(var(--border))]">
-              <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" className="input bg-[hsl(var(--background))]" autoComplete="off" />
-              <input value={password} onChange={e => setPassword(e.target.value)} type="password" placeholder="Password" className="input bg-[hsl(var(--background))]" autoComplete="new-password" />
-              <p className="text-[10px] text-yellow-500 leading-tight">Credentials live only in worker memory and are wiped instantly. They are never saved to DB or logs.</p>
-              {method === 'interactive' && (
-                <p className="text-[10px] text-purple-400 leading-tight">Interactive mode will prompt the remote user to enter a PIN to approve the deployment.</p>
-              )}
-            </div>
-          )}
-          {method === 'oneline' && (
-            <p className="text-[10px] text-cyan-400 leading-tight">This records a manual rollout. Generate a short-lived enrollment token above, run its signed installer on the target host, then track the agent heartbeat here.</p>
-          )}
+          <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--secondary))] p-3 text-[11px] leading-relaxed text-[hsl(var(--muted-foreground))]">
+            <p className="text-white font-semibold mb-1">No remote shell is used.</p>
+            <p>1. Generate a 15-minute token above. 2. Copy its one-liner to the target. 3. The target downloads the signed artifact from Aegis, enrolls and heartbeats back. 4. Track it here.</p>
+          </div>
           
           <PermissionGate perms={['deploy']}>
             <button onClick={handleCreateJob} disabled={createJobMut.isPending} className="btn btn-primary w-full bg-purple-600 hover:bg-purple-500 border-purple-500 text-white shadow-purple-500/20">
@@ -327,7 +311,7 @@ export default function DeployManager() {
                 </td>
                 <td className="p-4 text-xs">
                   <span className="font-semibold text-cyan-400">{j.agent_type}</span>
-                  <span className="text-[hsl(var(--muted-foreground))] ml-1">· {j.agent_version}</span>
+                  <span className="text-[hsl(var(--muted-foreground))] ml-1">· {(Object.values(j.results || {})[0] as any)?.agent_mode || 'full'} · {j.agent_version}</span>
                 </td>
                 <td className="p-4 text-xs">
                   <span className={cn('px-2 py-1 rounded font-bold uppercase tracking-wider border', 

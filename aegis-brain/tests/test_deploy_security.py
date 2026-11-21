@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from app.api.v1 import deploy
 from app.api.v1.deploy import INSTALL_PS1, INSTALL_SH
@@ -40,6 +41,28 @@ def test_installers_reference_signed_artifacts_only():
     for tpl in (INSTALL_PS1, INSTALL_SH):
         assert "artifacts/" in tpl
         assert "curl" in tpl or "Invoke-WebRequest" in tpl
+
+
+def test_single_agent_has_explicit_capability_modes():
+    assert deploy.VALID_AGENT_TYPES == {"unified"}
+    assert deploy.VALID_AGENT_MODES == {"full", "sensor", "endpoint"}
+    assert deploy.VALID_METHODS == {"oneline"}
+    for mode in ("full", "sensor", "endpoint"):
+        req = deploy.EnrollTokenRequest(agent_mode=mode)
+        assert req.agent_type == "unified" and req.agent_mode == mode
+    with pytest.raises(ValidationError):
+        deploy.EnrollTokenRequest(agent_mode="both")
+    with pytest.raises(ValidationError):
+        deploy.DeployJobRequest(method_default="ssh")
+
+
+def test_installers_write_the_selected_mode():
+    for tpl in (INSTALL_PS1, INSTALL_SH):
+        assert "AEGIS_AGENT_MODE" in tpl
+        assert "{AGENT_MODE}" in tpl
+    assert "remote dashboard NOT selected" in INSTALL_PS1
+    assert "outbound TLS access" in INSTALL_PS1
+    assert "outbound TLS access" in INSTALL_SH
 
 
 def test_installers_register_only_the_unified_service():

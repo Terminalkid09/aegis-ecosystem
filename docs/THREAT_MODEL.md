@@ -72,7 +72,7 @@ deploy: admin/analyst -> short token -> ps1/sh one-liner (TLS transport)
 
 Critical boundaries: kernel→user pipe (telemetry only, never commands); Redis
 (blacklist/queue: failure = deny, never allow); `ARTIFACT_DIR` (basename only,
-no traversal); DB (Alembic migrations `0001..0023`, `CREATE_ALL` only in dev).
+no traversal); DB (Alembic migrations `0001..0025`, `CREATE_ALL` only in dev).
 
 ## 4. API and authentication inventory (verified by decorator)
 
@@ -133,4 +133,11 @@ and untracked).
   and provenance-attested, not cosign-signed;
 - signed driver / tamper protection: outside the roadmap; user-mode + OS
   firewall only. A local administrator can stop ETW or the agent, as documented
-  in `KERNEL_AND_DRIVERS.md`.
+  in `KERNEL_AND_DRIVERS.md`;
+- honeypot exposure: the base compose keeps all deception listeners internal;
+  the explicit `docker-compose.kraken-honeypot.yml` overlay is required to
+  publish them. SSH/HTTP are the default protocols; FTP/Telnet/SMB/RDP are
+  opt-in, and SMB/RDP are banner-grade rather than full protocol servers;
+- container limits: CPU/RAM/PID limits and `no-new-privileges` are set, but the
+  broker still needs the Docker socket to create sandboxes. It is internal-only,
+  non-root and capability-dropped, but it remains a high-privilege component.

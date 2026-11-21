@@ -12,7 +12,11 @@ RUN pip install --no-cache-dir -r requirements-broker.txt
 COPY app ./app
 COPY broker ./broker
 
-RUN mkdir -p /app/data/malware
+RUN mkdir -p /app/data/malware && \
+    adduser --disabled-password --gecos "" --home /app broker && \
+    chown -R broker:broker /app/data
+
+USER broker
 
 EXPOSE 8100
 

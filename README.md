@@ -36,13 +36,13 @@ The design goal is **honest operation**: deterministic detections, explicit degr
 
 | Area | What is included |
 |---|---|
-| **Endpoint** | Unified Go agent with `sensor`, `endpoint` and `unified` profiles; process lineage, persistence, masquerading and security-control tampering detection; signed OTA updates. |
+| **Endpoint** | One unified Go agent with explicit `full`, `sensor` and `endpoint` modes; process lineage, persistence, masquerading and security-control tampering detection; signed OTA updates. The mode selects capabilities, not a second agent. |
 | **Kernel telemetry** | eBPF on Linux (`sched_process_exec`, `do_exit`, TCP state) and ETW kernel providers on Windows; no kernel driver and no Windows driver signing. |
 | **SIEM** | Syslog, Windows Event Log, Zeek, Suricata, nginx/Squid, pfSense/iptables; normalised events and source-health visibility. |
 | **Detection** | Static rules, custom AND/OR rules, Sigma with fail-loud exclusions, threshold/sequence correlation and MITRE ATT&CK mapping. |
 | **SOAR** | Playbook triggers, 12 action types, bounded command queue with ack, visibility timeout and DLQ. |
 | **Analysis** | PE/ELF/Mach-O/Office/PDF/archive/APK analysis with YARA, entropy, imports and IOC extraction. |
-| **Deception** | Optional Kraken profile: sensors, campaigns, Lab, read-only Aegis view and delegated SSO. |
+| **Deception** | Optional Kraken profile: deception sensors, campaigns, Lab, read-only Aegis view and delegated SSO. The base profile keeps sensors internal; the honeypot overlay is an explicit lab-only exposure. |
 
 YARA is optional and fail-soft: the engine is present only when the platform has
 a `yara-python` wheel, and the API reports the missing engine instead of silently
@@ -75,7 +75,7 @@ python scripts/setup.py update
 | **Lab** | `docker compose up -d --build` | Internal TLS, localhost ports, local login. |
 | **Pilot** | `docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.mtls.yml up -d --build` | mTLS, real secrets and `BACKUP_PASSPHRASE`. |
 | **Observability** | `docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile observability up -d --build` | Lab-only Prometheus and Grafana; not a production monitoring stack. |
-| **Kraken** | `docker compose --profile kraken up -d --build` | Deception stack. The signed Brain ingest path remains opt-in with `KRAKEN_INGEST_ENABLED=true`. |
+| **Kraken** | `docker compose --profile kraken up -d --build` | Deception stack with sensors internal by default. For an isolated honeypot lab, add `-f docker-compose.kraken-honeypot.yml` and set `KRAKEN_HONEYPOT_BIND_IP=0.0.0.0`; the signed Brain ingest path remains opt-in with `KRAKEN_INGEST_ENABLED=true`. |
 
 ### Public domain and TLS
 
@@ -116,7 +116,7 @@ Details: [Secrets](docs/SECRETS.md) · [OIDC](docs/OIDC.md) · [Threat model](do
 
 ## Verification
 
-Latest local verification: **2026-11-20**.
+Latest local verification: **2026-11-21**.
 
 | Check | Result |
 |---|---|
@@ -126,13 +126,16 @@ Latest local verification: **2026-11-20**.
 | Kraken pytest | **154 passed** |
 | Frontend production build | **PASS** |
 | Frontend lint | **0 errors, 24 warnings** |
-| Playwright pages/session/smoke through Caddy (post-4.3) | **12 passed**; the `users` spec assumes a single-admin database and was not used for this local run |
+| Playwright pages/session/smoke/Kraken through Caddy (post-4.3) | **13 passed**; the `users` spec assumes a single-admin database and was not used for this local run |
 | Playwright OIDC against Keycloak 26.0.7 | **2 passed** |
 | ETW live elevated | **PASS**, 95 events; non-admin **exit 2** |
 | WSL2 Ubuntu / Kali eBPF | **PASS**; benchmark **300/300**, zero lost events |
 | macOS Darwin build (amd64/arm64) | **PASS locally**; `macos-latest` job added to CI; no live hardware |
 | File secrets + real Vault KV v2 | **PASS**, including precedence and fail-closed cases |
 | Clean install from Git clone, core + Kraken | **PASS**; API smoke **21/21**; Kraken healthy |
+| Unified capability modes | `full`, `sensor`, `endpoint` via token/installer/`--mode`; one `agent_type=unified` record in every mode | **PASS locally** |
+| Docker hardening | Compose valid, CPU/RAM/PID limits, `no-new-privileges`, non-root broker, sensors internal by default | **PASS locally** |
+| Branch/PR CI | CI now runs on `dev`, `main`, `feat/**`, pull requests and tags; release job remains tag-only | **configured; hosted run still required** |
 
 Not verified locally: hosted CI/tag workflow, bare-metal Linux, Windows Server live, and macOS live. These are release gates, not claims. See [Release gate 4.3](docs/RELEASE_GATE_4.3.md).
 

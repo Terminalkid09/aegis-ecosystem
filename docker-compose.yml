@@ -3,6 +3,11 @@ services:
     image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     container_name: aegis-postgres
     restart: unless-stopped
+    mem_limit: 1g
+    cpus: "1.0"
+    pids_limit: 200
+    security_opt:
+      - no-new-privileges:true
     environment:
       POSTGRES_DB:       ${POSTGRES_DB:-aegis}
       POSTGRES_USER:     ${POSTGRES_USER:-postgres}
@@ -21,6 +26,11 @@ services:
     image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     container_name: aegis-redis
     restart: unless-stopped
+    mem_limit: 512m
+    cpus: "0.50"
+    pids_limit: 200
+    security_opt:
+      - no-new-privileges:true
     command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
@@ -39,6 +49,11 @@ services:
     container_name: aegis-ollama
     profiles: ["ollama"]
     restart: unless-stopped
+    mem_limit: 2g
+    cpus: "2.0"
+    pids_limit: 200
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "${OLLAMA_PORT_EXTERNAL:-11434}:11434"
     environment:
@@ -51,6 +66,11 @@ services:
     build: ./aegis-brain
     container_name: aegis-brain
     restart: unless-stopped
+    mem_limit: 1g
+    cpus: "1.0"
+    pids_limit: 300
+    security_opt:
+      - no-new-privileges:true
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "${BRAIN_WORKERS:-2}"]
     ports:
       - "127.0.0.1:${BRAIN_PORT_EXTERNAL:-8000}:8000"
@@ -172,6 +192,11 @@ services:
     build: ./aegis-link
     container_name: aegis-link
     restart: unless-stopped
+    mem_limit: 1g
+    cpus: "1.0"
+    pids_limit: 300
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "127.0.0.1:${LINK_PORT_EXTERNAL:-8080}:8080"
       - "127.0.0.1:1514:1514/udp"
@@ -199,6 +224,11 @@ services:
         VITE_API_URL: ${VITE_API_URL:-/api/v1}
     container_name: aegis-frontend
     restart: unless-stopped
+    mem_limit: 256m
+    cpus: "0.50"
+    pids_limit: 100
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "127.0.0.1:3000:3000"
     environment:
@@ -211,6 +241,11 @@ services:
     image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     container_name: aegis-caddy
     restart: unless-stopped
+    mem_limit: 256m
+    cpus: "0.50"
+    pids_limit: 100
+    security_opt:
+      - no-new-privileges:true
     environment:
       # Public FQDN and ACME account. Default = lab (internal CA).
       AEGIS_DOMAIN: ${AEGIS_DOMAIN:-aegis.local}
@@ -242,6 +277,11 @@ services:
     container_name: aegis-kraken-db
     restart: unless-stopped
     profiles: ["kraken"]
+    mem_limit: 512m
+    cpus: "0.50"
+    pids_limit: 200
+    security_opt:
+      - no-new-privileges:true
     environment:
       POSTGRES_DB: krakendb
       POSTGRES_USER: kraken
@@ -261,6 +301,11 @@ services:
     container_name: aegis-kraken-redis
     restart: unless-stopped
     profiles: ["kraken"]
+    mem_limit: 256m
+    cpus: "0.25"
+    pids_limit: 100
+    security_opt:
+      - no-new-privileges:true
     command: ["sh", "-c", "redis-server --requirepass \"$${KRAKEN_REDIS_PASSWORD}\""]
     environment:
       KRAKEN_REDIS_PASSWORD: ${KRAKEN_REDIS_PASSWORD:?KRAKEN_REDIS_PASSWORD must be set for the kraken profile}
@@ -301,6 +346,15 @@ services:
     container_name: aegis-kraken-broker
     restart: unless-stopped
     profiles: ["kraken"]
+    mem_limit: 512m
+    cpus: "0.50"
+    pids_limit: 200
+    group_add:
+      - "${DOCKER_GID:-0}"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set for the kraken profile}
       SANDBOX_IMAGE: kraken_sandbox
@@ -332,6 +386,13 @@ services:
     container_name: aegis-kraken
     restart: unless-stopped
     profiles: ["kraken"]
+    mem_limit: 1g
+    cpus: "1.0"
+    pids_limit: 300
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     expose:
       - "8000"
     ports:
@@ -420,14 +481,18 @@ services:
       TELNET_SENSOR_PORT: 2323
       SMB_SENSOR_PORT: 445
       RDP_SENSOR_PORT: 3389
+      SENSOR_PROTOCOLS: ${KRAKEN_SENSOR_PROTOCOLS:-ssh,http}
+      FTP_PASV_MIN_PORT: ${KRAKEN_FTP_PASV_MIN:-30000}
+      FTP_PASV_MAX_PORT: ${KRAKEN_FTP_PASV_MAX:-30009}
+      FTP_PASV_ADVERTISE_HOST: ${KRAKEN_FTP_PASV_ADVERTISE_HOST:-}
       SENSOR_CONFIG_SIGNING_KEY: ${KRAKEN_SENSOR_CONFIG_SIGNING_KEY:-}
-    ports:
-      - "${KRAKEN_SSH_PORT:-12222}:2222"
-      - "${KRAKEN_HTTP_PORT:-18080}:8080"
-      - "${KRAKEN_FTP_PORT:-12121}:2121"
-      - "${KRAKEN_TELNET_PORT:-12323}:2323"
-      - "${KRAKEN_SMB_PORT:-11445}:445"
-      - "${KRAKEN_RDP_PORT:-13389}:3389"
+    mem_limit: 512m
+    cpus: "0.50"
+    pids_limit: 200
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       aegis-kraken:
         condition: service_healthy
@@ -442,6 +507,9 @@ services:
     container_name: aegis-backup
     profiles: ["backup"]
     restart: unless-stopped
+    mem_limit: 256m
+    cpus: "0.25"
+    pids_limit: 100
     entrypoint: |
       sh -c "
         apk add --no-cache curl gnupg;

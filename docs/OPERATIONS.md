@@ -60,9 +60,12 @@ reset with audit records.
 
 ## 1b. Enrollment token and host services
 
-In **Deployment Manager**, create a token for **AegisAgent (unified)**. The token
-is short-lived and single-use; there are no separate Guard, NodeTrace or "both"
-tokens anymore.
+In **Deployment Manager**, create a token for **AegisAgent (unified)** and choose
+its capability mode: **full** (sensor + endpoint), **sensor only** or
+**endpoint only**. There is still one agent, one binary, one identity and one
+enrollment; the mode only controls which collectors start. The token is
+short-lived and single-use. There are no separate Guard, NodeTrace or "both"
+tokens, and there is no SSH/WinRM executor.
 
 To **re-enroll** an already registered host, create the token with
 `target_hostname` equal to the existing hostname. The static `AGENT_ENROLL_KEY`
@@ -73,17 +76,20 @@ identity change in the audit log.
 
 The generated command:
 
-- downloads `unified-latest.zip` (Windows) or `unified-latest.tar.gz` (Linux)
-  from the Brain using the bootstrap token;
-- configures the Brain URL, the manifest public key and a `0600` token file;
+- requires the target to reach the Aegis URL: it downloads
+  `unified-latest.zip` (Windows) or `unified-latest.tar.gz` (Linux) from the
+  Brain using the bootstrap token;
+- configures the Brain URL, the manifest public key, `AEGIS_AGENT_MODE` and a
+  `0600` token file;
 - registers `AegisAgent` as a Windows service or `aegis-unified.service` on
   Linux;
 - enables automatic start, restart after a crash and verifies the service state
   before exiting successfully.
 
-The remote dashboard connection is optional. If it is disabled, the files are
-extracted but the services are not started, because an agent without a
-configured enrollment endpoint must not start in an ambiguous state.
+The 4.3 Deployment Manager always selects the remote dashboard. The API can
+still stage files without registering a service, but that is **not** a
+deployment: an agent that cannot reach Aegis cannot enroll, heartbeat or receive
+commands. The installer states this explicitly.
 
 **Publish artifacts before using the installers.** The one-liner downloads from
 `/deploy/bootstrap-artifacts/unified-latest.zip` (or `.tar.gz`), so the file must

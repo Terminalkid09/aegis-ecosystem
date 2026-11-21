@@ -27,8 +27,9 @@ gate.
   delivered.
 - **AWS is optional.** A customer may run local storage, Garage/Ceph on their
   own server, or AWS S3. No cloud dependency is required for 4.3.
-- CI is executed at the release/tag boundary, not on every intermediate state.
-  Pushing is reserved for a release or an explicit saved state.
+- CI runs on `dev`, `main`, `feat/**` and pull requests, plus the release tag;
+  only the `release` publishing job is tag-only. This makes the release gate
+  visible before an immutable tag without pretending a branch run is Gate 5.
 
 ## Phase 1 — 4.3.0 release (inside 4.3)
 
@@ -89,6 +90,9 @@ Only after the live-validation evidence is acceptable:
 - response intelligence and approval gates;
 - real detonation as a supported, documented integration;
 - detection rules driven by measured false positives, not by demos;
+- Kraken advanced-lab expansion: configurable protocol set, dedicated-host
+  port profiles, full FTP/SMB/RDP behavior where the threat model requires it,
+  and source-IP preservation on Linux;
 - optional S3/AWS production policy templates (retention, immutability,
   private bucket, IAM least privilege).
 

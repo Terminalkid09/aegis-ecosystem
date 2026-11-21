@@ -33,6 +33,37 @@ func (p Profile) Valid() bool {
 	}
 }
 
+// Mode selects the capabilities of the single unified agent. The agent record
+// stays unified in every mode: this is one binary and one enrollment, not a
+// second agent type.
+type Mode string
+
+const (
+	ModeFull     Mode = "full"
+	ModeSensor   Mode = "sensor"
+	ModeEndpoint Mode = "endpoint"
+)
+
+func (m Mode) Valid() bool {
+	switch m {
+	case ModeFull, ModeSensor, ModeEndpoint:
+		return true
+	default:
+		return false
+	}
+}
+
+func modeForProfile(p Profile) Mode {
+	switch p {
+	case ProfileSensor, ProfileRouter:
+		return ModeSensor
+	case ProfileEndpoint:
+		return ModeEndpoint
+	default:
+		return ModeFull
+	}
+}
+
 // fileConfig mirrors the legacy NodeTrace config.json. The new agent accepts
 // it unchanged so a NodeTrace host can be migrated without rewriting config.
 type fileConfig struct {
@@ -50,12 +81,14 @@ type fileConfig struct {
 	EBPFObj           string `json:"ebpf_obj"`
 	AuditdEnabled     bool   `json:"auditd_enabled"`
 	AuditLog          string `json:"audit_log"`
+	Mode              string `json:"mode"`
 }
 
 // Options are explicit overrides from the command line. Environment variables
 // are applied after the file, matching the legacy agent's precedence.
 type Options struct {
 	Profile    string
+	Mode       string
 	AgentHome  string
 	ConfigFile string
 	Version    string
@@ -64,6 +97,7 @@ type Options struct {
 // Config is the resolved runtime configuration.
 type Config struct {
 	Profile    Profile
+	Mode       Mode
 	Version    string
 	AgentHome  string
 	ConfigFile string
@@ -126,6 +160,7 @@ func Load(opts Options) (Config, error) {
 
 	cfg := Config{
 		Profile:           ProfileSensor,
+		Mode:              ModeSensor,
 		Version:           DefaultVersion,
 		AgentHome:         home,
 		HeartbeatInterval: 10 * time.Second,
@@ -195,6 +230,9 @@ func Load(opts Options) (Config, error) {
 	cfg.AuditLog = fc.AuditLog
 
 	applyEnv(&cfg)
+	if err := resolveMode(&cfg, opts.Mode, fc.Mode); err != nil {
+		return Config{}, err
+	}
 
 	if cfg.DeviceName == "" {
 		if host, err := os.Hostname(); err == nil && strings.TrimSpace(host) != "" {
@@ -239,6 +277,32 @@ func Load(opts Options) (Config, error) {
 	cfg.deriveURLs()
 
 	return cfg, nil
+}
+
+// resolveMode applies the documented precedence: profile default, config file,
+// environment, then the command line. It runs after all three sources are
+// loaded so a valid CLI choice cannot be overwritten by config.json and an
+// invalid env value cannot bypass validation.
+func resolveMode(cfg *Config, cliMode, fileMode string) error {
+	m := modeForProfile(cfg.Profile)
+	if cfg.Profile == ProfileUnified {
+		if fileMode != "" {
+			m = Mode(fileMode)
+		}
+		if v := os.Getenv("AEGIS_AGENT_MODE"); v != "" {
+			m = Mode(v)
+		}
+		if cliMode != "" {
+			m = Mode(cliMode)
+		}
+	} else if cliMode != "" && Mode(cliMode) != m {
+		return fmt.Errorf("modalità %q non valida per il profilo %q", cliMode, cfg.Profile)
+	}
+	if !m.Valid() {
+		return fmt.Errorf("modalità agente non valida: %q", m)
+	}
+	cfg.Mode = m
+	return nil
 }
 
 func applyEnv(cfg *Config) {
@@ -565,6 +629,36 @@ func (c Config) ReadEnrollToken() (string, error) {
 		return token, nil
 	}
 	return "", fmt.Errorf("nessun enrollment token: impostare AEGIS_ENROLL_TOKEN_FILE o AEGIS_ENROLL_KEY")
+}
+
+// SensorEnabled reports whether this process should start host telemetry.
+// For unified it follows Mode; a sensor-only unified agent never starts the
+// endpoint monitor, FIM, actions or ETW.
+func (c Config) SensorEnabled() bool {
+	switch c.Profile {
+	case ProfileSensor, ProfileRouter:
+		return true
+	case ProfileEndpoint:
+		return false
+	case ProfileUnified:
+		return c.Mode != ModeEndpoint
+	default:
+		return false
+	}
+}
+
+// EndpointEnabled reports whether this process should start the endpoint
+// runtime. A sensor-only unified agent does not start process monitoring,
+// response actions, FIM or ETW.
+func (c Config) EndpointEnabled() bool {
+	switch c.Profile {
+	case ProfileEndpoint:
+		return true
+	case ProfileUnified:
+		return c.Mode != ModeSensor
+	default:
+		return false
+	}
 }
 
 // AgentType is the legacy record type used during the cutover. Guard and

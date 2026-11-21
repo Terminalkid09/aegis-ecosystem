@@ -25,6 +25,7 @@ var buildVersion = config.DefaultVersion
 func main() {
 	var (
 		profile     string
+		mode        string
 		home        string
 		configPath  string
 		once        bool
@@ -32,6 +33,7 @@ func main() {
 		showVersion bool
 	)
 	flag.StringVar(&profile, "profile", "", "profilo: sensor, endpoint, unified o router")
+	flag.StringVar(&mode, "mode", "", "modalità unified: full, sensor o endpoint (un solo agente)")
 	flag.StringVar(&home, "home", "", "directory stato agente")
 	flag.StringVar(&configPath, "config", "", "path config.json")
 	flag.BoolVar(&once, "once", false, "invia un ciclo e termina")
@@ -41,6 +43,7 @@ func main() {
 
 	cfg, err := config.Load(config.Options{
 		Profile:    profile,
+		Mode:       mode,
 		AgentHome:  home,
 		ConfigFile: configPath,
 		Version:    buildVersion,
@@ -53,8 +56,9 @@ func main() {
 		return
 	}
 	if check {
-		fmt.Printf("profile=%s version=%s home=%s server=%s token=%s\n",
-			cfg.Profile, cfg.Version, cfg.AgentHome, cfg.ServerURL, cfg.TokenFile)
+		fmt.Printf("profile=%s mode=%s sensor=%t endpoint=%t version=%s home=%s server=%s token=%s\n",
+			cfg.Profile, cfg.Mode, cfg.SensorEnabled(), cfg.EndpointEnabled(),
+			cfg.Version, cfg.AgentHome, cfg.ServerURL, cfg.TokenFile)
 		return
 	}
 	if err := cfg.ValidateNetwork(); err != nil {

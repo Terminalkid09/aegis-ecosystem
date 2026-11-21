@@ -188,6 +188,7 @@ class SSHSensor:
             self.host,
             self.port,
             server_host_keys=[key_path],
+            server_version="OpenSSH_8.9p1 Ubuntu-3ubuntu0.10",
             process_factory=handle_client,
         )
         logger.info(f"[SSH Sensor] Listening on {self.host}:{self.port}")

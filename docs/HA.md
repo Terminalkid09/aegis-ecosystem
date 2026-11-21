@@ -13,8 +13,10 @@
 - **Commands**: Brain and Link use atomic claim, processing list, visibility
   timeout, idempotent ack and DLQ. The guarantee is at-least-once: a crash
   between execution and ack can duplicate the action; it is not exactly-once.
-  AP-123 is in **Test**, not Done. The Link event path still has a non-atomic
-  check+push (AP-122).
+  **AP-122 and AP-123 are PASS in the 4.3 release gate**: the Link check+push is
+  atomic, the 50k boundary is measured, and the restart test recovers a claimed
+  command with a second delivery attempt. The at-least-once boundary remains a
+  design property, not a failure.
 
 ## Scaling (same host, available today)
 

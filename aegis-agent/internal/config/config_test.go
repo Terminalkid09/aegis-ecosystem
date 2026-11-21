@@ -10,7 +10,7 @@ import (
 func clearAgentEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"AEGIS_AGENT_HOME", "AEGIS_AGENT_PROFILE", "AEGIS_AGENT_VERSION",
+		"AEGIS_AGENT_HOME", "AEGIS_AGENT_PROFILE", "AEGIS_AGENT_MODE", "AEGIS_AGENT_VERSION",
 		"AEGIS_CA_BUNDLE", "AEGIS_ENROLL_KEY", "AEGIS_ENROLL_TOKEN_FILE",
 		"AEGIS_SECRET_FILE", "AEGIS_BRAIN_URL", "AEGIS_GATEWAY_URL", "AEGIS_IDENTITY_DIR",
 		"NODETRACE_CONFIG", "NODETRACE_IDENTITY_DIR", "NODETRACE_TOKEN_FILE",
@@ -162,6 +162,9 @@ func TestUnifiedProfileUsesOneIdentityAndGuardEndpoints(t *testing.T) {
 	if cfg.AgentType() != "unified" {
 		t.Fatalf("agent type = %q", cfg.AgentType())
 	}
+	if cfg.Mode != ModeFull || !cfg.SensorEnabled() || !cfg.EndpointEnabled() {
+		t.Fatalf("modalità full = %q sensor=%t endpoint=%t", cfg.Mode, cfg.SensorEnabled(), cfg.EndpointEnabled())
+	}
 	if cfg.GuardEnrollURL != "https://brain.example/api/v1/enroll/enroll" {
 		t.Fatalf("guard enroll = %q", cfg.GuardEnrollURL)
 	}
@@ -170,6 +173,87 @@ func TestUnifiedProfileUsesOneIdentityAndGuardEndpoints(t *testing.T) {
 	}
 	if err := cfg.ValidateNetwork(); err != nil {
 		t.Fatalf("validazione unified: %v", err)
+	}
+}
+
+func TestUnifiedModesKeepOneAgentType(t *testing.T) {
+	clearAgentEnv(t)
+	t.Setenv("AEGIS_BRAIN_URL", "https://brain.example/api/v1")
+	for _, tc := range []struct {
+		mode     string
+		sensor   bool
+		endpoint bool
+	}{
+		{"full", true, true},
+		{"sensor", true, false},
+		{"endpoint", false, true},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			cfg, err := Load(Options{AgentHome: t.TempDir(), Profile: "unified", Mode: tc.mode})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.AgentType() != "unified" {
+				t.Fatalf("agent type = %q", cfg.AgentType())
+			}
+			if cfg.SensorEnabled() != tc.sensor || cfg.EndpointEnabled() != tc.endpoint {
+				t.Fatalf("mode %s: sensor=%t endpoint=%t", tc.mode, cfg.SensorEnabled(), cfg.EndpointEnabled())
+			}
+		})
+	}
+}
+
+func TestUnifiedModePrecedence(t *testing.T) {
+	clearAgentEnv(t)
+	home := t.TempDir()
+	path := filepath.Join(home, "config.json")
+	if err := os.WriteFile(path, []byte(`{"mode":"endpoint"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(Options{AgentHome: home, Profile: "unified", Mode: "full"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mode != ModeFull {
+		t.Fatalf("CLI mode = %q, want full", cfg.Mode)
+	}
+
+	t.Setenv("AEGIS_AGENT_MODE", "sensor")
+	cfg, err = Load(Options{AgentHome: home, Profile: "unified"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mode != ModeSensor {
+		t.Fatalf("env mode = %q, want sensor", cfg.Mode)
+	}
+
+	cfg, err = Load(Options{AgentHome: t.TempDir(), Profile: "unified"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mode != ModeSensor {
+		t.Fatalf("env without file = %q, want sensor", cfg.Mode)
+	}
+
+	t.Setenv("AEGIS_AGENT_MODE", "invalid")
+	if _, err := Load(Options{AgentHome: t.TempDir(), Profile: "unified"}); err == nil {
+		t.Fatal("invalid env mode accepted")
+	}
+}
+
+func TestNonUnifiedProfileRejectsExplicitMode(t *testing.T) {
+	clearAgentEnv(t)
+	if _, err := Load(Options{AgentHome: t.TempDir(), Profile: "sensor", Mode: "endpoint"}); err == nil {
+		t.Fatal("sensor profile accepted endpoint mode")
+	}
+}
+
+func TestInvalidUnifiedMode(t *testing.T) {
+	clearAgentEnv(t)
+	_, err := Load(Options{AgentHome: t.TempDir(), Profile: "unified", Mode: "everything"})
+	if err == nil {
+		t.Fatal("modalità unified invalida accettata")
 	}
 }
 

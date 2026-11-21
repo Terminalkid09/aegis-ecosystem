@@ -32,7 +32,11 @@ from app.core.rate_limit import limiter
 router = APIRouter(tags=["Agent Deploy"])
 
 VALID_AGENT_TYPES = {"unified"}
-VALID_METHODS = {"ssh", "winrm", "oneline", "interactive"}
+VALID_AGENT_MODES = {"full", "sensor", "endpoint"}
+# One binary, one enrollment, one transport. The old SSH/WinRM executors were
+# removed with the credential path; keeping them selectable would promise a
+# deployment channel that does not exist.
+VALID_METHODS = {"oneline"}
 
 
 def _require_deploy_operator(user):
@@ -83,6 +87,9 @@ def _validate_targets(targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 class EnrollTokenRequest(BaseModel):
     label: Optional[str] = None
     agent_type: str = Field(default="unified", pattern="^unified$")
+    # The agent record is always unified. This selects which capabilities the
+    # same binary starts: both, host telemetry only, or endpoint only.
+    agent_mode: str = Field(default="full", pattern="^(full|sensor|endpoint)$")
     ttl_minutes: int = Field(default=15, ge=5, le=1440)
     dashboard_remote: bool = True
     dashboard_local: bool = False
@@ -104,7 +111,10 @@ async def create_enroll_token(
         raise HTTPException(status_code=422, detail="Local dashboard packaging is not available yet")
     target_hostname = (payload.target_hostname or "").strip() or None
     raw = secrets.token_urlsafe(32)
-    install_config = {"dashboard_remote": payload.dashboard_remote}
+    install_config = {
+        "dashboard_remote": payload.dashboard_remote,
+        "agent_mode": payload.agent_mode,
+    }
     if target_hostname:
         install_config["target_hostname"] = target_hostname
     rec = EnrollToken(
@@ -119,19 +129,20 @@ async def create_enroll_token(
     await log_audit(
         db, action="deploy_token_create", resource="enroll_token",
         details={"label": payload.label, "agent_type": payload.agent_type,
-                 "target_hostname": target_hostname},
+                 "agent_mode": payload.agent_mode, "target_hostname": target_hostname},
         user_id=user.id, username=user.username,
         ip_address=request.client.host if request else None,
     )
     await db.commit()
     base = settings.PUBLIC_BASE_URL.rstrip("/")
-    query = f"?agent={payload.agent_type}"
+    query = f"?agent={payload.agent_type}&mode={payload.agent_mode}"
     ps1 = f"irm {base}/api/v1/deploy/install.ps1{query} -Headers @{{'X-Enroll-Token'='{raw}'}} | iex"
     sh = f"curl -fsSL -H 'X-Enroll-Token: {raw}' '{base}/api/v1/deploy/install.sh{query}' | sudo bash"
     return {
         "token": raw,
         "expires_at": rec.expires_at.isoformat(),
         "agent_type": payload.agent_type,
+        "agent_mode": payload.agent_mode,
         "target_hostname": target_hostname,
         "dashboard_remote": payload.dashboard_remote,
         "dashboard_local": payload.dashboard_local,
@@ -149,6 +160,7 @@ async def list_enroll_tokens(db: AsyncSession = Depends(get_db), user=Depends(ge
         cfg = t.install_config if isinstance(t.install_config, dict) else {}
         out.append({
             "id": t.id, "label": t.label, "agent_type": t.agent_type,
+            "agent_mode": cfg.get("agent_mode", "full"),
             "target_hostname": cfg.get("target_hostname"),
             "expires_at": t.expires_at.isoformat() if t.expires_at else None,
             "used_at": t.used_at.isoformat() if t.used_at else None,
@@ -179,6 +191,8 @@ $Base = "{BASE}/api/v1"
 $EnrollToken = "{ENROLL_TOKEN}"
 $ManifestPubkey = "{MANIFEST_PUBKEY}"
 $RemoteDashboard = {REMOTE_DASHBOARD}
+$AgentMode = "{AGENT_MODE}"
+$EnableEndpoint = $AgentMode -ne "sensor"
 $Dir = "C:\Aegis\Agent"
 $Service = "AegisAgent"
 
@@ -199,6 +213,7 @@ if ($RemoteDashboard) {
     [Environment]::SetEnvironmentVariable("AEGIS_BRAIN_URL", $Base, "Machine")
     [Environment]::SetEnvironmentVariable("AEGIS_MANIFEST_PUBKEY", $ManifestPubkey, "Machine")
     [Environment]::SetEnvironmentVariable("AEGIS_AGENT_PROFILE", "unified", "Machine")
+    [Environment]::SetEnvironmentVariable("AEGIS_AGENT_MODE", $AgentMode, "Machine")
 
     # Token one-shot su file 0600, mai nell'env persistente.
     $TokenDir = Join-Path $env:ProgramData "Aegis"
@@ -209,7 +224,7 @@ if ($RemoteDashboard) {
     [Environment]::SetEnvironmentVariable("AEGIS_ENROLL_TOKEN_FILE", $TokenFile, "Machine")
 
     $etw = Join-Path $Dir "aegis-etw.exe"
-    if (Test-Path $etw) {
+    if ($EnableEndpoint -and (Test-Path $etw)) {
         [Environment]::SetEnvironmentVariable("AEGIS_ETW_ENABLED", "true", "Machine")
         [Environment]::SetEnvironmentVariable("AEGIS_ETW_PATH", $etw, "Machine")
         [Environment]::SetEnvironmentVariable("AEGIS_ETW_ALLOW_UNSIGNED", "true", "Machine")
@@ -217,8 +232,10 @@ if ($RemoteDashboard) {
         # both an empty pin and a binary whose hash changed after install.
         $etwHash = (Get-FileHash -Algorithm SHA256 $etw).Hash.ToLower()
         [Environment]::SetEnvironmentVariable("AEGIS_ETW_SHA256", $etwHash, "Machine")
-    } else {
+    } elseif ($EnableEndpoint) {
         Write-Host "[aegis] no ETW collector in the artifact: unified will declare quality=degraded:etw-..."
+    } else {
+        Write-Host "[aegis] sensor-only mode: ETW and endpoint response are not started."
     }
 
     if (Get-Service $Service -ErrorAction SilentlyContinue) {
@@ -231,10 +248,11 @@ if ($RemoteDashboard) {
         -StartupType Automatic | Out-Null
     sc.exe failure $Service reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
     Start-Service $Service
-    Write-Host "[aegis] $Service service installed and started."
+    Write-Host "[aegis] $Service service installed and started in mode=$AgentMode."
+    Write-Host "[aegis] The target must keep outbound TLS access to $Base to download, enroll and heartbeat."
 } else {
     Write-Host "[aegis] remote dashboard NOT selected: files extracted, no service registered."
-    Write-Host "        Start the agent from $Dir, or re-issue a token with remote dashboard enabled."
+    Write-Host "        This is staging only, not a deployment. Re-issue a token with remote dashboard enabled."
 }
 
 Write-Host "[aegis] The agent will consume the single-use token during its first enrollment."
@@ -250,6 +268,7 @@ BASE="{BASE}/api/v1"
 ENROLL_TOKEN="{ENROLL_TOKEN}"
 MANIFEST_PUBKEY="{MANIFEST_PUBKEY}"
 REMOTE_DASHBOARD="{REMOTE_DASHBOARD}"
+AGENT_MODE="{AGENT_MODE}"
 DIR="/opt/aegis/unified"
 
 mkdir -p "$DIR"
@@ -271,8 +290,9 @@ AEGIS_BRAIN_URL=$BASE
 AEGIS_MANIFEST_PUBKEY=$MANIFEST_PUBKEY
 AEGIS_ENROLL_TOKEN_FILE=$DIR/enroll.token
 AEGIS_AGENT_PROFILE=unified
+AEGIS_AGENT_MODE=$AGENT_MODE
 EOF
-    if [ -x "$DIR/aegis-collector" ] && [ -f "$DIR/aegis_exec.bpf.o" ]; then
+    if [ "$AGENT_MODE" != "endpoint" ] && [ -x "$DIR/aegis-collector" ] && [ -f "$DIR/aegis_exec.bpf.o" ]; then
         cat >> "$DIR/aegis.env" <<EOF
 NODETRACE_EBPF=1
 NODETRACE_EBPF_COLLECTOR=$DIR/aegis-collector
@@ -300,9 +320,11 @@ WantedBy=multi-user.target
 EOF
     systemctl enable --now aegis-unified.service
     systemctl is-active --quiet aegis-unified.service
-    echo "[aegis] aegis-unified service installed and started."
+    echo "[aegis] aegis-unified service installed and started (mode=$AGENT_MODE)."
+    echo "[aegis] The target must keep outbound TLS access to $BASE to download, enroll and heartbeat."
 else
     echo "[aegis] remote dashboard NOT selected: files extracted, no service registered."
+    echo "        This is staging only, not a deployment."
 fi
 """
 
@@ -336,6 +358,7 @@ async def _validate_install_token(x_enroll_token: str, db: AsyncSession):
 @router.get("/install.ps1", response_class=PlainTextResponse)
 async def install_ps1(
     agent: str = Query("unified", pattern="^unified$"),
+    mode: str = Query("full", pattern="^(full|sensor|endpoint)$"),
     x_enroll_token: str = Header(None, alias="X-Enroll-Token"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -343,15 +366,20 @@ async def install_ps1(
     if token.agent_type != "unified":
         raise HTTPException(status_code=403, detail="Legacy enrollment tokens are no longer accepted")
     config = token.install_config or {}
+    token_mode = config.get("agent_mode", "full")
+    if mode != token_mode:
+        raise HTTPException(status_code=403, detail="Token agent mode does not match installer mode")
     pubkey = _manifest_pubkey_b64()
     return INSTALL_PS1.replace("{BASE}", settings.PUBLIC_BASE_URL.rstrip("/")).replace(
         "{ENROLL_TOKEN}", x_enroll_token.strip()).replace("{MANIFEST_PUBKEY}", pubkey).replace(
+        "{AGENT_MODE}", token_mode).replace(
         "{REMOTE_DASHBOARD}", "$true" if config.get("dashboard_remote", True) else "$false")
 
 
 @router.get("/install.sh", response_class=PlainTextResponse)
 async def install_sh(
     agent: str = Query("unified", pattern="^unified$"),
+    mode: str = Query("full", pattern="^(full|sensor|endpoint)$"),
     x_enroll_token: str = Header(None, alias="X-Enroll-Token"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -359,9 +387,13 @@ async def install_sh(
     if token.agent_type != "unified":
         raise HTTPException(status_code=403, detail="Legacy enrollment tokens are no longer accepted")
     config = token.install_config or {}
+    token_mode = config.get("agent_mode", "full")
+    if mode != token_mode:
+        raise HTTPException(status_code=403, detail="Token agent mode does not match installer mode")
     pubkey = _manifest_pubkey_b64()
     return INSTALL_SH.replace("{BASE}", settings.PUBLIC_BASE_URL.rstrip("/")).replace(
         "{ENROLL_TOKEN}", x_enroll_token.strip()).replace("{MANIFEST_PUBKEY}", pubkey).replace(
+        "{AGENT_MODE}", token_mode).replace(
         "{REMOTE_DASHBOARD}", "1" if config.get("dashboard_remote", True) else "0")
 
 
@@ -618,17 +650,24 @@ async def push_update_command(
 
 class DeployJobRequest(BaseModel):
     agent_type: str = Field(default="unified", pattern="^unified$")
+    agent_mode: str = Field(default="full", pattern="^(full|sensor|endpoint)$")
     agent_version: str = Field(default="latest", max_length=50)
     targets: List[Dict[str, Any]]
     username: Optional[str] = Field(default=None, max_length=255)
     password: Optional[str] = Field(default=None, max_length=512)
-    method_default: str = Field(default="ssh", pattern="^(ssh|winrm|oneline|interactive)$")
+    method_default: str = Field(default="oneline", pattern="^oneline$")
 
 
-def _redacted_results(targets: List[Dict[str, Any]], method: str) -> Dict[str, Any]:
+def _redacted_results(targets: List[Dict[str, Any]], method: str, agent_mode: str) -> Dict[str, Any]:
     # Initial per-target state. Worker updates via PUT /deploy/jobs/{id}/status
-    # (agent callback) or server-side executor. Password is NEVER stored.
-    return {t["ip_address"]: {"status": "queued", "method": t.get("method", method), "log": ""} for t in targets}
+    # (agent callback). There is no server-side credential executor.
+    return {
+        t["ip_address"]: {
+            "status": "queued", "method": t.get("method", method),
+            "agent_mode": agent_mode, "log": "",
+        }
+        for t in targets
+    }
 
 
 @router.post("/jobs")
@@ -641,22 +680,24 @@ async def create_deploy_job(
     _require_deploy_operator(user)
     if payload.agent_type not in VALID_AGENT_TYPES:
         raise HTTPException(status_code=400, detail="Invalid agent_type")
+    if payload.agent_mode not in VALID_AGENT_MODES:
+        raise HTTPException(status_code=400, detail="Invalid agent_mode")
     if payload.method_default != "oneline":
         raise HTTPException(
-            status_code=501,
-            detail="SSH/WinRM execution is not enabled yet; use the signed one-line enrollment flow",
+            status_code=422,
+            detail="Only the manual one-line enrollment flow is available; no SSH/WinRM executor exists",
         )
     if payload.username or payload.password:
         raise HTTPException(status_code=400, detail="Credentials are not accepted for manual one-line deployment")
     targets = _validate_targets([
-        {**t, "method": t.get("method", payload.method_default)} for t in payload.targets
+        {**t, "method": "oneline"} for t in payload.targets
     ])
     job = DeployJob(
         agent_type=payload.agent_type,
         agent_version=payload.agent_version,
         targets=targets,
         status="queued",
-        results=_redacted_results(targets, payload.method_default),
+        results=_redacted_results(targets, payload.method_default, payload.agent_mode),
         created_by=user.id,
     )
     db.add(job)
@@ -671,8 +712,9 @@ async def create_deploy_job(
 
     await log_audit(
         db, action="deploy_job_create", resource="deploy_job", resource_id=str(job.id),
-        details={"agent_type": payload.agent_type, "targets": [t["ip_address"] for t in targets],
-                 "has_transient_creds": bool(payload.username)},
+        details={"agent_type": payload.agent_type, "agent_mode": payload.agent_mode,
+                 "method": "oneline", "targets": [t["ip_address"] for t in targets],
+                 "has_transient_creds": False},
         user_id=user.id, username=user.username,
         ip_address=request.client.host if request else None,
     )
@@ -683,14 +725,17 @@ async def create_deploy_job(
     # execution is rejected until a dedicated ephemeral worker exists.
     for entry in job.results.values():
         entry["status"] = "manual_required"
-        entry["log"] = "Use a short-lived signed enrollment token on the target host."
+        entry["log"] = (
+            "Copy the one-line installer to the target. The target must reach "
+            "Aegis to download, enroll and heartbeat; use a short-lived token."
+        )
     job.status = "manual_required"
     await db.commit()
     return {
         "job_id": job.id, "status": job.status,
-        "targets": targets,
+        "targets": targets, "agent_mode": payload.agent_mode,
         "poll": f"/api/v1/deploy/jobs/{job.id}",
-        "warning": "Manual one-line enrollment required; no credentials were accepted or stored.",
+        "warning": "Manual token-based enrollment required; no credentials, SSH or WinRM were used.",
     }
 
 
@@ -733,7 +778,7 @@ async def update_job_status(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     results = dict(job.results or {})
-    entry = results.get(payload.ip_address, {"method": "ssh", "log": ""})
+    entry = results.get(payload.ip_address, {"method": "oneline", "log": ""})
     entry.update({"status": payload.status, "log": (payload.log or "")[-4000:]})
     results[payload.ip_address] = entry
     job.results = results

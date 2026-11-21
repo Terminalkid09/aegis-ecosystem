@@ -322,6 +322,7 @@ func TestGuardRunOnceReportsLegacyEvents(t *testing.T) {
 func TestUnifiedCapabilitiesMergeBothProfiles(t *testing.T) {
 	cfg := testConfig("http://127.0.0.1:1")
 	cfg.Profile = config.ProfileUnified
+	cfg.Mode = config.ModeFull
 	a := New(cfg, identity.NewStore(filepath.Join(t.TempDir(), "token.json")),
 		transport.New(nil), fakeCollector{}, testLogger())
 	a.guardCaps = map[string]any{
@@ -331,12 +332,47 @@ func TestUnifiedCapabilitiesMergeBothProfiles(t *testing.T) {
 		"mode": "auditd", "kernel_profile": "partial", "auditd": true, "ebpf": false,
 	}
 	caps := a.capabilities()
-	if caps["agent_type"] != "unified" || caps["telemetry"] != true ||
-		caps["network_scan"] != true || caps["sensor_mode"] != "auditd" {
+	if caps["agent_type"] != "unified" || caps["mode"] != "full" ||
+		caps["telemetry"] != true || caps["network_scan"] != true ||
+		caps["sensor_mode"] != "auditd" {
 		t.Fatalf("capabilities unified = %+v", caps)
 	}
 	if caps["fim"] != true || caps["response_actions"] != true {
 		t.Fatalf("capabilities endpoint perse: %+v", caps)
+	}
+}
+
+func TestUnifiedSensorModeHidesEndpointCapabilities(t *testing.T) {
+	cfg := testConfig("http://127.0.0.1:1")
+	cfg.Profile = config.ProfileUnified
+	cfg.Mode = config.ModeSensor
+	a := New(cfg, identity.NewStore(filepath.Join(t.TempDir(), "token.json")),
+		transport.New(nil), fakeCollector{}, testLogger())
+	a.sensorSummary = map[string]any{"mode": "auditd"}
+	caps := a.capabilities()
+	if caps["agent_type"] != "unified" || caps["mode"] != "sensor" ||
+		caps["telemetry"] != true || caps["network_scan"] != true {
+		t.Fatalf("capabilities sensor = %+v", caps)
+	}
+	for _, key := range []string{"fim", "response_actions", "process_monitor"} {
+		if _, ok := caps[key]; ok {
+			t.Fatalf("capability endpoint %q presente in modalità sensor: %+v", key, caps)
+		}
+	}
+}
+
+func TestUnifiedEndpointModeHidesSensorCapabilities(t *testing.T) {
+	cfg := testConfig("http://127.0.0.1:1")
+	cfg.Profile = config.ProfileUnified
+	cfg.Mode = config.ModeEndpoint
+	a := New(cfg, identity.NewStore(filepath.Join(t.TempDir(), "token.json")),
+		transport.New(nil), fakeCollector{}, testLogger())
+	a.guardCaps = map[string]any{"agent_type": "unified", "fim": true}
+	caps := a.capabilities()
+	if caps["agent_type"] != "unified" || caps["mode"] != "endpoint" ||
+		caps["telemetry"] != false || caps["network_scan"] != false ||
+		caps["sensor_mode"] != "disabled" {
+		t.Fatalf("capabilities endpoint = %+v", caps)
 	}
 }
 

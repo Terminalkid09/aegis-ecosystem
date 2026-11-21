@@ -64,7 +64,7 @@ Evidenza eseguita il 2026-11-18 (fake) e il 2026-11-19 (stack reale):
 | live sensor/Guard con Brain finto | verdi; contratto di rete e comandi osservato |
 | live sensor/endpoint/unified con Brain reale | verdi; righe telemetria 1/18/17, capabilities popolate |
 | primo avvio unified con token monouso | token consumato, agent_type=unified, telemetria presente |
-| deploy API unified | token 200, install.ps1/sh 200, job `manual_required`; SSH/WinRM 501 |
+| deploy API unified | token 200, install.ps1/sh 200, job `manual_required`; only `oneline` accepted, no SSH/WinRM executor |
 | bundle agent runtime | `unified-latest.zip` scaricato dal Brain 4.3, eseguito come `agent_type=unified`, telemetria persistita e agente revocato |
 | A/B locale 2×8 s | NodeTrace 27.28 MB RSS vs Go sensor 18.43 MB; Guard Java 126.45 MB vs Go endpoint 18.77 MB |
 
@@ -99,6 +99,24 @@ esterno al repository locale.
 
 ### Changed
 
+- Unified agent modes: the single `agent_type=unified` agent now accepts
+  `full`, `sensor` and `endpoint` capabilities through the token, installer,
+  environment or `--mode`. A sensor-only unified agent does not start process
+  monitoring, FIM, response actions or ETW; an endpoint-only agent does not
+  start host telemetry or network scan. The agent record, binary, identity and
+  enrollment remain one.
+- Deployment Manager no longer offers or implies SSH/WinRM execution. The only
+  rollout path is a short-lived token plus a one-liner copied to the target;
+  the target must reach Aegis to download, enroll and heartbeat.
+- Kraken sensors are internal by default. The honeypot is exposed only with the
+  explicit `docker-compose.kraken-honeypot.yml` overlay, loopback-bound unless
+  the operator sets `KRAKEN_HONEYPOT_BIND_IP=0.0.0.0`. SSH/HTTP are the default
+  protocols; FTP/Telnet/SMB/RDP are opt-in.
+- Docker Compose applies CPU/RAM/PID limits, `no-new-privileges` and
+  capability drops to the application services; the sandbox broker now runs as
+  a non-root user with the Docker socket group added explicitly.
+- CI now runs on `dev`, `main`, `feat/**` and pull requests as well as tags. The
+  release/publish job remains tag-only; a branch run is not Gate 5.
 - Toolchain Go portata a **1.27.4** (ultima stabile, inclusi i fix di sicurezza
   del 2 novembre 2026) in `aegis-agent/go.mod`, nel piano 4.3 e nella CI, che ora
   esegue `go test`, `go vet` e build del binario su Ubuntu e Windows. La macchina
@@ -119,6 +137,13 @@ comandi batch, ack, scan Discovery e verifica dell'header `X-Client-Cert-Hash`.
 
 ### Fixed
 
+- Kraken SSH now advertises an Ubuntu OpenSSH banner instead of the AsyncSSH
+  default. FTP passive mode advertises a reachable host and a published passive
+  range, and uploads complete on the data channel instead of a fixed sleep.
+- The Kraken README no longer claims four sensors, a Docker socket in the app
+  or 65+ tests; it documents six sensors, the broker-only socket and 154 tests.
+- HA documentation no longer reports AP-122/AP-123 as open; both are PASS in
+  the 4.3 release gate. Threat-model migrations now cite `0001..0025`.
 - Il download degli artefatti (`/deploy/artifacts` e
   `/deploy/bootstrap-artifacts`) restituiva un `200` con `Content-Length`
   corretto ma zero byte: `FileResponse` attraverso il `BaseHTTPMiddleware`

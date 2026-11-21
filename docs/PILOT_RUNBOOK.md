@@ -36,15 +36,17 @@ Common checks: `GET /health/live` → `{"status":"alive"}`,
 
 ### Enrollment token end-to-end
 
-In **Deployment Manager**, create an **AegisAgent (unified)** token. The token is
-short-lived and single-use. On Windows, the generated command requires elevated
-PowerShell and creates an automatic service with restart-on-crash. On Linux, it
-requires root and creates a systemd unit with `systemctl enable --now`; both
-paths fail explicitly when the runtime is missing.
+In **Deployment Manager**, create an **AegisAgent (unified)** token and choose
+`full`, `sensor` or `endpoint`. The token is short-lived and single-use; it is
+still one agent and one enrollment. On Windows, the generated command requires
+elevated PowerShell and creates an automatic service with restart-on-crash. On
+Linux, it requires root and creates a systemd unit with `systemctl enable --now`;
+both paths fail explicitly when the runtime is missing.
 
-The remote dashboard checkbox configures the Brain URL. The local endpoint
-dashboard is not a distributable artifact: the backend rejects that choice
-instead of producing a partial installation.
+The target must keep outbound TLS access to Aegis to download the artifact,
+enroll and heartbeat. The UI no longer offers SSH/WinRM or an offline-only
+checkbox: copy the one-liner to the target; there is no remote shell. The local
+endpoint dashboard is not a distributable artifact.
 
 ## 2. Pilot (prod overlay + mTLS)
 

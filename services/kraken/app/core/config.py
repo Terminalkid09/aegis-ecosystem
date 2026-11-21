@@ -83,6 +83,16 @@ class Settings(BaseSettings):
     TELNET_SENSOR_PORT: int = 2323
     SMB_SENSOR_PORT: int = 445
     RDP_SENSOR_PORT: int = 3389
+    # Only these deception listeners start. The base lab exposes SSH and HTTP;
+    # FTP/Telnet/SMB/RDP are opt-in because they add surface and are not all
+    # full protocol implementations.
+    SENSOR_PROTOCOLS: str = "ssh,http"
+    # FTP passive data channel. The range must also be published by the
+    # explicit honeypot overlay; the advertised host is the address the client
+    # can reach (not the container's 172.x address).
+    FTP_PASV_MIN_PORT: int = 30000
+    FTP_PASV_MAX_PORT: int = 30009
+    FTP_PASV_ADVERTISE_HOST: str = ""
     # Key used to sign the desired configuration returned to a sensor node.
     # Empty falls back to SECRET_KEY; set a dedicated value in production.
     SENSOR_CONFIG_SIGNING_KEY: str = ""
