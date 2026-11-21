@@ -31,7 +31,9 @@ jobs:
           cache-dependency-path: aegis-agent/go.sum
       - name: Install WiX 5
         shell: pwsh
-        run: dotnet tool install --tool-path .tmp/wix5 wix --version 5.0.2
+        run: |
+          dotnet tool install --tool-path .tmp/wix5 wix --version 5.0.2
+          .\.tmp\wix5\wix.exe extension add -g WixToolset.Util.wixext/5.0.2
       - name: Build and test-sign MSI
         shell: pwsh
         run: .\scripts\build-msi.ps1 -Version 4.3.0 -OutDir dist -TestSign
@@ -81,6 +83,10 @@ jobs:
           }
           $service = Get-Service -Name AegisAgent -ErrorAction SilentlyContinue
           if (-not $service) { throw "AegisAgent service was not registered" }
+          $recovery = sc.exe qfailure AegisAgent
+          if ($recovery -notmatch 'RESTART') {
+            throw "AegisAgent recovery actions were not configured"
+          }
           $uninstall = Start-Process msiexec.exe -ArgumentList @(
             "/x", $msi, "/qn", "/norestart"
           ) -Wait -PassThru
@@ -248,7 +254,9 @@ jobs:
           cache-dependency-path: aegis-agent/go.sum
       - name: Install WiX 5
         shell: pwsh
-        run: dotnet tool install --tool-path .tmp/wix5 wix --version 5.0.2
+        run: |
+          dotnet tool install --tool-path .tmp/wix5 wix --version 5.0.2
+          .\.tmp\wix5\wix.exe extension add -g WixToolset.Util.wixext/5.0.2
       - name: Build and production-sign MSI
         shell: pwsh
         run: |

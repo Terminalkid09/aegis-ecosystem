@@ -68,6 +68,7 @@ $args = @(
     "build", $wxs, "-arch", "x64",
     "-d", "Version=$Version",
     "-d", "AgentSource=$AgentSource",
+    "-ext", "WixToolset.Util.wixext",
     "-o", $msi
 )
 if ($EtwSource) { $args += @("-d", "EtwSource=$EtwSource") }

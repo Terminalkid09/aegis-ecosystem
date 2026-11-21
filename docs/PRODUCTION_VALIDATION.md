@@ -154,6 +154,13 @@ python scripts/self_improvement.py rollback --state-dir dist/detection-state \
 The canary file is an input to the deployment process, not an automatic live
 switch. A real canary needs the operator's fleet and an observation window.
 
+This pipeline is **experimental and is not a 4.3 release gate**. It has no
+connection to the live rule deployment API and has not been evaluated against
+the real AP-127 corpus. The low-complexity, production-relevant part is the
+offline corpus evaluation; signed promotion/canary/rollback should stay behind
+the operator's change process until that integration exists. A fully autonomous
+self-modifying detector is explicitly out of scope.
+
 ## Signing and MDM
 
 Production Authenticode, GPG and cosign identities are operator secrets and are
@@ -222,6 +229,6 @@ These are deliberate boundaries, not hidden defaults:
 | Production signatures | CI jobs | certificate/GPG/cosign identity |
 | MDM/Intune/GPO | templates and local validation | real tenant and clean managed host |
 | Multi-node Kraken lab | 3-container simulation | true separate hosts and network zones |
-| Self-improvement | evaluate/promote/rollback | approval and deployment window |
+| Self-improvement (experimental) | evaluate/promote/rollback prototype | real AP-127 corpus, rule deployment API and approval window; not a 4.3 release gate |
 
 No row marked "still needs" is claimed as PASS by this repository.

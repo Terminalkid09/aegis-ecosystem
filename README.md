@@ -14,6 +14,13 @@
 </p>
 
 <p align="center">
+  <a href="https://gitdiagram.com/terminalkid09/aegis-ecosystem?utm_source=readme&utm_medium=badge">
+    <img src="https://gitdiagram.com/diagram-badge.svg" alt="AI-generated architecture overview (non-authoritative)" />
+  </a>
+</p>
+<p align="center"><sub>GitDiagram overview generated from <code>main</code>; it is AI-generated and non-authoritative. Versioned diagrams in this repository are canonical.</sub></p>
+
+<p align="center">
   <a href="#overview">Overview</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#platform-support">Platforms</a> •
@@ -151,6 +158,7 @@ Not verified locally: hosted CI/tag workflow, bare-metal Linux, Windows Server l
 | [Pilot runbook](docs/PILOT_RUNBOOK.md) | Pilot deployment and acceptance. |
 | [Release gate](docs/RELEASE_GATE_4.3.md) | What is green, what remains, and allowed claims. |
 | [Production validation](docs/PRODUCTION_VALIDATION.md) | Soak, DR, HA, AP-126/127 and governance harnesses, with external inputs and limits. |
+| [Persistence](docs/PERSISTENCE.md) | What restarts after a reboot, what does not, and the Docker daemon prerequisite. |
 | [Threat model](docs/THREAT_MODEL.md) | Assets, trust boundaries and mitigations. |
 | [Benchmarks](docs/BENCHMARK.md) | Load methodology and measured numbers. |
 | [YARA feeds](docs/YARA_FEEDS.md) | Signed rule bundles, key rotation and fail-closed import. |

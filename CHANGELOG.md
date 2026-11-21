@@ -133,8 +133,8 @@ esterno al repository locale.
   They emit JSON evidence and fail closed on missing inputs; none is a
   substitute for the real run. `docs/PRODUCTION_VALIDATION.md` defines the
   operator inputs and the acceptance boundary.
-- AP-126 evidence gate (`scripts/ap126_evidence.py`), a governed
-  detection-candidate pipeline (`scripts/self_improvement.py`: corpus gate,
+- AP-126 evidence gate (`scripts/ap126_evidence.py`), an **experimental**
+  detection-candidate prototype (`scripts/self_improvement.py`: corpus gate,
   named approval, signed promotion, canary and rollback) and a three-node
   Kraken lab simulation (`deploy/kraken-lab/`). The last one is explicitly
   single-host, not a true multi-host or network-partition test.
@@ -142,6 +142,10 @@ esterno al repository locale.
   replace the MSI or the default one-liner: they verify the production
   signature, provision the one-shot token and provide local post-deployment
   validation. A real tenant is still required for tenant evidence.
+- `scripts/install-autostart.ps1` and `docs/PERSISTENCE.md` make the reboot
+  contract explicit for Docker Desktop, Linux Docker Engine, the Windows MSI,
+  systemd and OpenWrt. The helper only configures the current user's Docker
+  Desktop startup; it does not claim pre-login server availability.
 - Test di integrazione live del sensor Go con Brain finto: enrollment, CSR
   firmata da una CA di test, salvataggio identità, heartbeat/telemetria,
   comandi batch, ack, scan Discovery e verifica dell'header `X-Client-Cert-Hash`.
@@ -154,6 +158,12 @@ esterno al repository locale.
 
 ### Fixed
 
+- Persistenza: l'MSI configura il recovery del servizio `AegisAgent` (tre
+  restart a 5 s, reset dopo un giorno) oltre all'avvio automatico; l'unità
+  Linux usa `Restart=always`. I container Compose usano già
+  `restart: unless-stopped`, ma richiedono che il demone Docker sia abilitato
+  al boot. `docs/PERSISTENCE.md` separa ciò che riparte davvero da ciò che
+  dipende dall'host o dal lab.
 - CI now derives the Docker socket GID for the non-root Kraken broker and
   validates Vault addresses before `urlopen`; the Vault SSL context still uses
   the verified constructor with an explicit lab-only opt-out. Live telemetry

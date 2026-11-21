@@ -27,6 +27,7 @@ Build locally (Windows, Go, WiX 5, PowerShell 5.1+):
 
 ```powershell
 dotnet tool install --tool-path .tmp/wix5 wix --version 5.0.2
+.\.tmp\wix5\wix.exe extension add -g WixToolset.Util.wixext/5.0.2
 .\scripts\build-msi.ps1 -Version 4.3.0 -OutDir dist -TestSign
 ```
 
@@ -71,8 +72,10 @@ Start-Service AegisAgent
 ```
 
 The MSI sets `AEGIS_AGENT_PROFILE=unified`, `AEGIS_AGENT_MODE=full`,
-`AEGIS_BRAIN_URL`, `AEGIS_IDENTITY_DIR` and `AEGIS_ENROLL_TOKEN_FILE`. The
-token file and `C:\ProgramData\Aegis` ACL are deployment responsibilities; the
+`AEGIS_BRAIN_URL`, `AEGIS_IDENTITY_DIR` and `AEGIS_ENROLL_TOKEN_FILE`. It also
+configures Windows service recovery (three restarts, 5 seconds apart, reset
+after one day) through the WiX Util extension. The token file and
+`C:\ProgramData\Aegis` ACL are deployment responsibilities; the
 MSI does not grant broad write access to ProgramData. Uninstall stops and
 removes the service, then removes the installed binaries; the state directory is
 retained unless the operator removes it.

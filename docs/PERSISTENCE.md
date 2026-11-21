@@ -1,0 +1,111 @@
+# Persistence and reboot behavior
+
+Status: 2026-11-21.
+
+This page separates three different guarantees that are often confused:
+
+1. the agent service starts at boot;
+2. the service restarts after a crash;
+3. the Aegis/Kraken containers return when the Docker engine starts.
+
+## Matrix
+
+| Component | Starts at boot | Restarts after crash | Notes |
+|---|---|---|---|
+| Windows agent, MSI | Yes, `AegisAgent` is `Start="auto"` | Yes, three restarts 5 s apart | Token must exist before the service can enroll. Uninstall removes the service. |
+| Windows agent, one-liner | Yes, `New-Service -StartupType Automatic` | Yes, `sc.exe failure ... restart/5000` | Requires an elevated PowerShell and a short-lived token. |
+| Linux agent, deb/RPM | Yes, the package enables `aegis-agent.service` | Yes, the unit uses `Restart=always` | The package enables but does not start the unit; provision the token first. |
+| Linux agent, one-liner | Yes, `systemctl enable --now aegis-unified.service` | Yes, `Restart=always` | The generated unit is independent from the package unit. |
+| OpenWrt agent, ipk | Yes, `postinst` enables the procd service | Yes, `procd_set_param respawn` | Only when the router is an OpenWrt host with the ipk installed. |
+| Aegis core containers | Yes, when the Docker daemon starts | Yes, `restart: unless-stopped` | Postgres, Redis, Brain, Link, frontend, Caddy and backup. |
+| Kraken profile containers | Yes, when the Docker daemon starts | Yes, `restart: unless-stopped` | App, sensors, broker, DB and Redis. One-shot init/sandbox-image helpers are intentionally `restart: "no"`. |
+| `deploy/kraken-lab/` overlay | No | No | It is a single-host lab harness; each node is deliberately `restart: "no"`. |
+| A router that only routes packets | Not applicable | Not applicable | Aegis does not install a component on a plain router; only the OpenWrt ipk path applies. |
+
+## Docker host prerequisite
+
+Compose restart policies do **not** start the Docker daemon. They only tell the
+daemon what to do with an existing container.
+
+### Linux server
+
+```bash
+sudo systemctl enable --now docker
+systemctl is-enabled docker
+docker compose ps
+```
+
+`docker compose up -d` must have created the containers at least once. After
+that, an enabled Docker daemon and `restart: unless-stopped` are sufficient for
+a reboot. If the operator explicitly ran `docker compose stop`, the containers
+stay stopped by design.
+
+### Windows PC
+
+Docker Desktop is a per-user desktop application, not a server service. Enable
+its login startup explicitly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1
+```
+
+The script adds the current user's `Docker Desktop.exe` to the `Run` key. It is
+reversible with `-Remove`. The Aegis containers then return when the Docker
+engine is ready, because they use `restart: unless-stopped`.
+
+This covers a workstation after the user signs in. It does **not** provide
+pre-login availability. For an unattended server, use Linux with Docker Engine
+enabled at boot, or an operator-managed Windows service with a supported
+container runtime; Docker Desktop is not a substitute for that.
+
+## Agent verification
+
+Windows:
+
+```powershell
+Get-Service AegisAgent
+sc.exe qc AegisAgent
+sc.exe qfailure AegisAgent
+```
+
+The expected startup type is `AUTO_START`, and the failure actions must contain
+`RESTART`. The MSI and the one-liner both configure them.
+
+Linux:
+
+```bash
+systemctl is-enabled aegis-agent
+systemctl show -p Restart aegis-agent
+```
+
+The expected values are `enabled` and `Restart=always`. The one-liner uses
+`aegis-unified.service` instead of the packaged unit.
+
+OpenWrt:
+
+```sh
+/etc/init.d/aegis-agent enabled && echo enabled
+/etc/init.d/aegis-agent status
+```
+
+## Container verification
+
+```bash
+docker inspect -f '{{.Name}} {{.HostConfig.RestartPolicy.Name}}' \
+  aegis-brain aegis-kraken aegis-kraken-sensors aegis-kraken-broker
+```
+
+Expected: `unless-stopped` for long-running services. A container with
+`restart: "no"` is intentionally not a persistence guarantee: the Kraken lab
+overlay and one-shot helpers fall into this category.
+
+## What is not claimed
+
+- A real host reboot is not simulated by `docker restart`; the host-level
+  Docker autostart must be checked on the target.
+- A plain router has no Aegis service to restart. Only an OpenWrt device with the
+  ipk is in scope.
+- A local administrator can stop the agent, Docker or the containers. Persistence
+  is availability, not tamper-proofing.
+- Windows Server live validation and Linux bare-metal validation remain release
+  gates; this document records the configured behavior, not a new certification.
