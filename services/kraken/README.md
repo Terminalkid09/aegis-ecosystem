@@ -12,26 +12,29 @@ assertion; the Brain receives only signed events and a read-only view.
 | `aegis-kraken` | FastAPI application, own PostgreSQL/Redis, event/alert/incident API, reports, SSO. No Docker socket. |
 | `aegis-kraken-broker` | The only process that talks to the Docker daemon. Creates ephemeral sandboxes with a fixed policy. Internal-only, non-root, capability-dropped. |
 | `aegis-kraken-sensors` | Six deception listeners. No Docker socket; asks the app/broker for a sandbox over the internal HTTP API. |
+| `aegis-kraken-rdp` | Real xrdp + XFCE endpoint with disposable weak decoy accounts. No host filesystem or Kraken secrets. |
 | `aegis-kraken-db` / `aegis-kraken-redis` | Private state; never published to the host. |
 
-## Sensors and honest capabilities
+## Sensors and real engines
 
-The base profile starts **SSH and HTTP only**. The other protocols are opt-in
-with `KRAKEN_SENSOR_PROTOCOLS`; they add surface and are not all full protocol
-servers.
+The base profile keeps every listener internal, but all six are enabled by
+default; exposure is still an explicit overlay. SMB and RDP use unprivileged
+container ports (`4445`/`33890`), so a client connecting to host 445/3389 is
+proxied by Compose without requiring a privileged sensor process.
 
-| Protocol | Default | Behavior |
+| Protocol | Engine | Behavior |
 |---|---|---|
-| SSH | on | OpenSSH-compatible banner, accepts credentials, interactive shell backed by the sandbox. |
-| HTTP | on | Generic Apache/Ubuntu response; records method, path and headers. |
-| FTP | off | Login, PASV data channel, upload capture, SHA-256. The passive range must be published. |
-| Telnet | off | Ubuntu-style login and sandbox shell. |
-| SMB | off | SMB2 negotiate and NTLMSSP challenge; captures NetNTLMv2 material. Not a file-share server. |
-| RDP | off | X.224 connection confirm/banner only. It does not authenticate or relay RDP. |
+| SSH | `asyncssh` | OpenSSH-compatible banner, accepts credentials, interactive shell backed by the sandbox; deterministic realistic fallback if the broker is down. |
+| HTTP | asyncio | Virtual hosts, portal/OWA/RDWeb pages, Apache-style 403/404, recon paths, method/path/header/body capture. |
+| FTP | `pyftpdlib` | Real login, PASV, LIST/RETR/STOR/DELE/MKD, decoy filesystem, upload SHA-256. |
+| Telnet | asyncio + sandbox | Ubuntu-style login and interactive shell; same fallback shell as SSH. |
+| SMB | `impacket` | SMB2 share, authentication, list/read/write and NetNTLMv2 capture. Relay/signing attacks are not implemented by design. `KRAKEN_SMB_ENGINE=raw` keeps the old negotiation-only probe. |
+| RDP | `xrdp` + XFCE | Real RDP session with `administrator`, `admin` and `kraken` decoy accounts. xrdp auth logs are container logs, not yet Aegis-ingested. |
 
-SMB and RDP are **banner-grade deception**, not full implementations. Do not
-claim full SMB file sharing or interactive RDP. SSH, HTTP, FTP and Telnet are
-the interactive paths exercised by the lab tests.
+The SMB and RDP statements are deliberately narrower than “full enterprise
+protocol implementation”: there is no SMB relay, no RDP credential relay and no
+xrdp log shipper in this branch. The lab/telemetry gaps are tracked in
+`docs/ROADMAP_LIVE_VALIDATION.md`.
 
 ## Exposure model
 
@@ -43,7 +46,7 @@ For a disposable honeypot host, use the explicit overlay:
 
 ```bash
 KRAKEN_HONEYPOT_BIND_IP=0.0.0.0 \
-KRAKEN_SENSOR_PROTOCOLS=ssh,http,ftp,telnet \
+KRAKEN_SENSOR_PROTOCOLS=ssh,http,ftp,telnet,smb,rdp \
 KRAKEN_SSH_PORT=22 KRAKEN_HTTP_PORT=80 KRAKEN_FTP_PORT=21 \
 KRAKEN_TELNET_PORT=23 KRAKEN_SMB_PORT=445 KRAKEN_RDP_PORT=3389 \
 KRAKEN_FTP_PASV_ADVERTISE_HOST=<host-ip> \

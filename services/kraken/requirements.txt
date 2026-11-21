@@ -28,3 +28,5 @@ aiosqlite==0.22.1
 faker==25.2.0
 asyncssh==2.24.1
 prometheus-client==0.20.0
+pyftpdlib==2.2.0
+impacket==0.13.1

@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     TELNET_SENSOR_PORT: int = 2323
     SMB_SENSOR_PORT: int = 445
     RDP_SENSOR_PORT: int = 3389
+    # impacket gives real SMB2 share interaction (read/list/write) and still
+    # captures NetNTLMv2 material. raw keeps the legacy negotiation-only probe.
+    SMB_SENSOR_ENGINE: str = "impacket"
+    SMB_SHARE_NAME: str = "Finance$"
+    SMB_SERVER_NAME: str = "FILESERVER01"
     # Only these deception listeners start. The base lab exposes SSH and HTTP;
     # FTP/Telnet/SMB/RDP are opt-in because they add surface and are not all
     # full protocol implementations.
