@@ -50,6 +50,10 @@ class CorrelationRule:
     title: str
     type: str
     group_by: List[str] = field(default_factory=list)
+    # Se impostato, la soglia conta valori distinti (es. sensori diversi)
+    # invece di eventi. Serve a `multi_sensor_same_ip`: due eventi dallo stesso
+    # sensore non sono due sensori.
+    distinct_by: List[str] = field(default_factory=list)
     threshold: int = 5
     window_seconds: int = 300
     severity: str = "MEDIUM"
@@ -69,7 +73,8 @@ class CorrelationRule:
     def to_summary(self) -> Dict[str, Any]:
         return {
             "id": self.id, "title": self.title, "type": self.type,
-            "group_by": self.group_by, "threshold": self.threshold,
+            "group_by": self.group_by, "distinct_by": self.distinct_by,
+            "threshold": self.threshold,
             "window_seconds": self.window_seconds, "severity": self.severity,
             "mitre": self.mitre, "steps": len(self.steps),
             "source_types": self.source_types, "description": self.description,
@@ -187,6 +192,7 @@ def _build_rule(doc: Any, filename: str) -> Optional[CorrelationRule]:
         title=str(doc["title"]),
         type=rtype,
         group_by=[str(g) for g in (doc.get("group_by") or [])][:4],
+        distinct_by=[str(g) for g in (doc.get("distinct_by") or [])][:2],
         threshold=max(1, int(doc.get("threshold", 5) or 5)),
         window_seconds=max(1, int(doc.get("window_seconds", 300) or 300)),
         severity=str(doc.get("severity", "MEDIUM")).upper(),
@@ -271,10 +277,18 @@ class CorrelationEngine:
         group_key, ok = self._group_key(rule, event)
         if not ok:
             return None
-        counter_key = f"corr:{rule.id}:{group_key}:{step_index}"
-        count = await rc.incr(counter_key)
-        if count == 1:
-            await rc.expire(counter_key, rule.window_seconds)
+        if rule.distinct_by:
+            distinct_key = f"corr-distinct:{rule.id}:{group_key}:{step_index}"
+            for field_name in rule.distinct_by:
+                for value in get_values(event, field_name)[:8]:
+                    await rc.sadd(distinct_key, str(value)[:128])
+            await rc.expire(distinct_key, rule.window_seconds)
+            count = int(await rc.scard(distinct_key) or 0)
+        else:
+            counter_key = f"corr:{rule.id}:{group_key}:{step_index}"
+            count = await rc.incr(counter_key)
+            if count == 1:
+                await rc.expire(counter_key, rule.window_seconds)
         if count < rule.threshold:
             return None
         # Fire-once per finestra: senza questa chiave un attacco lungo

@@ -447,6 +447,7 @@ copy /y "%ROOT%aegis-ebpf\aegis-etw.exe" "%ROOT%aegis-guard\aegis-etw.exe" >nul
 set "AEGIS_ETW_ENABLED=true"
 set "AEGIS_ETW_PATH=%ROOT%aegis-guard\aegis-etw.exe"
 set "AEGIS_ETW_ALLOW_UNSIGNED=true"
+for /f "delims=" %%H in ('powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%AEGIS_ETW_PATH%').Hash.ToLower()"') do set "AEGIS_ETW_SHA256=%%H"
 echo  %GREEN%  [+] Kernel telemetry ETW attiva per Guard%RESET%
 exit /b 0
 

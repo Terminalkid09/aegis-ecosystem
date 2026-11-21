@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -47,6 +49,46 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         except Exception:
             pass  # fall through to legacy verify
     return _pwd_context.verify(plain_password, hashed_password)
+
+
+def device_token_proof(token: str, stored_hash: str) -> str:
+    """Prova veloce per un device token ad alta entropia, legata all'hash Argon2.
+
+    I device token sono generati con `secrets.token_urlsafe(32)` (256 bit),
+    non sono password scelte da un umano: Argon2 protegge da un attacco offline
+    su un dizionario, che qui non esiste. La prova permette a un worker appena
+    avviato (o a un altro worker) di evitare la KDF costosa senza rendere il
+    dump del DB sufficiente a impersonare l'agente.
+
+    La prova include `stored_hash`: un re-enroll o una revoca cambiano l'hash,
+    quindi ogni prova precedente smette di combaciare senza dover cancellare
+    il campo dal JSON. Il confronto va fatto con `hmac.compare_digest`.
+    """
+    material = b"aegis-device-token-v1\x00" + (token or "").encode("utf-8")
+    material += b"\x00" + (stored_hash or "").encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
+
+
+def verify_device_token_proof(token: str, stored_hash: str, proof: str | None) -> bool:
+    if not isinstance(proof, str) or not proof:
+        return False
+    return hmac.compare_digest(device_token_proof(token, stored_hash), proof)
+
+
+_dummy_password_hash: str | None = None
+
+
+def verify_password_dummy(password: str) -> bool:
+    """Esegue una verifica Argon2 anche quando l'email non esiste.
+
+    Senza questo, un login con email inesistente ritorna prima di una KDF e
+    diventa distinguibile per timing da una password sbagliata su un account
+    reale. Il risultato è volutamente ignorato dal chiamante.
+    """
+    global _dummy_password_hash
+    if _dummy_password_hash is None:
+        _dummy_password_hash = hash_password("aegis-not-a-real-password")
+    return verify_password(password, _dummy_password_hash)
 
 
 def needs_rehash(hashed_password: str) -> bool:
@@ -103,7 +145,8 @@ JWT_AUDIENCE = "aegis-api"
 JWT_LEEWAY_S = 30
 
 
-def create_access_token(subject: str, role: str, expires_minutes: int | None = None) -> tuple[str, str, int]:
+def create_access_token(subject: str, role: str, expires_minutes: int | None = None,
+                        token_version: int = 0) -> tuple[str, str, int]:
     expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes or settings.JWT_EXPIRE_MINUTES)
     jti = str(uuid.uuid4())
     payload = {
@@ -111,6 +154,7 @@ def create_access_token(subject: str, role: str, expires_minutes: int | None = N
         "role": role,
         "exp": expire,
         "jti": jti,
+        "ver": int(token_version or 0),
         "iss": JWT_ISSUER,
         "aud": JWT_AUDIENCE,
     }

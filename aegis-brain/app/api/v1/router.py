@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, vault, osint, ai, telemetry, nodetrace, enroll, history, rules, discovery, ws, playbooks, syslog, audit, deploy, total, incidents, ocsf, ingest, search, integrations, fim, yara, users, telegram, deception
+from app.api.v1 import auth, vault, osint, ai, telemetry, nodetrace, enroll, history, rules, discovery, ws, playbooks, syslog, audit, deploy, total, incidents, ocsf, ingest, search, integrations, fim, yara, users, telegram, deception, timeline, detections, suppressions
 
 api_router = APIRouter()
 
@@ -21,6 +21,9 @@ api_router.include_router(ocsf.router, prefix="/ocsf")
 # SIEM v4: ingestione multi-sorgente e ricerca sugli eventi normalizzati.
 api_router.include_router(ingest.router, prefix="/ingest")
 api_router.include_router(search.router, prefix="/search")
+api_router.include_router(timeline.router, prefix="/timeline")
+api_router.include_router(detections.router, prefix="/detections")
+api_router.include_router(suppressions.router, prefix="/suppressions")
 # Kraken remains a separate service: the Brain only exposes a read-only
 # overview and the delegated-SSO assertion used by the Aegis console.
 api_router.include_router(deception.router, prefix="/deception")

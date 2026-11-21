@@ -31,9 +31,13 @@ const PAGES: { id: string; label: string }[] = [
   { id: 'syslog', label: 'Syslog' },
   { id: 'logsources', label: 'Log Sources' },
   { id: 'search', label: 'Search' },
+  { id: 'timeline', label: 'Timeline' },
+  { id: 'coverage', label: 'ATT&CK Coverage' },
+  { id: 'suppressions', label: 'Suppressions' },
   { id: 'kraken', label: 'Kraken' },
   { id: 'yara', label: 'YARA & FIM' },
   { id: 'settings', label: 'Settings' },
+  { id: 'users', label: 'Users & Roles' },
 ];
 
 const ERROR_BOUNDARY = 'This view hit an error';

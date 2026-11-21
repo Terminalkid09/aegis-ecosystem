@@ -18,7 +18,7 @@ from app.core.audit import log_audit
 from app.core.config import settings
 from app.core.deps import get_current_user
 from app.core.rate_limit import limiter
-from app.core.security import hash_password
+from app.core.security import device_token_proof, hash_password
 from app.core.logging import get_logger
 from app.core.redis_utils import get_redis_url
 from app.services.enrollment import consume_enroll_token, token_target_hostname, validate_enroll_token
@@ -142,11 +142,13 @@ async def enroll_agent(request: Request, payload: EnrollRequest, db: AsyncSessio
         await consume_enroll_token(
             db, payload.enroll_key, payload.agent_type, payload.hostname)
         new_secret = secrets.token_urlsafe(32)
-        existing.device_token_hash = hash_password(new_secret)
+        new_hash = hash_password(new_secret)
+        existing.device_token_hash = new_hash
+        meta["device_token_proof"] = device_token_proof(new_secret, new_hash)
         if machine_hash:
             meta["machine_id_hash"] = machine_hash
             meta["identity_bound"] = True
-            existing.meta = meta
+        existing.meta = meta
         await log_audit(
             db, action="agent_reenroll", resource="agent",
             resource_id=str(existing.agent_id),
@@ -182,13 +184,17 @@ async def enroll_agent(request: Request, payload: EnrollRequest, db: AsyncSessio
     if used_token:
         await consume_enroll_token(
             db, payload.enroll_key, payload.agent_type, payload.hostname)
+    secret_hash = hash_password(agent_secret)
+    agent_meta = {"device_token_proof": device_token_proof(agent_secret, secret_hash)}
+    if machine_hash:
+        agent_meta.update({"machine_id_hash": machine_hash, "identity_bound": True})
     new_agent = Agent(
         agent_id=agent_id,
         hostname=payload.hostname,
         os_type=payload.os,
         agent_type=payload.agent_type,
-        device_token_hash=hash_password(agent_secret),
-        meta={"machine_id_hash": machine_hash, "identity_bound": True} if machine_hash else None,
+        device_token_hash=secret_hash,
+        meta=agent_meta,
     )
     db.add(new_agent)
     await log_audit(
@@ -324,6 +330,9 @@ async def revoke_agent(agent_id: str, payload: RevokeRequest, request: Request,
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     agent.device_token_hash = hash_password(secrets.token_urlsafe(48))
+    meta = dict(agent.meta) if isinstance(agent.meta, dict) else {}
+    meta.pop("device_token_proof", None)
+    agent.meta = meta
     # DB è primario (audit + transazione), file è fallback per boot senza DB.
     db.add(RevokedCert(agent_id=str(agent_uuid), reason=payload.reason, revoked_by=user.id))
     try:

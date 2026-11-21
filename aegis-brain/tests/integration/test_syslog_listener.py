@@ -94,6 +94,19 @@ def _free_udp_port() -> int:
         return sock.getsockname()[1]
 
 
+def _free_dual_port() -> int:
+    """A port free for both UDP and TCP; Windows can reserve one protocol only."""
+    for _ in range(20):
+        port = _free_udp_port()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError("no dual-protocol free port found")
+
+
 @pytest.mark.usefixtures("require_db")
 async def test_udp_datagram_is_ingested_and_stored():
     source = _source("syslog-udp")
@@ -136,7 +149,7 @@ async def test_udp_datagram_is_ingested_and_stored():
 @pytest.mark.usefixtures("require_db")
 async def test_tcp_line_is_ingested_and_stored():
     source = _source("syslog-tcp")
-    port = _free_udp_port()
+    port = _free_dual_port()
     listener = SyslogListener(host="127.0.0.1", port=port, source_name=source,
                               with_tcp=True)
     await listener.start()
@@ -168,7 +181,7 @@ async def test_tcp_line_is_ingested_and_stored():
 
 
 async def test_listener_health_is_exposed_while_running():
-    listener = SyslogListener(host="127.0.0.1", port=_free_udp_port(),
+    listener = SyslogListener(host="127.0.0.1", port=_free_dual_port(),
                               source_name=_source("syslog-health"), with_tcp=True)
     await listener.start()
     try:

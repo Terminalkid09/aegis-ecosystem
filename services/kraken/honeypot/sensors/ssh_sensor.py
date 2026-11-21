@@ -85,6 +85,9 @@ class KrakenSSHServer(asyncssh.SSHServer):
         self.commands = []
 
     def connection_made(self, conn):
+        peer = conn.get_extra_info("peername") or ("unknown", 0)
+        self.ip, self.port = peer[0], peer[1]
+        conn._kraken_server = self
         logger.info(f"[SSH] Connection from {self.ip}:{self.port} - session {self.session_id}")
 
     def connection_lost(self, exc):
@@ -112,15 +115,18 @@ class KrakenSSHServer(asyncssh.SSHServer):
         return True
 
 
-def server_factory(conn):
-    peer = conn.get_extra_info('peername') or ("unknown", 0)
-    ip, port = peer[0], peer[1]
-    session_id = str(uuid.uuid4())
-    return KrakenSSHServer(session_id, ip, port)
+def server_factory():
+    # asyncssh calls the factory without arguments for every new connection;
+    # peer details are available in SSHServer.connection_made(conn).
+    return KrakenSSHServer(str(uuid.uuid4()), "unknown", 0)
 
 
 async def handle_client(process):
-    server = process.channel.get_connection().get_server()
+    server = getattr(process.channel.get_connection(), "_kraken_server", None)
+    if server is None:
+        logger.error("[SSH] Process started without server context")
+        process.exit(1)
+        return
     session_id = server.session_id
 
     process.stdout.write("Welcome to Ubuntu 22.04.3 LTS (GNU/Linux 5.15.0-generic x86_64)\n\n")
@@ -182,6 +188,7 @@ class SSHSensor:
             self.host,
             self.port,
             server_host_keys=[key_path],
+            server_version="OpenSSH_8.9p1 Ubuntu-3ubuntu0.10",
             process_factory=handle_client,
         )
         logger.info(f"[SSH Sensor] Listening on {self.host}:{self.port}")

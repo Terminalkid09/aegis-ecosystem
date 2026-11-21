@@ -1,0 +1,27 @@
+title: Deception SMB NetNTLM Attempt
+id: kraken-sigma-smb-netntlm
+status: experimental
+description: |
+  Un tentativo SMB con un username produce un hash NetNTLMv2 nel sensore esca.
+  Il relay non è implementato: questo alert segnala solo la cattura.
+references:
+  - https://attack.mitre.org/techniques/T1557/001/
+author: Aegis Sigma bundle
+date: 2026/11/17
+logsource:
+  product: kraken
+detection:
+  selection:
+    signature: smb
+    user|exists: true
+  condition: selection
+fields:
+  - src_ip
+  - user
+  - signature
+falsepositives:
+  - Client SMB legittimo configurato contro il sensore esca
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1557.001

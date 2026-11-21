@@ -20,7 +20,7 @@ export default function DiscoveryCenter() {
   const [selectedHosts, setSelectedHosts] = useState<Set<string>>(new Set())
   const [showRepHelp, setShowRepHelp] = useState(false)
   const [deployModal, setDeployModal] = useState<any>(null)
-  const [deployAgentType, setDeployAgentType] = useState('nodetrace')
+  const [deployAgentType, setDeployAgentType] = useState('unified')
   const [plan, setPlan] = useState<any>(null)
 
   // Queries
@@ -360,15 +360,13 @@ export default function DiscoveryCenter() {
               <div>
                 <label className="text-[10px] uppercase font-bold tracking-widest text-[hsl(var(--muted-foreground))] mb-1.5 block">Select Agent Type</label>
                 <select value={deployAgentType} onChange={e => setDeployAgentType(e.target.value)} className="input">
-                  <option value="nodetrace">NodeTrace (Python Telemetry)</option>
-                  <option value="aegis-guard">Aegis-Guard (Java EDR)</option>
-                  <option value="unified">Unified (Guard + NodeTrace)</option>
+                  <option value="unified">AegisAgent (Go unified)</option>
                 </select>
               </div>
 
               <div className="p-3 rounded-lg border border-purple-500/20 bg-purple-500/10 text-xs text-purple-200">
                 <p className="font-semibold mb-1">Recommended: Mass Deploy</p>
-                <p className="opacity-80 mb-3">Use the Deployment Manager to roll out via SSH/WinRM safely without saving credentials.</p>
+                <p className="opacity-80 mb-3">Use the Deployment Manager to generate a short-lived token and copy its one-liner to the target. No SSH/WinRM credential is used.</p>
                 <button onClick={() => {
                   localStorage.setItem('aegis-deploy-targets', JSON.stringify([deployModal.ip_address]))
                   setDeployModal(null)

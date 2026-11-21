@@ -57,6 +57,26 @@ try:
 except Exception:
     pass
 
+# The command-queue tests use AEGIS_TEST_REDIS_URL, not REDIS_URL. Derive a
+# dedicated DB index (15) from the reachable app URL so the documented
+# `REDIS_URL=... pytest` command exercises those tests without flushing the
+# application's DB 0. An explicit AEGIS_TEST_REDIS_URL always wins.
+def _configure_test_redis_url() -> None:
+    if os.getenv("AEGIS_TEST_REDIS_URL"):
+        return
+    base = os.getenv("REDIS_URL", "")
+    if not base:
+        return
+    try:
+        from urllib.parse import urlparse, urlunparse
+        parsed = urlparse(base)
+        os.environ["AEGIS_TEST_REDIS_URL"] = urlunparse(parsed._replace(path="/15"))
+    except Exception:
+        pass
+
+
+_configure_test_redis_url()
+
 # ----------------------------------------------------------------- Database
 # Stesso problema della sezione Redis, stessa cura: se `DATABASE_URL` punta a
 # un hostname non risolvibile dall'host di test (es. `aegis-postgres` di
@@ -192,6 +212,12 @@ try:
         expire_on_commit=False,
         autocommit=False,
         autoflush=False,
+        # The fixtures wrap each test in an outer transaction.  An endpoint
+        # that deliberately calls rollback() after a failed write (batch
+        # ingestion) must roll back its own savepoint, not the fixture's
+        # committed agent.  Without this, the test harness deletes the agent
+        # and the *next* event fails with a foreign-key error.
+        join_transaction_mode="create_savepoint",
     )
     async def _probe_database():
         async with test_engine.connect():

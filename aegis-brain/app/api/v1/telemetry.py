@@ -326,7 +326,7 @@ async def get_recent_telemetry(
     stmt = (
         select(Telemetry, Agent)
         .join(Agent, Telemetry.device_id == Agent.agent_id)
-        .filter(Agent.agent_type.in_(["nodetrace", "NodeTrace"])) # Robust multi-case check
+        .filter(Agent.agent_type.in_(["nodetrace", "NodeTrace", "unified"])) # Unified is one host/one agent
     )
     if agent_id:
         stmt = stmt.where(Telemetry.device_id == agent_id)
@@ -469,7 +469,7 @@ async def agent_report(request: Request, payload: EventSchema, db: AsyncSession 
         inc("aegis_events_duplicate_total", 1, f'agent="{agent.agent_id}"')
         return {"status": "duplicate"}
     try:
-        await telemetry_service.process_telemetry(db, agent.agent_id, data)
+        await telemetry_service.process_telemetry(db, agent.agent_id, data, agent=agent)
     except Exception as e:
         inc("aegis_agent_errors_total", 1, f'agent="{agent.agent_id}",error="process_telemetry"')
         raise
@@ -540,7 +540,9 @@ async def agent_report_batch(
             inc("aegis_events_duplicate_total", 1, f'agent="{agent_ref}"')
             continue
         try:
-            await telemetry_service.process_telemetry(db, agent_id, sanitize_event(item.model_dump()))
+            await telemetry_service.process_telemetry(
+                db, agent_id, sanitize_event(item.model_dump()), agent=agent
+            )
             accepted += 1
         except Exception as exc:
             rejected += 1
@@ -581,9 +583,9 @@ async def agent_heartbeat(data: dict, db: AsyncSession = Depends(get_db), agent:
             host = r.scalars().first()
             if host:
                 threshold_ok = True  # just heartbeated -> active
-                if (agent.agent_type or "").lower() == "aegis-guard":
+                if (agent.agent_type or "").lower() in ("aegis-guard", "unified"):
                     host.guard_status = "active" if threshold_ok else host.guard_status
-                elif (agent.agent_type or "").lower() == "nodetrace":
+                if (agent.agent_type or "").lower() in ("nodetrace", "unified"):
                     host.nodetrace_status = "active" if threshold_ok else host.nodetrace_status
                 host.last_seen = datetime.now(timezone.utc)
     except Exception:
@@ -598,13 +600,13 @@ async def get_agent_commands(
 ):
     import redis.asyncio as redis
     from app.core.redis_utils import get_redis_url
+    from app.services.command_queue import pop_commands
     rc = redis.from_url(get_redis_url(), decode_responses=True)
-    queue_name = f"aegis:commands:{agent.agent_id}"
-    command = await rc.lpop(queue_name)
-    if command:
-        import json
-        return json.loads(command)
-    return None
+    try:
+        commands = await pop_commands(rc, str(agent.agent_id), 1)
+        return commands[0] if commands else None
+    finally:
+        await rc.aclose()
 
 
 @router.get("/commands/batch")
@@ -613,29 +615,17 @@ async def get_agent_commands_batch(
     db: AsyncSession = Depends(get_db),
     n: int = Query(50, ge=1, le=100),
 ):
-    """Drena fino a N comandi in un round-trip (sotto burst, niente 25s di poll).
-
-    Gli agenti provano prima qui e cadono sul singolo in caso di 404
-    (brain vecchio). Ritorna sempre una lista (anche vuota).
-    """
+    """Claim fino a N comandi; restano in processing finché l'agente non fa ack."""
     import redis.asyncio as redis
     from app.core.redis_utils import get_redis_url
+    from app.services.command_queue import pop_commands
     rc = redis.from_url(get_redis_url(), decode_responses=True)
-    queue_name = f"aegis:commands:{agent.agent_id}"
-    out = []
     try:
-        for _ in range(n):
-            raw = await rc.lpop(queue_name)
-            if not raw:
-                break
-            import json
-            try:
-                out.append(json.loads(raw))
-            except Exception:
-                continue
+        return await pop_commands(rc, str(agent.agent_id), n)
     except Exception:
-        pass
-    return out
+        return []
+    finally:
+        await rc.aclose()
 
 
 class CommandAck(BaseModel):
@@ -643,6 +633,7 @@ class CommandAck(BaseModel):
     status: str = "ok"
     details: Optional[str] = None
     alert_id: Optional[int] = None
+    delivery_id: Optional[str] = None
 
 
 @router.post("/commands/ack")
@@ -657,6 +648,23 @@ async def ack_agent_command(
     ok/failed instead of fire-and-forget. If alert_id is supplied the
     matching RemediationAction is updated too.
     """
+    # Ack the processing entry before touching DB fields: a retry is harmless
+    # and the command must not be replayed just because the DB update failed.
+    try:
+        import redis.asyncio as redis
+        from app.core.redis_utils import get_redis_url
+        from app.services.command_queue import ack_command
+        rc = redis.from_url(get_redis_url(), decode_responses=True)
+        try:
+            await ack_command(
+                rc, str(agent.agent_id),
+                delivery_id=payload.delivery_id,
+                command_name=payload.command,
+            )
+        finally:
+            await rc.aclose()
+    except Exception:
+        pass
     if payload.alert_id:
         r = await db.execute(select(RemediationAction).where(RemediationAction.id == payload.alert_id))
         rec = r.scalars().first()

@@ -68,6 +68,15 @@ def test_public_ip_gate(ip, public):
 
 
 @pytest.mark.asyncio
+async def test_hsts_only_on_https(client):
+    plain = await client.get("/health/live")
+    assert "strict-transport-security" not in plain.headers
+
+    proxied = await client.get("/health/live", headers={"x-forwarded-proto": "https"})
+    assert proxied.headers["strict-transport-security"].startswith("max-age=31536000")
+
+
+@pytest.mark.asyncio
 async def test_login_throttle_blocks_after_10_fails(monkeypatch):
     import app.core.security as sec
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, events, export, containers, health, plugins, reports
+from app.api.v1.endpoints import auth, events, export, containers, health, plugins, reports, ops
 
 tags_metadata = [
     {
@@ -31,6 +31,10 @@ tags_metadata = [
         "name": "Reports",
         "description": "Professional report generation with executive summaries, findings matrices, recommendations, HTML preview, and PDF download.",
     },
+    {
+        "name": "Operations",
+        "description": "Campaigns, sensor fleet, topology and shadow Lab metadata.",
+    },
 ]
 
 api_router = APIRouter(prefix="/api/v1")
@@ -41,3 +45,4 @@ api_router.include_router(containers.router, tags=["Containers"])
 api_router.include_router(health.router, tags=["Health"])
 api_router.include_router(plugins.router, tags=["Plugins"])
 api_router.include_router(reports.router, tags=["Reports"])
+api_router.include_router(ops.router, tags=["Operations"])

@@ -71,6 +71,8 @@ class CredentialAttempt(Base):
     event_id = Column(Integer, ForeignKey("attack_events.id", ondelete="CASCADE"), nullable=False)
     username = Column(String(128), nullable=True)
     password = Column(String(256), nullable=True)
+    # NetNTLMv2 response material only (never a plaintext password).
+    ntlm_hash = Column(String(1024), nullable=True)
     success = Column(Boolean, default=False)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -117,3 +119,83 @@ class MalwareSample(Base):
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
     event = relationship("AttackEvent", back_populates="malware_samples")
+
+
+class Campaign(Base):
+    """A named intrusion campaign; never stores raw credentials."""
+    __tablename__ = "campaigns"
+    __allow_unmapped__ = True
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    status = Column(String(24), nullable=False, default="active", index=True)
+    fingerprint = Column(String(128), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SensorNode(Base):
+    """A managed Kraken sensor node. Only the key hash is persisted."""
+    __tablename__ = "sensor_nodes"
+    __allow_unmapped__ = True
+
+    id = Column(Integer, primary_key=True, index=True)
+    node_id = Column(String(64), unique=True, nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    site = Column(String(64), nullable=False, default="default", index=True)
+    status = Column(String(24), nullable=False, default="pending", index=True)
+    key_hash = Column(String(128), nullable=False)
+    config = Column(JSON, nullable=False, default=dict)
+    config_version = Column(Integer, nullable=False, default=1)
+    applied_version = Column(Integer, nullable=False, default=0)
+    last_seen = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Topology(Base):
+    """Lab network definition. It is data, not an executable scenario."""
+    __tablename__ = "topologies"
+    __allow_unmapped__ = True
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(128), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    spec = Column(JSON, nullable=False, default=dict)
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class LabRun(Base):
+    """A shadow-only Lab run; it can never trigger destructive actions."""
+    __tablename__ = "lab_runs"
+    __allow_unmapped__ = True
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String(64), unique=True, nullable=False, index=True)
+    topology_id = Column(Integer, ForeignKey("topologies.id", ondelete="SET NULL"), nullable=True)
+    scenario_id = Column(String(64), nullable=False, index=True)
+    mode = Column(String(16), nullable=False, default="shadow")
+    status = Column(String(24), nullable=False, default="running", index=True)
+    evidence = Column(JSON, nullable=False, default=dict)
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+
+
+class AnalysisJob(Base):
+    """Async static file/ZIP analysis. The sample never enters Aegis."""
+    __tablename__ = "analysis_jobs"
+    __allow_unmapped__ = True
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(String(64), unique=True, nullable=False, index=True)
+    sha256 = Column(String(64), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    size = Column(Integer, nullable=False, default=0)
+    storage_path = Column(String(1024), nullable=True)
+    status = Column(String(24), nullable=False, default="queued", index=True)
+    report = Column(JSON, nullable=False, default=dict)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)

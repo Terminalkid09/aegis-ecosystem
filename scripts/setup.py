@@ -7,10 +7,13 @@ Installazione (da repo appena clonata):
 Fa tutto, nell'ordine:
   1. preflight dipendenze (docker, compose, python) con messaggi chiari
   2. .env: se manca, lo GENERA con segreti casuali forti (nessun placeholder)
-  3. binari vendor (nssm, yara64) scaricati con SHA-256 pinnato, se assenti
-  4. build artefatti agenti se assenti (PyInstaller + Maven + JRE + ETW)
-  5. avvio piattaforma (compose) + attesa readiness + agenti host + smoke API
-  6. bootstrap admin: crea/promuove l'utente admin e stampa le credenziali
+  3. avvio piattaforma (compose) + attesa readiness + smoke API
+  4. bootstrap admin: crea/promuove l'utente admin e stampa le credenziali
+
+Gli agenti endpoint non vengono piu' compilati o installati da questo script:
+la 4.3 li installa dalla Deployment Manager con un token monouso e l'archivio
+unified pubblicato. Guard/NodeTrace restano solo nel sorgente per i 4.2.1
+gia' installati.
 
 Aggiornamento (dopo un git pull, o direttamente):
     python scripts/setup.py update
@@ -25,8 +28,10 @@ Idempotente: rilanciabile quante volte si vuole.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -89,7 +94,8 @@ def preflight() -> int:
 # -------------------------------------------------------------------- .env
 
 REQUIRED_ENV = ("POSTGRES_PASSWORD", "REDIS_PASSWORD", "DATABASE_URL",
-                "AEGIS_API_KEY", "AGENT_ENROLL_KEY", "JWT_SECRET")
+                "AEGIS_API_KEY", "AGENT_ENROLL_KEY", "JWT_SECRET",
+                "MASTER_KEY_B64")
 
 
 def ensure_env() -> str:
@@ -108,6 +114,15 @@ def ensure_env() -> str:
     log(".env assente: lo genero con segreti casuali forti...")
     pw = secrets.token_hex(16)
     redis_pw = secrets.token_hex(16)
+    # The compose file marks MASTER_KEY_B64 as required. A fresh clone must get
+    # a valid 32-byte key here, otherwise `setup.py` generates a .env that
+    # immediately fails at `docker compose up`.
+    master_key = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
+    domain = (os.environ.get("AEGIS_DOMAIN") or "aegis.local").strip()
+    acme_email = (os.environ.get("ACME_EMAIL") or "internal").strip()
+    if domain not in ("aegis.local", "localhost") and acme_email == "internal":
+        log("ATTENZIONE: AEGIS_DOMAIN e' un dominio pubblico ma ACME_EMAIL=internal; "
+            "Caddy userebbe la CA interna. Imposta ACME_EMAIL con un indirizzo reale.")
     values = {
         "POSTGRES_USER": "aegis_user",
         "POSTGRES_PASSWORD": pw,
@@ -124,12 +139,41 @@ def ensure_env() -> str:
         "AEGIS_API_KEY": secrets.token_hex(32),
         "AGENT_ENROLL_KEY": secrets.token_hex(16),
         "JWT_SECRET": secrets.token_hex(32),
+        "MASTER_KEY_B64": master_key,
         "JWT_ALGORITHM": "HS256",
         "JWT_EXPIRE_MINUTES": "60",
-        "ALLOWED_ORIGINS": "http://localhost:3000,http://localhost:5173",
+        # Only the direct localhost:3000 dashboard is plain HTTP. aegis.local
+        # is served by Caddy over HTTPS, so its cookie must remain Secure even
+        # though the hostname is not a public FQDN.
+        "AEGIS_DEBUG": "false",
+        "AEGIS_ALLOW_OPEN_REGISTRATION": "false",
+        "AEGIS_COOKIE_SECURE": "false" if domain == "localhost" else "true",
+        # Caddy domain/TLS. A real FQDN + real ACME email uses Let's Encrypt;
+        # the lab default uses Caddy's internal CA.
+        "AEGIS_DOMAIN": domain,
+        "ACME_EMAIL": acme_email,
+        # Include the Caddy HTTPS origin: without it, cookie-authenticated
+        # POST/PATCH requests through https://<domain> fail CSRF checks with
+        # 403 even though the dashboard loads correctly. PUBLIC_BASE_URL is
+        # used by OIDC callbacks and deployment links and must match.
+        "ALLOWED_ORIGINS": f"https://{domain},http://localhost:3000,http://localhost:5173",
+        "PUBLIC_BASE_URL": f"https://{domain}",
         "VITE_API_URL": "/api/v1",
         "AEGIS_AGENT_ID": "agent-001",
         "AEGIS_SCAN_INTERVAL_MS": "1000",
+        # Kraken is an optional compose profile, but a fresh clone should be
+        # able to start it without hand-editing secrets. These values are
+        # independent from the Brain secrets above.
+        "KRAKEN_DB_PASSWORD": secrets.token_hex(16),
+        "KRAKEN_REDIS_PASSWORD": secrets.token_hex(16),
+        "KRAKEN_SECRET_KEY": secrets.token_hex(32),
+        "KRAKEN_INTERNAL_API_KEY": secrets.token_hex(32),
+        "KRAKEN_SSO_ENABLED": "true",
+        "KRAKEN_SSO_SECRET": secrets.token_hex(32),
+        "KRAKEN_INGEST_ENABLED": "false",
+        "KRAKEN_INGEST_KEY": secrets.token_hex(32),
+        "KRAKEN_INGEST_SECRET": secrets.token_hex(32),
+        "SANDBOX_BROKER_TOKEN": secrets.token_hex(32),
     }
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("# Generato da scripts/setup.py — segreti casuali, non condividere.\n")
@@ -404,6 +448,10 @@ def install_agent_services() -> bool:
 
 
 def run_smoke(base: str, email: str, password: str) -> int:
+    if not email or not password:
+        log("smoke autenticato saltato: password admin non disponibile "
+            "(re-run con AEGIS_ADMIN_PASSWORD_FILE per eseguirlo)", "!")
+        return 0
     r = run([sys.executable, os.path.join(SCRIPTS, "api_smoke.py"), "--base", base,
              "--email", email, "--password", password], timeout=300)
     print(r.stdout[-1500:])
@@ -442,26 +490,67 @@ def write_env_pair(key: str, value: str) -> None:
         f.write("\n".join(lines) + "\n")
 
 
+def _configured_admin_password(env: dict[str, str]) -> str:
+    """Password from --password, environment or a mounted secret file."""
+    password = (env.get("AEGIS_ADMIN_PASSWORD") or "").strip()
+    if password:
+        return password
+    path = (os.environ.get("AEGIS_ADMIN_PASSWORD_FILE") or "").strip()
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def admin_exists() -> bool:
+    """True if at least one admin already exists. Used to keep re-runs non-destructive."""
+    r = run(["docker", "exec", "aegis-brain", "python", "-m", "app.admin", "list"], timeout=60)
+    if r.returncode != 0:
+        return False
+    out = (r.stdout or "") + (r.stderr or "")
+    match = re.search(r"admin:\s*(\d+)", out)
+    return bool(match and int(match.group(1)) > 0)
+
+
 def bootstrap_admin(env: dict[str, str], email: str | None, password: str | None) -> tuple[str, str]:
-    """Crea/promuove l'admin e ritorna (email, password) effettive."""
+    """Create/promote the first admin without persisting its password.
+
+    The password is generated once, printed once and never written to .env.
+    On a re-run an existing admin is left untouched: silently resetting it to a
+    new generated value would lock the operator out of the account they had.
+    For automation, supply AEGIS_ADMIN_PASSWORD or AEGIS_ADMIN_PASSWORD_FILE.
+    """
     email = email or env.get("AEGIS_ADMIN_EMAIL") or "admin@aegis.local"
-    password = password or env.get("AEGIS_ADMIN_PASSWORD") or secrets.token_urlsafe(12)
+    configured = (password or _configured_admin_password(env)).strip()
 
     in_container = run(["docker", "exec", "aegis-brain", "python", "-c", "1"], timeout=30)
-    if in_container.returncode == 0:
-        r = run(["docker", "exec", "aegis-brain", "python", "-m", "app.admin",
-                 "bootstrap", email, password], timeout=120)
-        if r.returncode != 0:
-            log(f"bootstrap fallito:\n{(r.stdout or '')[-500:]}", "!")
-            return "", ""
-    else:
+    if in_container.returncode != 0:
         # Setup senza container attivi (es. prima esecuzione di update): riprova dopo.
         log("container brain non raggiungibile: bootstrap rimandato", "!")
         return "", ""
 
-    # Persisti le credenziali nel .env cosi' il re-run e' idempotente e ritrovabile.
+    if not configured and admin_exists():
+        log("admin già presente: password non modificata e non salvata in .env", "+")
+        write_env_pair("AEGIS_ADMIN_EMAIL", email)
+        return email, ""
+
+    password = configured or secrets.token_urlsafe(18)
+    r = run(["docker", "exec", "aegis-brain", "python", "-m", "app.admin",
+             "bootstrap", email, password], timeout=120)
+    if r.returncode != 0:
+        out = (r.stdout or "") + (r.stderr or "")
+        if "password non corrisponde" in out:
+            log("admin esistente con una password diversa: non la resetto", "!")
+            write_env_pair("AEGIS_ADMIN_EMAIL", email)
+            return email, ""
+        log(f"bootstrap fallito:\n{(r.stdout or '')[-500:]}", "!")
+        return "", ""
+
+    # Solo l'email è configurazione; la password resta fuori dal file.
     write_env_pair("AEGIS_ADMIN_EMAIL", email)
-    write_env_pair("AEGIS_ADMIN_PASSWORD", password)
     return email, password
 
 
@@ -494,15 +583,6 @@ def cmd_update(args) -> int:
     log("aggiornamento completato: dati preservati (volume DB intatto, "
         "migrazioni applicate all'avvio).")
 
-    # Il pull puo' aver portato una versione nuova dei binari vendor.
-    ensure_binaries()
-
-    if args.rebuild_agents and IS_NT:
-        if build_agents() != 0:
-            log("agenti non ricompilati: la piattaforma e' comunque aggiornata", "!")
-    elif agents_built():
-        log("agenti host: artefatti presenti (usa --rebuild-agents per ricompilarli)")
-
     env = read_env()
     email, password = bootstrap_admin(env, args.email, args.password)
     if email:
@@ -519,20 +599,12 @@ def main() -> int:
     sub = ap.add_subparsers(dest="command")
     up = sub.add_parser("update", help="git pull + rebuild + riavvio (dati preservati)")
     up.add_argument("--force", action="store_true", help="procedi anche con working tree sporco")
-    up.add_argument("--rebuild-agents", action="store_true", help="ricompila anche gli agenti host")
     up.add_argument("--wait", type=int, default=120)
     up.add_argument("--email")
     up.add_argument("--password")
 
     ap.add_argument("--email", help="email admin (default: admin@aegis.local o quella nel .env)")
-    ap.add_argument("--password", help="password admin (default: generata e salvata nel .env)")
-    ap.add_argument("--no-agents", action="store_true", help="non avviare gli agenti host")
-    ap.add_argument("--no-autostart", action="store_true",
-                    help="non registrare gli agenti come servizi Windows (solo avvio dev)")
-    ap.add_argument("--force-build", action="store_true", help="ricompila gli artefatti anche se presenti")
-    ap.add_argument("--skip-build", action="store_true", help="salta la build degli artefatti")
-    ap.add_argument("--skip-binaries", action="store_true",
-                    help="non scaricare nssm/yara64 (offline o li metti a mano)")
+    ap.add_argument("--password", help="password admin (default: generata e mostrata una sola volta)")
     args = ap.parse_args()
 
     if args.command == "update":
@@ -549,19 +621,6 @@ def main() -> int:
                    "Completa le chiavi manualmente o cancella .env per rigenerarlo.")
     if status == "created":
         log(".env creato con segreti casuali.", "+")
-
-    # Prima della build: l'installer di Guard deploya yara64.exe se lo trova,
-    # quindi scaricarlo adesso significa che l'agente parte con YARA attivo e
-    # con i servizi registrabili (nssm).
-    if not args.skip_binaries:
-        if ensure_binaries() != 0:
-            log("binari vendor incompleti: la piattaforma parte comunque, "
-                "ma servizi Windows e scansioni YARA restano disattivati "
-                "finche' non li metti a mano (istruzioni sopra).", "!")
-
-    if not args.skip_build:
-        if build_agents() != 0:
-            return 1
 
     if ai_profile_requested():
         log("profilo AI locale attivo (AEGIS_WITH_AI=1): avvio anche ollama")
@@ -580,24 +639,16 @@ def main() -> int:
         return 1
     log(f"admin pronto: {email}", "+")
 
-    if not args.no_agents:
-        # Prima i servizi (persistono al reboot), poi — solo se NON registrati —
-        # l'avvio dev. Mai entrambi: due istanze per endpoint = telemetria doppia.
-        services_up = False if args.no_autostart else install_agent_services()
-        if services_up:
-            log("agenti gestiti dai servizi Windows (ripartono da soli al boot)", "+")
-        else:
-            if start_agents() != 0:
-                log("agenti non avviati: la piattaforma resta utilizzabile", "!")
-        time.sleep(8)
-
     if run_smoke("http://127.0.0.1:8000", email, password) != 0:
         return 1
 
     print()
     log("=== AEGIS PRONTO ===", "+")
     print(f"  Dashboard:   http://localhost:3000   (login: {email})")
-    print(f"  Password:    {password}   (salvata anche in .env: AEGIS_ADMIN_PASSWORD)")
+    if password:
+        print(f"  Password:    {password}   (mostrata una sola volta, NON salvata in .env)")
+    else:
+        print("  Password:    invariata (admin già esistente); usa AEGIS_ADMIN_PASSWORD_FILE per l'automazione)")
     print(f"  API:         http://127.0.0.1:8000/api/v1")
     print(f"  Aggiornare?  python scripts/setup.py update")
     return 0

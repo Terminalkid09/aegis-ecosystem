@@ -8,11 +8,11 @@ import pytest
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.database.models import Alert, Incident, IncidentAlert, SiemEvent
+from app.database.models import Alert, DeceptionSession, Incident, IncidentAlert, SiemEvent
 
 
 def _kraken_body(event_id: str, *, occurred_at: str | None = None,
-                 password: str = "plain-secret") -> bytes:
+                 password: str = "plain-secret", context: str = "sensor") -> bytes:
     event = {
         "event_id": event_id,
         "occurred_at": occurred_at or datetime.now(timezone.utc).isoformat(),
@@ -31,7 +31,8 @@ def _kraken_body(event_id: str, *, occurred_at: str | None = None,
         "raw": {
             "sensor": "ssh", "session_id": event_id, "threat_level": "high",
             "geo": {"country": "RU"}, "iocs": ["45.9.20.7"],
-            "password": password,
+            "password": password, "context": context,
+            "run_id": "run-lab-1" if context == "lab" else None,
         },
         "tags": ["deception", "kraken"],
     }
@@ -70,7 +71,11 @@ async def test_kraken_event_creates_stored_event_alert_and_incident(
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["stored"] == 1
-    assert data["alerts"] == 1
+    # One event can legitimately match more than one deception rule (SSH
+    # credential access and post-auth command), but the fallback must not add
+    # another alert on top: every id must belong to the same event's incident.
+    assert data["alerts"] >= 1
+    assert len(data["alert_ids"]) == data["alerts"]
     assert data["incident_id"] is not None
 
     stored = (await db_session.execute(
@@ -81,20 +86,49 @@ async def test_kraken_event_creates_stored_event_alert_and_incident(
     assert stored.src_ip == "45.9.20.7"
     assert "plain-secret" not in json.dumps(stored.extra)
 
-    alert = (await db_session.execute(
-        select(Alert).where(Alert.event_type == "DECEPTION")
-    )).scalars().first()
-    assert alert is not None
-    assert "plain-secret" not in alert.description
-    assert "plain-secret" not in json.dumps(alert.evidence)
+    alerts = (await db_session.execute(
+        select(Alert).where(Alert.id.in_(data["alert_ids"]))
+    )).scalars().all()
+    assert alerts and all(alert.event_type == "DECEPTION" for alert in alerts)
+    assert all("plain-secret" not in alert.description for alert in alerts)
+    assert all("plain-secret" not in json.dumps(alert.evidence) for alert in alerts)
 
     incident = await db_session.get(Incident, data["incident_id"])
     assert incident is not None
-    link = (await db_session.execute(
+    links = (await db_session.execute(
         select(IncidentAlert).where(IncidentAlert.incident_id == incident.id)
-    )).scalars().first()
-    assert link is not None
-    assert link.alert_id == alert.id
+    )).scalars().all()
+    assert links
+    assert {link.alert_id for link in links} == set(data["alert_ids"])
+
+    session = (await db_session.execute(
+        select(DeceptionSession).where(DeceptionSession.session_id == event_id)
+    )).scalars().one()
+    assert session.context == "sensor"
+    assert session.incident_id == incident.id
+
+
+@pytest.mark.asyncio
+async def test_lab_context_is_preserved_and_marked_shadow(
+    client, db_session, kraken_settings
+):
+    event_id = f"kraken:lab:{uuid.uuid4().hex}:ssh"
+    body = _kraken_body(event_id, context="lab")
+    response = await client.post(
+        "/api/v1/ingest/kraken", content=body,
+        headers=_headers(body, kraken_settings),
+    )
+    assert response.status_code == 200, response.text
+    stored = (await db_session.execute(
+        select(SiemEvent).where(SiemEvent.event_id == event_id)
+    )).scalars().one()
+    assert stored.extra["kraken"]["context"] == "lab"
+    session = (await db_session.execute(
+        select(DeceptionSession).where(DeceptionSession.session_id == event_id)
+    )).scalars().one()
+    assert session.context == "lab"
+    assert session.status == "shadow"
+    assert session.run_id == "run-lab-1"
 
 
 @pytest.mark.asyncio

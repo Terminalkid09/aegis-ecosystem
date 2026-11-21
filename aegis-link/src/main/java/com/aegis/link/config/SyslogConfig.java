@@ -1,6 +1,7 @@
 package com.aegis.link.config;
 
 import com.aegis.link.dto.EventRequest;
+import com.aegis.link.service.EventSpoolService;
 import com.aegis.link.service.RedisService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,9 +22,11 @@ public class SyslogConfig {
     private static final int SYSLOG_PORT = 1514;
 
     private final RedisService redisService;
+    private final EventSpoolService spoolService;
 
-    public SyslogConfig(RedisService redisService) {
+    public SyslogConfig(RedisService redisService, EventSpoolService spoolService) {
         this.redisService = redisService;
+        this.spoolService = spoolService;
     }
 
     @Bean
@@ -62,7 +65,12 @@ public class SyslogConfig {
                     .fileHash(msg)
                     .build();
 
-            redisService.pushEvent(event);
+            try {
+                redisService.pushEvent(event);
+            } catch (RuntimeException redisError) {
+                if (!spoolService.spool(event)) throw redisError;
+                log.warn("Syslog event spooled locally after Redis failure from {}", host);
+            }
             log.debug("Processed syslog message from {}: {}", host, msg);
         } catch (Exception e) {
             log.error("Error processing syslog message", e);

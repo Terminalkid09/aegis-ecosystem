@@ -1,0 +1,113 @@
+"""OIDC helpers: group mapping, signed state, public policy endpoints."""
+import pytest
+
+from app.core import oidc
+from app.core.config import settings
+
+
+def test_role_mapping_uses_highest_privilege(monkeypatch):
+    monkeypatch.setattr(
+        settings, "OIDC_GROUP_ROLE_MAP",
+        '{"aegis-viewers":"viewer","aegis-analysts":"analyst","aegis-admins":"admin"}',
+        raising=False,
+    )
+    monkeypatch.setattr(settings, "OIDC_DEFAULT_ROLE", "viewer", raising=False)
+    assert oidc.role_from_groups(["aegis-viewers", "aegis-analysts"]) == "analyst"
+    assert oidc.role_from_groups(["aegis-analysts", "aegis-admins"]) == "admin"
+    assert oidc.role_from_groups([]) == "viewer"
+
+
+def test_role_mapping_is_case_tolerant_and_never_unknown(monkeypatch):
+    monkeypatch.setattr(settings, "OIDC_GROUP_ROLE_MAP",
+                        '{"Aegis-Admins":"admin"}', raising=False)
+    monkeypatch.setattr(settings, "OIDC_DEFAULT_ROLE", "viewer", raising=False)
+    assert oidc.role_from_groups(["aegis-admins"]) == "admin"
+    assert oidc.role_from_groups(["unknown-group"]) == "viewer"
+
+
+def test_frontend_url_keeps_brain_redirect_off_the_api_root(monkeypatch):
+    monkeypatch.setattr(settings, "PUBLIC_BASE_URL", "https://aegis.example", raising=False)
+    assert oidc.frontend_url("/") == "https://aegis.example/"
+    assert oidc.frontend_url("/alerts?x=1") == "https://aegis.example/alerts?x=1"
+    assert oidc.frontend_url("//evil.example") == "https://aegis.example/"
+
+
+def test_state_roundtrip_and_safe_return(monkeypatch):
+    monkeypatch.setattr(settings, "JWT_SECRET", "x" * 40, raising=False)
+    token = oidc.encode_state(
+        state="state-1", verifier="verifier-1", nonce="nonce-1",
+        return_to="//evil.example/path",
+    )
+    payload = oidc.decode_state(token)
+    assert payload["state"] == "state-1"
+    assert payload["verifier"] == "verifier-1"
+    assert payload["return_to"] == "/"
+    assert oidc.safe_return_to("/alerts?x=1") == "/alerts?x=1"
+    assert oidc.safe_return_to("https://evil.example") == "/"
+    assert oidc.safe_return_to("/\\evil") == "/"
+
+
+@pytest.mark.asyncio
+async def test_oidc_config_is_public_and_fail_closed(client, monkeypatch):
+    monkeypatch.setattr(settings, "OIDC_ENABLED", False, raising=False)
+    response = await client.get("/api/v1/auth/oidc/config")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enabled"] is False
+    assert body["login_url"] == "/api/v1/auth/oidc/login"
+
+
+@pytest.mark.asyncio
+async def test_oidc_login_is_404_when_disabled(client, monkeypatch):
+    monkeypatch.setattr(settings, "OIDC_ENABLED", False, raising=False)
+    response = await client.get("/api/v1/auth/oidc/login")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_oidc_callback_rejects_missing_state_cookie(client, monkeypatch):
+    monkeypatch.setattr(settings, "OIDC_ENABLED", True, raising=False)
+    response = await client.get(
+        "/api/v1/auth/oidc/callback?code=abc&state=expected", follow_redirects=False)
+    assert response.status_code == 302
+    assert "sso_error=" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_oidc_callback_rejects_state_mismatch(client, monkeypatch):
+    monkeypatch.setattr(settings, "OIDC_ENABLED", True, raising=False)
+    cookie = oidc.encode_state(
+        state="expected", verifier="verifier", nonce="nonce", return_to="/")
+    client.cookies.set("aegis_oidc_state", cookie, path="/api/v1/auth/oidc")
+    response = await client.get(
+        "/api/v1/auth/oidc/callback?code=abc&state=wrong", follow_redirects=False)
+    assert response.status_code == 302
+    assert "sso_error=" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_oidc_role_sync_cannot_remove_last_active_admin(db_session):
+    from app.api.v1.auth import _safe_oidc_role
+    from app.database.models import User
+
+    admin = User(
+        username="oidc-last-admin", email="oidc-last-admin@aegis.test",
+        password_hash="x", role="admin", active=True,
+    )
+    db_session.add(admin)
+    await db_session.commit()
+    await db_session.refresh(admin)
+
+    role, suppressed = await _safe_oidc_role(db_session, admin, "viewer")
+    assert role == "admin"
+    assert suppressed is True
+
+    db_session.add(User(
+        username="second-admin", email="second-admin@aegis.test",
+        password_hash="x", role="admin", active=True,
+    ))
+    await db_session.commit()
+
+    role, suppressed = await _safe_oidc_role(db_session, admin, "viewer")
+    assert role == "viewer"
+    assert suppressed is False

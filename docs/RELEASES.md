@@ -1,7 +1,8 @@
 # Release audit — Aegis Ecosystem
 
-Status: 2026-11-16. This document audits the tags that already exist, including
-the completed `v4.1.0` release. It does not move history.
+Status: 2026-11-19. This document audits the tags that already exist, including
+the completed `v4.1.0` release. It does not move history. The current release
+being prepared is `v4.3.0`; it is not tagged or published yet.
 
 ## Published tags are immutable
 
@@ -31,6 +32,8 @@ tags.
 | `v3.0.0` | 2026-07-09 | `058dea5` | `058dea5` | yes | none |
 | `v4.0.0` | 2026-09-21 | `38e245f` | `de52206` | yes | `aegis-guard.jar`, `sbom.spdx.json`, `SHA256SUMS.txt` |
 | `v4.1.0` | 2026-11-16 | `17c499f` | `17c499f` | yes | 24 assets: Brain/Link/Frontend/Guard/NodeTrace, compose, SBOM, source, seven images, manifests/checksums |
+| `v4.2.1` | 2026-11-18 | `1de7443` | `1de7443` | yes | 4.2 maintenance release; NodeTrace spec tracked |
+| `v4.3.0` | not cut | — | — | no | unified-only 24-file bundle prepared; hosted tag CI still required |
 
 The first four are lightweight tags; `v4.1.0` is annotated. `v4.0.0` and
 `v4.1.0` are the only ones whose code version matches the tag: `aegis-brain`
@@ -74,6 +77,8 @@ The safe correction is:
 | `v3.0.0` | Standalone agents and Discovery Center | historical |
 | `v4.0.0` | EDR + SIEM platform, ETW, Sigma, Telegram, signed enrollment | historical; last batch tag |
 | `v4.1.0` | Foundation + complete Kraken vertical: blocking fixes, CI green, compose/outbox/UI/unified view, complete release | released 2026-11-16; complete |
+| `v4.2.1` | Kraken outbox/lab hardening and 4.2 maintenance | released 2026-11-18 |
+| `v4.3.0` | Unified Go agent, at-least-once commands, 50k Link and release gates | prepared 2026-11-19; tag not cut |
 
 `v4.1.0` is a **minor** because it fixes and hardens existing contracts. The
 removal of the disabled-by-default `script` playbook action will be documented
@@ -170,15 +175,105 @@ Measured on commit `4ac83b5` before the release merge:
   locally and attached to the release because the Linux release job cannot
   produce it; Playwright and live detection batteries remain manual gates.
 
+## 4.2 release candidate verification (2026-11-18)
+
+Status: PR #13 was merged into `main` at `5c89d41`. The `v4.2.0` tag was created there, but its tag workflow (`44351348039`) failed before publishing: `nodetrace-agent.spec` was ignored by `*.spec` and absent from the tag, so the Windows package job could not build. **No GitHub Release exists for `v4.2.0`.** `v4.2.1` tracks the spec, runs the NodeTrace Windows package job on pull requests, and is the first complete 4.2 release. The 4.2.0 code passed hosted run `44342912879`, including `Compose E2E Gate` (Playwright **13/13**), and the merge commit passed main run `44349513947`. Local verification on 2026-11-18: Brain **853 passed, 3 skipped** against a disposable PostgreSQL test database, Kraken **150 passed**, Playwright **13/13**, `api_smoke.py` **ALL PASS** (21 checks), frontend lint **0 errors / 26 warnings**, `npm audit --omit=dev` **0 vulnerabilities**, build **OK**, root and Kraken Compose stack **OK**, **aegis-kraken-sensors healthy**. The v4.2.1 tag and release are the remaining gate.
+
+**Load gate — met locally; hosted CI does not measure throughput.** On the default **2-worker**
+stack, `/telemetry/report` with unique, committed events reached **289.35 rps
+through Caddy/TLS** (1.500/1.500 `200`, p95 159.9 ms, p99 188.8 ms) and
+**247.76 rps direct** (3.000/3.000 `200`, 3.008 DB rows, p95 194.4 ms). The
+20-agent cold proof burst reached **341.16 rps** (p95 52.3 ms) and 100 warm
+events reached **301.16 rps** (p95 91.5 ms); no read timeouts. Legacy agents
+take 79.4 ms on first contact and 38.7 ms after backfill. The old **96–111.58
+rps** was an 8-worker measurement, not the default Compose path, and is
+superseded; `synchronous_commit` remains `on`. Hosted CI/E2E passed on
+`00eb030`; merge, tag and release await explicit approval.
+
+- `npm audit --omit=dev` is clean (**0**), and CI blocks the runtime tree. The
+  development tree still reports **5 high `picomatch` advisories** through
+  Vite/fdir/tinyglobby; no patched release exists, and these tools are not
+  shipped in the runtime image. CI reports the dev audit without blocking.
+- `release-bundle.py` emits `env.example`, not `.env.example`, and has a focused
+  contract test for the final asset name and the NodeTrace identity exclusion.
+- The tag workflow has a Windows `nodetrace_windows` job that builds the
+  PyInstaller package and uploads it as an artifact; `release` consumes it.
+- The tag workflow builds all seven release images, generates a CycloneDX SBOM
+  for each with pinned Syft, records the names in `RELEASE_MANIFEST.json`, and
+  includes them in the bundle.
+- `release-smoke.py` now requires `env.example`, `frontend.zip`,
+  `RELEASE_SIGNING.md`, the source archive and the core assets; the tag job
+  runs it with `--require-nodetrace --require-image-sboms` before publishing.
+- `docs/RELEASE_SIGNING.md` records that 4.2 remains **checksummed, not
+  signed**, and that a GitHub build-provenance attestation is produced for the
+  release assets. Provenance is verifiable; it is not a cosign signature.
+- Local bundle verification: `v4.2.0-rc1` produced **29 files**;
+  `release-smoke.py` **OK**; `env.example` present and no `.env.example`;
+  seven fixture image SBOMs recorded; `nodetrace.zip` **39 entries**, no
+  `token.json`, `device.key`, `device.crt` or `nodetrace.pid`.
+- Real Compose E2E on the running stack: Playwright **13/13 passed**
+  (including setup, pages, session and the Kraken vertical) after a fresh seeded
+  event; `scripts/api_smoke.py` **ALL PASS** (21 checks). The first Kraken run
+  failed because the existing `203.0.113.77` event was outside the 24-hour
+  window; the fix is the deterministic `services/kraken/scripts/seed_e2e.py`,
+  not a product change.
+- The `aegis-kraken-sensors` container now has a localhost-only HTTP health
+  listener on port 8000. It reports `healthy` without probing a honeypot port,
+  so the healthcheck cannot create fake attacks or SIEM events.
+- Hosted CI run `44342912879` and the Compose E2E gate passed on the 4.2 code;
+  PR #13 merged at `5c89d41`. The first `v4.2.0` tag stopped in the NodeTrace
+  Windows package because `nodetrace-agent.spec` was ignored; `v4.2.1` tracks
+  the spec and runs that package job on pull requests.
+- Added after the pipeline work: timeline, deception rules/correlation,
+  campaigns/fleet/topology/Lab UI, SMB/RDP sensors, ATT&CK coverage, governed
+  suppressions, mTLS fingerprint enforcement and asynchronous static file
+  analysis. These are implementation candidates, not release verification.
+
+## v4.3.0 release preparation (2026-11-19)
+
+Direct `v4.3.0` release, no `4.3.0-rc1`. The locally executable gates are green:
+27 Link tests, 8 Brain command-queue tests, the 50k Link live cap, process-level
+command restart, `queued — not executed` UI visibility, a 24-artifact unified-only
+bundle with checksums, a clean install from the extracted bundle with API smoke **21/21**,
+and a 4.2.1 server upgrade preserving **68 agents / 321 alerts** with smoke
+**21/21**. The annotated tag, hosted tag workflow, downloaded-asset verification
+and publication remain the external release step. The release is checksummed,
+not cosign-signed; see `docs/RELEASE_SIGNING.md`.
+
+## Local verification update — 2026-11-20
+
+The clean-install/security pass closed with **875 Brain tests passed, 3 skipped**
+(YARA unavailable on Python 3.15/Windows), **Kraken 154 passed**, **15
+Playwright tests passed + 1 SSO opt-in skipped** through Caddy with Kraken,
+**SSO 2/2** against Keycloak 26.0.7,
+**ETW 95 live events** (non-admin exit 2), WSL Ubuntu/Kali eBPF **PASS** and
+**300/300 zero-loss**, real file/Vault secrets **PASS**, and a clean core+Kraken
+install with API smoke **21/21**. A Python 3.12 container with `yara-python`
+4.5.4 also ran the three YARA engine tests (**3 passed**); the 3.15 suite keeps
+its declared skip. Caddy now takes `AEGIS_DOMAIN`/`ACME_EMAIL` from `.env`, and
+the optional Prometheus profile is documented as lab-only. The fixes include the
+Caddy origin in the
+generated `.env`, the missing `OIDC_*` compose mapping, SPA session hydration
+after OIDC, the Kraken `asyncio` startup import, and the missing Darwin build
+tags for `SystemInfo`/`LocalMAC`. macOS now cross-builds for amd64/arm64 and
+has a `macos-latest` Go CI job; it remains build/CI-only with no endpoint
+telemetry or live hardware validation.
+
+**Release verdict:** local 4.3.0 release candidate is sound, but the hosted tag
+workflow (Gate 5), bare-metal Linux, Windows Server live and macOS live remain
+unverified. Do not push a raw mixed working tree or tag a release today; commit
+the release state, run hosted CI, then tag. See `docs/RELEASE_GATE_4.3.md`.
+
 ## Current version fields
 
-These are the release version fields for `v4.1.0`.
+These are the release version fields for the `v4.3.0` release.
 
 | Component | File | Current |
 |---|---|---|
-| Brain API | `aegis-brain/app/core/config.py` | `4.1.0` |
-| Frontend | `frontend/package.json` | `4.1.0` |
-| Guard | `aegis-guard/pom.xml` | `4.1.0` |
-| NodeTrace | `NodeTrace/agents/python/agent.py` | `4.1.0` |
-| OCSF agent metadata | `aegis-brain/app/services/ocsf.py` | `4.1.0` |
-| Artifact packer | `scripts/pack-artifacts.py` | `v4.1.0` |
+| Brain API | `aegis-brain/app/core/config.py` | `4.3.0` |
+| Frontend | `frontend/package.json` | `4.3.0` |
+| Unified Go agent | `aegis-agent/internal/config/config.go` | `4.3.0` |
+| Guard legacy | `aegis-guard/pom.xml` | `4.3.0` |
+| NodeTrace legacy | `NodeTrace/agents/python/agent.py` | `4.3.0` |
+| OCSF agent metadata | `aegis-brain/app/services/ocsf.py` | `4.3.0` |
+| Artifact packer | `scripts/pack-artifacts.py` | `v4.3.0` |

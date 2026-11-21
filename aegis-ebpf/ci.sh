@@ -1,6 +1,6 @@
 #!/bin/bash
-# One-shot CI: toolchain + build + bench + test funzionale + pulizia generati.
-# Uso: docker run --rm --privileged -v $PWD:/src debian:bookworm-slim bash /src/ci.sh [N]
+# One-shot CI: toolchain + build + benchmark + functional test + cleanup of generated files.
+# Usage: docker run --rm --privileged -v $PWD:/src debian:bookworm-slim bash /src/ci.sh [N]
 set -u
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq

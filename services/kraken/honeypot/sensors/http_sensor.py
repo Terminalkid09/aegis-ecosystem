@@ -31,7 +31,7 @@ class HTTPSensor:
             try:
                 writer.write(
                     b"HTTP/1.1 200 OK\r\nServer: Apache/2.4.57 (Ubuntu)\r\n"
-                    b"Content-Type: text/html\r\nContent-Length: 45\r\n\r\n"
+                    b"Content-Type: text/html\r\nContent-Length: 44\r\n\r\n"
                     b"<html><body><h1>It works!</h1></body></html>"
                 )
                 await writer.drain()

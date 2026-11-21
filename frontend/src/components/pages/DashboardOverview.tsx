@@ -300,7 +300,7 @@ export default function DashboardOverview() {
       <div className="card p-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <h3 className="font-semibold text-white">Host Telemetry — NodeTrace agents</h3>
+            <h3 className="font-semibold text-white">Host Telemetry — agents</h3>
             <p className="text-[10px] text-[hsl(var(--muted-foreground))] mt-0.5">
               {chartData.length} samples · one every ~12s
               {chartHost === 'all' && hosts.length > 0 && ` · averaged across ${hosts.length} host${hosts.length > 1 ? 's' : ''}`}

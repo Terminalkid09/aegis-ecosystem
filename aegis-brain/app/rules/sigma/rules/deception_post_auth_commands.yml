@@ -1,0 +1,30 @@
+title: Deception Commands After Authentication
+id: kraken-sigma-post-auth-commands
+status: stable
+description: |
+  Kraken esegue i comandi dell'attaccante in una sandbox isolata. Un comando
+  dopo l'autenticazione è interazione reale, non un banner di scansione.
+references:
+  - https://attack.mitre.org/techniques/T1059/
+author: Aegis Sigma bundle
+date: 2026/11/17
+logsource:
+  product: kraken
+detection:
+  selection:
+    signature:
+      - ssh
+      - telnet
+      - rdp
+    command_line|exists: true
+  condition: selection
+fields:
+  - src_ip
+  - signature
+  - command_line
+falsepositives:
+  - Client di test che invia un comando vuoto
+level: high
+tags:
+  - attack.execution
+  - attack.t1059

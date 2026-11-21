@@ -12,6 +12,220 @@ the tag audit and the release policy.
 > after the batch tags: the full Kraken vertical ships with the hardening
 > fixes, and expansion moves to 4.2+.
 
+## [4.3.0] - 2026-11-19
+
+### Aegis Agent 4.3.0 — parità funzionale NodeTrace e Guard
+
+**Stato: release 4.3.0 per pilot controllati.** Il runtime Go e il profilo
+`unified` sono verificati contro il Brain reale; la release non è production GA
+e non dichiara la certificazione malware. Il bundle 4.3 non contiene più Guard
+Java e NodeTrace Python: restano solo nel sorgente per compatibilità 4.2.1 e non
+sono offribili per nuovi deploy. Il rollback agli agenti legacy non è un
+requisito della 4.3.0 ed è esplicitamente fuori perimetro.
+
+NodeTrace (`sensor`) è stato verificato con la suite Python (82 test, 2 skip) e
+con 84 funzioni di test Go su tutti i package. Il live test del binario copre
+enroll, CSR, `token.json`, heartbeat, `/update`, comandi, ack, scan e header
+`X-Client-Cert-Hash`; è stato eseguito sia con Brain finto sia contro il Brain
+reale locale, con telemetria persistita in PostgreSQL.
+
+Guard (`endpoint`) è stato portato per capacità, non come traduzione meccanica
+dei 140 JUnit: `secret.json`/`agent_id`, enrollment `/enroll/enroll`, outbox
+batch 25/500 ms con buffer 2.000, spool AES-256-GCM 50 MB con quarantena dei
+file corrotti, FIM fsnotify, YARA CLI fail-closed, consumer ETW, monitor
+processi con PID+start time, registry/servizi/persistenza/Defender/Authenticode
+e le 14 azioni (kill, kill tree, block IP e temporaneo, quarantine, remove
+persistence, DNS sinkhole, collect IOC, verify, isolate/deisolate, FIM, YARA,
+update delegato). Il live test del binario copre identità, heartbeat/metriche,
+comandi, ack e header `X-Client-Cert-Hash`; sul Brain reale il profilo endpoint
+ha riportato FIM e response actions attivi, con ETW/YARA dichiarati non
+disponibili su questo host.
+
+Il profilo `unified` usa una sola identità Guard e un solo outbox, ma avvia
+anche i collector sensor. Il Brain/UI lo accettano in enrollment, token di
+deploy, job, OTA, Discovery e telemetria recente. Il bundle 4.3.0 contiene solo
+l'agente Go per Windows e Linux: `unified-latest.zip`, `unified-latest.tar.gz` e
+le copie versionate `unified-4.3.0.*`. L'archivio Windows include
+`aegis-agent.exe` e `aegis-etw.exe`; quello Linux include `aegis-agent`,
+`aegis-collector` e `aegis_exec.bpf.o`. `release-smoke.py --require-agent`
+rifiuta un bundle senza questi file e rifiuta esplicitamente Guard/NodeTrace e i
+binari grezzi. Fuori dal perimetro 4.3.0 restano il servizio/installer drop-in
+firmato e il rollback.
+
+Evidenza eseguita il 2026-11-18 (fake) e il 2026-11-19 (stack reale):
+
+| Gate | Risultato |
+|---|---|
+| `go test ./... -count=1` | 84 funzioni di test Go, tutti i package verdi |
+| `go vet ./...` | verde |
+| build Go Windows e Linux | verde, Go 1.27.4 |
+| `mvn test` Guard Java | 140 test JUnit, 0 failure/error (Temurin 25.0.5.8) |
+| NodeTrace Python | 82 test, 0 failure, 2 skip |
+| live sensor/Guard con Brain finto | verdi; contratto di rete e comandi osservato |
+| live sensor/endpoint/unified con Brain reale | verdi; righe telemetria 1/18/17, capabilities popolate |
+| primo avvio unified con token monouso | token consumato, agent_type=unified, telemetria presente |
+| deploy API unified | token 200, install.ps1/sh 200, job `manual_required`; only `oneline` accepted, no SSH/WinRM executor |
+| bundle agent runtime | `unified-latest.zip` scaricato dal Brain 4.3, eseguito come `agent_type=unified`, telemetria persistita e agente revocato |
+| A/B locale 2×8 s | NodeTrace 27.28 MB RSS vs Go sensor 18.43 MB; Guard Java 126.45 MB vs Go endpoint 18.77 MB |
+
+Il benchmark è in `docs/BENCHMARK.md` e i dati grezzi in
+`docs/benchmarks/4.3/agents-ab.json`. È una misura di footprint e startup su
+Brain finto, non di ingestione PostgreSQL, mTLS/Caddy o flotta. Il vantaggio
+misurato è la riduzione di RSS e artefatto; la CPU dell'endpoint Go è
+comparabile a Java e non viene dichiarata più bassa. Durante la misura è stata
+corretta una regressione reale del polling Windows (WMI/Authenticode per tutti
+i processi ogni secondo), che saturava un core.
+
+**Perimetro dichiarato:** packaging firmato MSI/deb/rpm,
+servizio nativo e rollback Java/JRE/Python su host reale non sono parte della
+4.3.0; sono lavoro successivo. Lo smoke contro il Brain reale è reale, ma non è
+un test di flotta né di servizio installato. La 4.3.0 è una release per pilot
+controllati, non una sostituzione production-grade di un servizio endpoint
+firmato; il bundle non contiene più Guard/NodeTrace, che restano solo nel
+sorgente per i 4.2.1 già installati.
+
+**Evidenza di release:** clean install isolata da sorgente senza artefatti
+(`aegis-clean43`) con volumi nuovi, bootstrap admin, enrollment reale,
+heartbeat, evento agente, alert Sigma `T1110.001`, frontend e Link health;
+`api_smoke.py` **21/21 ALL PASS**. La clean install del gate 6 è stata eseguita
+sull'archivio `31962cd`; il bundle finale aggiunge il fix del download e i
+default `unified`, è verificato con smoke 24/24 e con il download/run live
+dell'agente Go contro un Brain 4.3. Il bundle ha 24 file: quattro archivi
+`unified-*` e i tre helper kernel dentro gli archivi;
+l'upgrade del database 4.2.1 ha preservato 68 agenti e 321 alert, con smoke
+21/21. Il 50k Link, il restart del consumer comandi e i gate restano registrati
+in `docs/RELEASE_GATE_4.3.md`. La CI hosted al tag è l'unico passo ancora
+esterno al repository locale.
+
+### Changed
+
+- Unified agent modes: the single `agent_type=unified` agent now accepts
+  `full`, `sensor` and `endpoint` capabilities through the token, installer,
+  environment or `--mode`. A sensor-only unified agent does not start process
+  monitoring, FIM, response actions or ETW; an endpoint-only agent does not
+  start host telemetry or network scan. The agent record, binary, identity and
+  enrollment remain one.
+- Deployment Manager no longer offers or implies SSH/WinRM execution. The only
+  rollout path is a short-lived token plus a one-liner copied to the target;
+  the target must reach Aegis to download, enroll and heartbeat.
+- Kraken sensors are internal by default. The honeypot is exposed only with the
+  explicit `docker-compose.kraken-honeypot.yml` overlay, loopback-bound unless
+  the operator sets `KRAKEN_HONEYPOT_BIND_IP=0.0.0.0`. SSH/HTTP are the default
+  protocols; FTP/Telnet/SMB/RDP are opt-in.
+- Docker Compose applies CPU/RAM/PID limits, `no-new-privileges` and
+  capability drops to the application services; the sandbox broker now runs as
+  a non-root user with the Docker socket group added explicitly.
+- CI now runs on `dev`, `main`, `feat/**` and pull requests as well as tags. The
+  release/publish job remains tag-only; a branch run is not Gate 5.
+- Toolchain Go portata a **1.27.4** (ultima stabile, inclusi i fix di sicurezza
+  del 2 novembre 2026) in `aegis-agent/go.mod`, nel piano 4.3 e nella CI, che ora
+  esegue `go test`, `go vet` e build del binario su Ubuntu e Windows. La macchina
+  di sviluppo è stata portata da Go 1.26.5 a 1.27.4 tramite il pacchetto ufficiale;
+  `go version` e `go env GOROOT` ora puntano alla nuova installazione.
+
+### Added
+
+- Test di integrazione live del sensor Go con Brain finto: enrollment, CSR
+firmata da una CA di test, salvataggio identità, heartbeat/telemetria,
+comandi batch, ack, scan Discovery e verifica dell'header `X-Client-Cert-Hash`.
+- Live reale dei profili `sensor`, `endpoint` e `unified` contro il Brain
+  locale: `scripts/live_agent_profiles.py`; primo avvio unified con token
+  monouso e install.ps1/install.sh generati e verificati sintatticamente.
+- Base del profilo `endpoint` Guard: `secret.json`/`agent_id`, enrollment
+  `aegis-guard`, report legacy e layer di validazione comandi; test di
+  integrazione con Brain finto e test sulle funzioni pure.
+
+### Fixed
+
+- CI now derives the Docker socket GID for the non-root Kraken broker and
+  validates Vault addresses before `urlopen`; the Vault SSL context still uses
+  the verified constructor with an explicit lab-only opt-out. Live telemetry
+  tests skip on Darwin, where the collector is unsupported, while the macOS
+  build/vet gate remains. Branch run 44916543187 is green for all non-release
+  jobs; the release job remains tag-only.
+- Kraken SSH now advertises an Ubuntu OpenSSH banner instead of the AsyncSSH
+  default. FTP passive mode advertises a reachable host and a published passive
+  range, and uploads complete on the data channel instead of a fixed sleep.
+- The Kraken README no longer claims four sensors, a Docker socket in the app
+  or 65+ tests; it documents six sensors, the broker-only socket and 154 tests.
+- HA documentation no longer reports AP-122/AP-123 as open; both are PASS in
+  the 4.3 release gate. Threat-model migrations now cite `0001..0025`.
+- Il download degli artefatti (`/deploy/artifacts` e
+  `/deploy/bootstrap-artifacts`) restituiva un `200` con `Content-Length`
+  corretto ma zero byte: `FileResponse` attraverso il `BaseHTTPMiddleware`
+  di Starlette 1.10.0 perdeva il body, quindi nessun one-liner poteva
+  scaricare l'agente. La risposta ora legge l'artefatto in memoria (file da
+  pochi MB) e un test di regressione copre il caso.
+
+## [4.2.1] - 2026-11-18
+
+The `v4.2.0` tag was created but produced no GitHub Release: its release
+workflow stopped in the NodeTrace Windows package because
+`nodetrace-agent.spec` was ignored and absent from the tag. `v4.2.1` tracks the
+spec, runs that package job on pull requests, and is the first complete 4.2
+release.
+
+### Kraken expansion and unified SOC
+
+- Kraken outbox batches 500 deliveries, retries only rejected events, isolates
+  poison events and exposes lag metrics; lab context remains `shadow` end to
+  end. Brain migration `0021` and the replay script cover deception sessions.
+- Six deception Sigma rules plus `multi_sensor_same_ip` correlation, and a
+  unified timeline over SIEM, deception, alert, incident and telemetry sources.
+- Kraken operations UI for campaigns, sensors/fleet, topologies and Lab runs;
+  Brain remains read-only. SMB and RDP sensors capture NetNTLMv2/decoy access
+  and negotiation banners without relaying credentials.
+- ATT&CK coverage and governed suppressions: TTL is mandatory, capped at 90
+  days, and hidden-alert counts remain visible.
+- Real mTLS fingerprint enforcement rejects the legacy full-certificate header;
+  Guard and NodeTrace send only `X-Client-Cert-Hash`. Brain runs two workers
+  with Redis-backed rate limiting.
+- File intelligence is an opt-in asynchronous static-analysis job: bounded
+  upload, ZIP manifest, IOC extraction and a Sigma candidate with low
+  confidence and explicit provenance. The sample stays in Kraken's storage and
+  deletion is verified; no detonation or network execution is implemented.
+
+### Performance and operational hardening
+
+- Telemetry ingestion reuses the authenticated Agent, caches the Argon2 secret
+  check for 60 seconds, throttles `last_seen` writes to 30 seconds, and fetches
+  context/custom rules only when a rule actually fires. Device tokens also carry
+  a SHA-256 proof bound to the current Argon2 hash: a restarted worker verifies
+  them without the expensive KDF, while re-enrollment/revocation invalidate the
+  proof automatically and the DB revocation check still runs on every request.
+- The durable, unique-event path now meets the 200 rps gate on the default
+  **2-worker** stack: **289.35 rps through Caddy/TLS** (1.500/1.500 `200`,
+  p50 99.1 ms, p95 159.9 ms, p99 188.8 ms) and **247.76 rps direct**
+  (3.000/3.000 `200`, 3.008 DB rows, p95 194.4 ms). A 20-agent cold proof
+  burst reaches **341.16 rps** (p95 52.3 ms); 100 warm events reach
+  **301.16 rps** (p95 91.5 ms). Legacy agents take 79.4 ms on first contact
+  and 38.7 ms after the proof backfill, with no read timeouts. The earlier
+  **96–111.58 rps** figure came from the non-default 8-worker setup and is
+  superseded; `synchronous_commit` remains `on`.
+- The Kraken sensors container now exposes a localhost-only health listener on
+  port 8000. The Docker healthcheck no longer probes a honeypot port, so it
+  cannot create fake attack events; the container reports `healthy`.
+
+### Release engineering
+
+- The NodeTrace Windows package is built and uploaded on pull requests as well
+  as tags, so the release-only path is tested before an immutable tag. The
+  PyInstaller spec is tracked in the repository instead of being ignored.
+- The release bundle uses `env.example`, the portable name GitHub does not
+  rewrite, and the installers accept either `env.example` or `.env.example`.
+- The tag workflow builds the Windows NodeTrace package and includes it in the
+  bundle; no manual upload is required.
+- The tag workflow generates one CycloneDX SBOM per release image, records them
+  in `RELEASE_MANIFEST.json`, and runs `release-smoke.py` before publishing.
+- The tag workflow produces a GitHub build-provenance attestation for the
+  release assets. `docs/RELEASE_SIGNING.md` records the 4.2 decision:
+  checksummed, not signed; provenance is verifiable but does not authenticate
+  the publisher.
+- The `e2e` CI job starts an ephemeral Compose stack, seeds a deterministic
+  Kraken event and runs `api_smoke.py` plus Playwright pages/session/Kraken.
+- Five operational runbooks cover compromised agents, Brain, Kraken, malware
+  escape and backup/restore.
+
 ## [4.1.0] - 2026-11-16
 
 The complete Kraken vertical: transactional outbox and retry, delegated SSO,
@@ -22,7 +236,7 @@ mounted UI, read-only Aegis view and the isolated compose profile.
 - Gate 0 licensing groundwork: `LICENSE` (AGPL-3.0-only), `NOTICE`,
   `TRADEMARK.md`, `SECURITY.md`, `CONTRIBUTING.md`, and the
   `THIRD_PARTY_NOTICES.md` placeholder.
-- `docs/PLAN_AEGIS_KRAKEN_HANDOFF.md` v2.7: the 4.1 scope is the complete
+- `docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md` v2.7: the 4.1 scope is the complete
   Kraken vertical (compose, signed ingest with outbox/retry, UI, read-only
   Aegis view, end-to-end smoke test); new sensors, campaigns, Lab and unified
   timeline move to 4.2+.
@@ -30,7 +244,7 @@ mounted UI, read-only Aegis view and the isolated compose profile.
   the release-integrity gate: no user-visible capability is called integrated
   until API, UI, docs and tests ship together. The gate now names the complete
   Kraken vertical as a 4.1 requirement.
-- `docs/ROADMAP.md`: explicit OSINT/SentinelX and deploy/fleet
+- `docs/archive/ROADMAP.md`: explicit OSINT/SentinelX and deploy/fleet
   workstreams, separate from the release hardening checklist.
 - `docs/youtrack_tickets.csv` and `scripts/youtrack_import.py`: import path for
   the findings and roadmap work packages.
@@ -199,7 +413,7 @@ Release notes report 166 tests passing.
 - Asynchronous Redis-backed ingestion, PostgreSQL persistence, Docker Compose
   deployment, and Windows/Linux installation scripts.
 
-[Unreleased]: https://github.com/Terminalkid09/aegis-ecosystem/compare/v4.1.0...HEAD
+[4.3.0]: https://github.com/Terminalkid09/aegis-ecosystem/compare/v4.2.1...HEAD
 [4.1.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v4.1.0
 [4.0.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v4.0.0
 [3.0.0]: https://github.com/Terminalkid09/aegis-ecosystem/releases/tag/v3.0.0

@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     # Transactional outbox worker. The defaults drain quickly without hammering
     # Aegis; max attempts prevents a poison event from looping forever.
     AEGIS_OUTBOX_POLL_INTERVAL_S: float = 2.0
-    AEGIS_OUTBOX_BATCH_SIZE: int = 50
+    AEGIS_OUTBOX_BATCH_SIZE: int = 500
     AEGIS_OUTBOX_MAX_ATTEMPTS: int = 8
     AEGIS_OUTBOX_BACKOFF_BASE_S: float = 2.0
     AEGIS_OUTBOX_BACKOFF_MAX_S: float = 300.0
@@ -81,6 +81,42 @@ class Settings(BaseSettings):
     HTTP_SENSOR_PORT: int = 8080
     FTP_SENSOR_PORT: int = 2121
     TELNET_SENSOR_PORT: int = 2323
+    SMB_SENSOR_PORT: int = 445
+    RDP_SENSOR_PORT: int = 3389
+    # Only these deception listeners start. The base lab exposes SSH and HTTP;
+    # FTP/Telnet/SMB/RDP are opt-in because they add surface and are not all
+    # full protocol implementations.
+    SENSOR_PROTOCOLS: str = "ssh,http"
+    # FTP passive data channel. The range must also be published by the
+    # explicit honeypot overlay; the advertised host is the address the client
+    # can reach (not the container's 172.x address).
+    FTP_PASV_MIN_PORT: int = 30000
+    FTP_PASV_MAX_PORT: int = 30009
+    FTP_PASV_ADVERTISE_HOST: str = ""
+    # Key used to sign the desired configuration returned to a sensor node.
+    # Empty falls back to SECRET_KEY; set a dedicated value in production.
+    SENSOR_CONFIG_SIGNING_KEY: str = ""
+
+    # File intelligence (4.2.x). Static analysis is always local. Object
+    # storage is local by default; `s3` uses any S3-compatible endpoint
+    # (AWS, MinIO, Ceph). Detonation is opt-in and never runs in this process.
+    FILE_ANALYSIS_ENABLED: bool = True
+    FILE_ANALYSIS_MAX_BYTES: int = 64 * 1024 * 1024
+    FILE_ANALYSIS_TIMEOUT_S: int = 30
+    FILE_ANALYSIS_STORAGE_DIR: str = ""
+    FILE_ANALYSIS_POLL_INTERVAL_S: float = 1.0
+    OBJECT_STORE_BACKEND: str = "local"
+    OBJECT_STORE_S3_BUCKET: str = ""
+    OBJECT_STORE_S3_PREFIX: str = "kraken-samples"
+    OBJECT_STORE_S3_ENDPOINT: str = ""
+    OBJECT_STORE_S3_ACCESS_KEY: str = ""
+    OBJECT_STORE_S3_SECRET_KEY: str = ""
+    OBJECT_STORE_S3_REGION: str = ""
+    OBJECT_STORE_S3_USE_SSL: bool = True
+    DETONATION_ENABLED: bool = False
+    DETONATION_URL: str = ""
+    DETONATION_TOKEN: str = ""
+    DETONATION_TIMEOUT_S: float = 120.0
 
     # Rate limiting
     RATE_LIMIT_LOGIN: str = "10/minute"
@@ -106,6 +142,15 @@ class Settings(BaseSettings):
 
     def validate_secrets(self):
         """Auto-generate secrets only in DEBUG; refuse placeholders and weak keys."""
+        if (self.OBJECT_STORE_BACKEND or "local").lower() not in ("local", "s3"):
+            print("❌ OBJECT_STORE_BACKEND must be local or s3.")
+            sys.exit(1)
+        if (self.OBJECT_STORE_BACKEND or "local").lower() == "s3" and not self.OBJECT_STORE_S3_BUCKET:
+            print("❌ OBJECT_STORE_S3_BUCKET is required when OBJECT_STORE_BACKEND=s3.")
+            sys.exit(1)
+        if self.DETONATION_ENABLED and not self.DETONATION_URL:
+            print("❌ DETONATION_URL is required when DETONATION_ENABLED=true.")
+            sys.exit(1)
         markers = ("changeme", "change-me", "replace-with", "please_change", "example", "dummy")
         for name, value in (("SECRET_KEY", self.SECRET_KEY), ("INTERNAL_API_KEY", self.INTERNAL_API_KEY)):
             if value and any(marker in value.lower() for marker in markers):

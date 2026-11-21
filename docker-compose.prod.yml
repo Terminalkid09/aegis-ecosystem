@@ -32,8 +32,6 @@ services:
 
   aegis-frontend:
     logging: *prod-logging
-    environment:
-      REACT_APP_API_URL: /api/v1
 
   aegis-caddy:
     logging: *prod-logging

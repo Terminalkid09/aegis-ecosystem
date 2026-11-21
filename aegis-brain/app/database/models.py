@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
-from sqlalchemy import String, Integer, Boolean, DateTime, Text, ForeignKey, Float, BigInteger, JSON
+from sqlalchemy import String, Integer, Boolean, DateTime, Text, ForeignKey, Float, BigInteger, JSON, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.database.base import Base
@@ -11,12 +11,21 @@ def utc_now():
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("oidc_issuer", "oidc_subject", name="uq_users_oidc_identity"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(500), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="user")
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Incrementato al reset password: ogni JWT con un "ver" precedente muore.
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Identità OIDC: il subject è stabile anche se l'email cambia. Le colonne
+    # restano NULL per gli account locali (break-glass e CLI).
+    oidc_subject: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    oidc_issuer: Mapped[Optional[str]] = mapped_column(String(512), nullable=True, index=True)
     encrypted_dek: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -330,14 +339,50 @@ class YaraRule(Base):
     Perché in DB e non su filesystem: la regola deve viaggiare sul canale
     comandi (brain -> agente) e vuole ciclo di vita (attiva/disattiva,
     audit, chi l'ha creata) — il DB lo dà gratis.
+
+    Le regole arrivate da un feed firmato restano riconoscibili (`managed`,
+    `source`, `source_version`): un aggiornamento automatico non deve mai
+    sovrascrivere una regola scritta a mano dal SOC.
     """
     __tablename__ = "yara_rules"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), index=True)
     content: Mapped[str] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(default=True)
+    severity: Mapped[str] = mapped_column(String(20), default="high", nullable=False, server_default="high")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tags: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    mitre_technique_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    source: Mapped[str] = mapped_column(String(255), default="manual", nullable=False, server_default="manual", index=True)
+    source_version: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    managed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class YaraFeedState(Base):
+    """Ultimo esito di ogni feed YARA configurato.
+
+    Lo stato è separato dalle regole: un feed irraggiungibile o con firma
+    invalida deve essere visibile in UI senza disattivare le firme già
+    importate. `url` è la chiave stabile; il contenuto delle regole resta in
+    `yara_rules`.
+    """
+    __tablename__ = "yara_feed_state"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    url: Mapped[str] = mapped_column(String(2048), unique=True, nullable=False, index=True)
+    feed_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    key_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    etag: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    last_modified: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    bundle_version: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    rules_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
@@ -566,6 +611,33 @@ class SiemEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class DeceptionSession(Base):
+    """Stato aggregato di una sessione deception ricevuta da Kraken.
+
+    Il Brain non legge il DB Kraken: questa tabella è la sua copia dei metadati
+    necessari alla timeline e alla correlazione multi-sensore. Non contiene
+    credenziali, sample o comandi eseguibili.
+    """
+    __tablename__ = "deception_sessions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    sensor: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    context: Mapped[str] = mapped_column(String(16), default="sensor", nullable=False, index=True)
+    src_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    event_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    run_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    scenario_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    topology_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    incident_id: Mapped[Optional[int]] = mapped_column(ForeignKey("incidents.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class LogSource(Base):
     """Sorgente di log configurata: nome, parser e statistiche di ingestione."""
     __tablename__ = "log_sources"
@@ -580,3 +652,22 @@ class LogSource(Base):
     last_event_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Suppression(Base):
+    """Governed rule suppression: mandatory TTL, reason and audit fields.
+
+    A suppression is deliberately narrower than disabling a rule: the rule
+    keeps running, the count of hidden alerts is visible, and the row expires.
+    """
+    __tablename__ = "suppressions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rule_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    scope: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    suppressed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_suppressed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

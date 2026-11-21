@@ -18,9 +18,13 @@ export type Page =
   | 'syslog'
   | 'logsources'
   | 'search'
+  | 'timeline'
+  | 'coverage'
+  | 'suppressions'
   | 'kraken'
   | 'yara'
   | 'settings'
+  | 'users'
 
 interface User {
   id: number

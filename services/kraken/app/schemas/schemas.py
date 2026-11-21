@@ -117,7 +117,7 @@ class DashboardStats(BaseModel):
 
 # ── Sensor telemetry ingest ───────────────────────────────────────────────────
 
-_ALLOWED_SENSORS = {"ssh", "http", "ftp", "telnet", "smtp", "rdp"}
+_ALLOWED_SENSORS = {"ssh", "http", "ftp", "telnet", "smtp", "rdp", "smb"}
 
 
 class SensorEventIn(BaseModel):
@@ -128,7 +128,17 @@ class SensorEventIn(BaseModel):
     session_id: str = Field(..., min_length=8, max_length=64)
     username: Optional[str] = Field(None, max_length=128)
     password: Optional[str] = Field(None, max_length=256)
+    # NetNTLMv2 response captured by the SMB sensor. It is a challenge
+    # response, not a reusable plaintext credential.
+    ntlm_hash: Optional[str] = Field(None, max_length=1024)
     commands: Optional[List[str]] = Field(default_factory=list)
+    # ``sensor`` is a real honeypot; ``lab`` is a shadow scenario. The Brain
+    # must keep them distinguishable: a lab event is evidence, not an attack
+    # against production.
+    context: str = Field("sensor", pattern=r"^(sensor|lab)$")
+    run_id: Optional[str] = Field(None, max_length=64)
+    scenario_id: Optional[str] = Field(None, max_length=64)
+    topology_id: Optional[str] = Field(None, max_length=64)
     # Cap applied in the validator (200 commands) instead of rejecting a
     # slightly oversized sensor batch with a 422.
 

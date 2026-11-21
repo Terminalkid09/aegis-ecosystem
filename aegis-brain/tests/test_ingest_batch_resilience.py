@@ -170,7 +170,7 @@ async def test_error_path_survives_a_failed_write(
     real = telemetry_service.process_telemetry
     calls = {"n": 0}
 
-    async def flaky(db, agent_id, data):
+    async def flaky(db, agent_id, data, agent=None):
         calls["n"] += 1
         if calls["n"] == 1:
             # `severity` è NOT NULL: il flush fallisce e la sessione resta in
@@ -179,7 +179,7 @@ async def test_error_path_survives_a_failed_write(
                          event_type="probe", description="probe"))
             await db.commit()
             return
-        return await real(db, agent_id, data)
+        return await real(db, agent_id, data, agent=agent)
 
     monkeypatch.setattr(telemetry_service, "process_telemetry", flaky)
 

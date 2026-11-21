@@ -45,4 +45,6 @@ locust==2.47.0
 # yara-python 4.5.4 non ha ancora una wheel CPython 3.15 su PyPI.
 # Il motore YARA è già fail-soft (YARA_AVAILABLE=False + motivo esplicito),
 # quindi su 3.15 la funzione resta dichiarata come non disponibile.
+# I test del motore girano nel job CI `yara_engine` su Python 3.12, dove la
+# wheel esiste: lo skip su 3.15 è dichiarato, non nascosto.
 yara-python==4.5.4; python_version < "3.15"

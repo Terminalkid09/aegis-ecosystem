@@ -17,9 +17,14 @@ export default defineConfig({
     // The compose smoke test reaches Caddy at https://aegis.local without
     // changing the host's hosts file; both knobs are opt-in.
     ignoreHTTPSErrors: process.env.E2E_IGNORE_HTTPS === '1',
-    launchOptions: process.env.E2E_RESOLVE_AEGIS === '1'
-      ? { args: ['--host-resolver-rules=MAP aegis.local 127.0.0.1'] }
-      : undefined,
+    launchOptions: (() => {
+      // Compose smoke uses aegis.local; the ephemeral Keycloak test uses
+      // host.docker.internal, which the browser resolves to the Windows host.
+      const rules: string[] = [];
+      if (process.env.E2E_RESOLVE_AEGIS === '1') rules.push('MAP aegis.local 127.0.0.1');
+      if (process.env.E2E_RESOLVE_KEYCLOAK === '1') rules.push('MAP host.docker.internal 127.0.0.1');
+      return rules.length ? { args: [`--host-resolver-rules=${rules.join(',')}`] } : undefined;
+    })(),
   },
   webServer: process.env.E2E_NO_SERVER
     ? undefined

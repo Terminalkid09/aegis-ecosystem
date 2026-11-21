@@ -2,16 +2,21 @@ package com.aegis.link.controllers;
 
 import com.aegis.link.dto.EventRequest;
 import com.aegis.link.dto.EventResponse;
+import com.aegis.link.service.CommandDeliveryService;
+import com.aegis.link.service.EventSpoolService;
 import com.aegis.link.service.RedisService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 /*
 Controller REST che espone gli endpoint di ingestion per aegis-guard.
@@ -43,9 +48,9 @@ public class IngestionController {
     private static final Logger log = LoggerFactory.getLogger(IngestionController.class);
 
     private final RedisService redisService;
+    private final EventSpoolService spoolService;
+    private final CommandDeliveryService commandDeliveryService;
 
-    /** Tetto anti-OOM: oltre, 429 con retry (audit). */
-    static final long MAX_QUEUE_SIZE = 50000;
 
     /*
     Riceve un evento da aegis-guard e lo accoda su Redis.
@@ -85,21 +90,30 @@ public class IngestionController {
         }
 
         // Audit: tetto coda anti-OOM Redis (consumer brain fermo -> niente
-        // accumulo infinito). 429 con retry, mai perdita silenziosa.
-        if (redisService.getQueueSize() >= MAX_QUEUE_SIZE) {
-            log.warn("Queue full ({}), rejecting event from agent={}", MAX_QUEUE_SIZE, agentIdHeader);
-            return ResponseEntity
-                    .status(HttpStatus.TOO_MANY_REQUESTS)
-                    .body(EventResponse.error("Ingestion queue full, retry later"));
+        // accumulo infinito). Check e push sono atomici; oltre il tetto
+        // l'evento va nello spool durevole: il 202 significa che Link lo ha
+        // persistito, non che Redis lo ha già.
+        try {
+            if (redisService.pushEventIfRoom(event, RedisService.MAX_QUEUE_SIZE)) {
+                return ResponseEntity.status(HttpStatus.ACCEPTED).body(EventResponse.accepted());
+            }
+        } catch (RuntimeException redisError) {
+            if (spoolService.spool(event)) {
+                return ResponseEntity.status(HttpStatus.ACCEPTED).body(EventResponse.spooled());
+            }
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(EventResponse.error("Redis unavailable and spool write failed"));
         }
 
-        redisService.pushEvent(event);
-
-        // 202 Accepted: l'evento è stato ricevuto e messo in coda,
-        // ma non ancora processato da aegis-brain
+        if (spoolService.spool(event)) {
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(EventResponse.spooled());
+        }
+        log.warn("Queue full ({}) and spool failed, rejecting agent={}",
+                RedisService.MAX_QUEUE_SIZE, agentIdHeader);
         return ResponseEntity
-                .status(HttpStatus.ACCEPTED)
-                .body(EventResponse.accepted());
+                .status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, "5")
+                .body(EventResponse.error("Ingestion queue full and spool unavailable, retry later"));
     }
 
     /*
@@ -125,7 +139,7 @@ public class IngestionController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Authenticated principal does not match agent");
         }
         
-        String command = redisService.popCommand(agentId);
+        String command = commandDeliveryService.claim(agentId);
         
         if (command == null) {
             return ResponseEntity.noContent().build();
@@ -134,6 +148,34 @@ public class IngestionController {
         // Audit: niente contenuto comandi nei log info (solo metadati).
         log.debug("Command dispatched to agent={}", agentId);
         return ResponseEntity.ok(command);
+    }
+
+    /**
+     * Ack del comando legacy. Accetta sia /api/v1/commands/ack sia il path
+     * usato dagli agenti NodeTrace quando il loro heartbeat punta a Link:
+     * /api/v1/telemetry/commands/ack. L'ack e' idempotente.
+     */
+    @PostMapping({"/commands/ack", "/telemetry/commands/ack"})
+    public ResponseEntity<Map<String, Object>> ackCommand(
+            @RequestHeader("X-Agent-Id") String agentId,
+            @RequestBody Map<String, Object> body) {
+        if (!isAuthorizedForAgent(agentId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("status", "error", "message", "Authenticated principal does not match agent"));
+        }
+        Object rawId = body == null ? null : body.get("delivery_id");
+        if (rawId == null) rawId = body == null ? null : body.get("deliveryId");
+        String deliveryId = rawId == null ? "" : rawId.toString();
+        if (deliveryId.isBlank()) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("status", "error", "message", "delivery_id is required"));
+        }
+        boolean removed = commandDeliveryService.ack(agentId, deliveryId);
+        log.debug("Command ack agent={} delivery={} new={}", agentId, deliveryId, removed);
+        return ResponseEntity.ok(Map.of(
+                "status", "acked",
+                "delivery_id", deliveryId,
+                "duplicate", !removed));
     }
 
     private boolean isAuthorizedForAgent(String agentId) {

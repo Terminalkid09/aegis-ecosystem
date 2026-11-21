@@ -31,7 +31,7 @@ from app.rules.sigma import get_engine as get_sigma_engine
 from app.services import siem_store
 from app.services.correlation import get_correlation_engine
 from app.services.siem_pipeline import ingest_payload
-from app.database.models import Incident, IncidentAlert
+from app.database.models import DeceptionSession, Incident, IncidentAlert
 from app.ingest.base import parse_timestamp
 
 
@@ -207,6 +207,67 @@ def _kraken_allowed(auth: Dict[str, Any]) -> bool:
     return "*" in scopes or "kraken:write" in scopes
 
 
+async def _upsert_deception_sessions(
+    db: AsyncSession,
+    events: List[Dict[str, Any]],
+    incident_id: Optional[int] = None,
+) -> int:
+    """Aggiorna la copia Aegis delle sessioni deception.
+
+    Una sessione può arrivare in più richieste (comandi successivi, retry del
+    sensore). L'upsert è idempotente per `session_id`: non crea righe duplicate
+    e conserva il primo `first_seen`.
+    """
+    touched = 0
+    for row in events:
+        if not isinstance(row, dict):
+            continue
+        raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+        network = row.get("network") if isinstance(row.get("network"), dict) else {}
+        user = row.get("user") if isinstance(row.get("user"), dict) else {}
+        session_id = str(raw.get("session_id") or row.get("event_id") or "")[:64]
+        if not session_id:
+            continue
+        occurred = parse_timestamp(row.get("occurred_at") or row.get("time"))
+        context = str(raw.get("context") or "sensor").lower()
+        if context not in ("sensor", "lab"):
+            context = "sensor"
+        existing = (await db.execute(
+            select(DeceptionSession).where(DeceptionSession.session_id == session_id)
+        )).scalars().first()
+        if existing is None:
+            db.add(DeceptionSession(
+                session_id=session_id,
+                sensor=str(raw.get("sensor") or row.get("source") or "kraken")[:32],
+                context=context,
+                src_ip=network.get("src_ip") or row.get("ip"),
+                username=str(user.get("name"))[:255] if user.get("name") else None,
+                first_seen=occurred,
+                last_seen=occurred,
+                event_count=1,
+                run_id=str(raw.get("run_id"))[:64] if raw.get("run_id") else None,
+                scenario_id=str(raw.get("scenario_id"))[:64] if raw.get("scenario_id") else None,
+                topology_id=str(raw.get("topology_id"))[:64] if raw.get("topology_id") else None,
+                incident_id=incident_id,
+                status="shadow" if context == "lab" else "active",
+            ))
+        else:
+            existing.last_seen = max(existing.last_seen, occurred)
+            existing.event_count = int(existing.event_count or 0) + 1
+            existing.sensor = str(raw.get("sensor") or existing.sensor or "kraken")[:32]
+            existing.context = context
+            existing.src_ip = network.get("src_ip") or existing.src_ip
+            if user.get("name"):
+                existing.username = str(user.get("name"))[:255]
+            if incident_id:
+                existing.incident_id = incident_id
+            if context == "lab":
+                existing.status = "shadow"
+        touched += 1
+    await db.flush()
+    return touched
+
+
 async def _ensure_kraken_incident(db: AsyncSession, events: List[Dict[str, Any]],
                                   alert_ids: List[int]) -> Optional[int]:
     """Attach the new alerts to one open incident, creating the timeline row.
@@ -315,7 +376,10 @@ async def ingest_kraken_event(
         })
 
     incident_id = await _ensure_kraken_incident(db, rows, result.get("alert_ids") or [])
-    return {"status": "ok", **result, "incident_id": incident_id}
+    sessions = await _upsert_deception_sessions(db, rows, incident_id)
+    await db.commit()
+    return {"status": "ok", **result, "incident_id": incident_id,
+            "deception_sessions": sessions}
 
 
 @router.post("/{source}")

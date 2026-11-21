@@ -26,6 +26,7 @@ _PRODUCT_SOURCES = {
     "firewall": {"firewall", "pfsense", "pfirewall", "iptables"},
     "aegis": {"json", "syslog", "windows_event", "zeek", "suricata", "web",
               "firewall", "pfsense", "pfirewall", "iptables", "nginx", "squid"},
+    "kraken": {"kraken"},
 }
 
 # `service` Windows → sottostringa attesa nel Channel dell'evento.
