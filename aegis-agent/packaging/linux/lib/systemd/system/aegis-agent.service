@@ -1,0 +1,19 @@
+[Unit]
+Description=Aegis unified endpoint and sensor agent
+Documentation=https://github.com/Terminalkid09/aegis-ecosystem
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/aegis-agent --profile unified --home /var/lib/aegis-agent
+EnvironmentFile=-/etc/aegis-agent/aegis-agent.env
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=65536
+# The agent runs as root for eBPF/auditd; filesystem access is narrowed.
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
