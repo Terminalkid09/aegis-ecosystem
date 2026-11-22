@@ -11,7 +11,7 @@ lab and corpus inputs, not fabricated results.
 ## 4.3 enterprise/Kraken addendum (2026-11-21)
 
 The user expanded the 4.3 scope: signed endpoint packages, realistic Kraken
-engines, configurable Docker limits and a roadmap for Lab/self-improvement.
+engines, configurable Docker limits and a roadmap for the Lab.
 This addendum is the working checklist; none of it changes the `NOT RELEASED`
 status until the branch PRs are green and the two branches are merged in `dev`.
 
@@ -51,18 +51,13 @@ rendered compose model; `scripts/load_limits.sh` wraps `pilot_soak.py` and
 captures `docker stats` before/after. `mem_limit`/`cpus` are Compose v2 fields,
 not Swarm `deploy.resources`; `pids_limit` is Linux-only.
 
-### Lab and self-improvement — 4.3 scope with explicit remaining work
+### Lab — 4.3 scope with explicit remaining work
 
 **Advanced Kraken lab:** simulated topologies and subnets, multi-host decoys,
 scenario/assertion engine, per-sensor port profiles, source-IP preservation on
 Linux, controlled file drops and a restore/snapshot lifecycle. These are
 required before calling Kraken a lab product; the current branch provides real
 protocol engines, not a range orchestrator.
-
-**Self-improvement:** signed model/rule updates, offline evaluation, shadow and
-canary rollout, automatic rollback, drift/FP monitoring and human approval.
-Auto-modification of detection logic and autonomous response remain explicitly
-out of scope. No self-improvement component is implemented in 4.3.
 
 **AP-126 / AP-127:** part of the 4.3 production gate. The repository now
 contains a bounded sandbox harness (read-only, no network, kill switch) and a

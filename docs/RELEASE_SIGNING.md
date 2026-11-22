@@ -45,6 +45,22 @@ must not force a particular certificate authority. A public CA, an internal CA
 distributed by GPO/Intune, or an HSM-backed key are all valid as long as the
 resulting signature verifies on the target.
 
+## Test-signed is not a release artifact
+
+`-TestSign` and the default `build-deb.sh` test mode exist for CI and local
+smoke tests. They use an ephemeral/self-signed identity and are **never** a
+release signature. Every package build writes a
+`<package>.signing.json` sidecar with `mode` set to `test`, `production` or
+`unsigned`. A release is accepted only when the sidecar says `production`, the
+Authenticode status is `Valid`, the signer is the operator certificate and an
+RFC 3161 timestamp is present (for the MSI); the deb has a detached GPG
+signature made with the production key.
+
+If the production PFX/GPG key is missing, the packaging job fails closed. Do not
+relabel a test-signed file or attach it to a release. `scripts/release-smoke.py`
+rejects a release directory containing a `test`/`unsigned` sidecar, an MSI
+whose status is not `Valid`, or a production MSI without a timestamp.
+
 ## Provenance
 
 The tag workflow also produces a GitHub build-provenance attestation. It binds

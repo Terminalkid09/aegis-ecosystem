@@ -38,6 +38,33 @@ def _archive_members(path: Path) -> dict[str, tarfile.TarInfo]:
         return {Path(m.name).name: m for m in archive.getmembers() if m.isfile()}
 
 
+def check_signing_sidecars(root: Path) -> list[str]:
+    """Reject test/unsigned packages copied into a release directory.
+
+    The tag bundle normally has no endpoint packages, but an operator may attach
+    them. Presence is optional; a present package must carry a production
+    sidecar, and a production MSI must have a valid timestamped signature.
+    """
+    problems: list[str] = []
+    for path in sorted(root.glob("*.signing.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            problems.append(f"cannot read signing sidecar {path.name}: {exc}")
+            continue
+        package = str(data.get("package") or path.name.removesuffix(".signing.json"))
+        mode = str(data.get("mode") or "")
+        if mode != "production":
+            problems.append(f"{package}: signing mode is {mode!r}, expected production")
+            continue
+        if package.lower().endswith(".msi"):
+            if str(data.get("status") or "") != "Valid":
+                problems.append(f"{package}: Authenticode status is not Valid")
+            if not data.get("timestamp"):
+                problems.append(f"{package}: RFC 3161 timestamp is missing")
+    return problems
+
+
 def check_agent_assets(root: Path, version: str) -> list[str]:
     """Validate the complete unified artifact without running it.
 
@@ -177,6 +204,11 @@ def main() -> int:
             return 1
     if args.require_image_sboms and not manifest.get("image_sboms"):
         print("[X] per-image SBOMs missing from RELEASE_MANIFEST.json")
+        return 1
+    signing_problems = check_signing_sidecars(root)
+    if signing_problems:
+        for problem in signing_problems:
+            print(f"[X] {problem}")
         return 1
     print(f"[OK] release {manifest.get('version')} verified: {len(manifest.get('files', []))} files")
     return 0

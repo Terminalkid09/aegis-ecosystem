@@ -7,7 +7,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from scripts.soak_7d import evaluate, parse_duration, parse_lost, parse_mem_bytes
+from scripts.soak_7d import (
+    continuity_gaps,
+    evaluate,
+    parse_duration,
+    parse_lost,
+    parse_mem_bytes,
+)
 
 
 def test_parse_duration() -> None:
@@ -30,6 +36,19 @@ def test_parse_memory_and_lost() -> None:
         'aegis_events_lost_total{reason="consumer"} 2\n'
         "aegis_events_lost_total 3\n"
     ) == 5
+
+
+def test_soak_rejects_a_sleep_gap() -> None:
+    assert continuity_gaps([0.0, 300.0, 600.0], 300.0) == []
+    gaps = continuity_gaps([0.0, 300.0, 39600.0], 300.0)
+    assert gaps == [39300.0]
+    good = {
+        "enroll_fail": 0, "reports": 100, "accepted": 100, "heartbeat": 100,
+        "errors": 0, "lost_delta": 0, "health_failures": 0,
+        "rss_growth_mb": {"aegis-brain": 4.0},
+        "continuity_gaps_s": gaps,
+    }
+    assert any("not continuous" in item for item in evaluate(good, 128))
 
 
 def test_evaluate_is_fail_closed() -> None:

@@ -78,9 +78,10 @@ fi
 %post
 install -d -m 0700 /var/lib/aegis-agent
 install -d -m 0750 /etc/aegis-agent
-if command -v systemctl >/dev/null 2>&1; then
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
-    systemctl enable aegis-agent.service || true
+    systemctl enable aegis-agent.service
+    systemctl is-enabled --quiet aegis-agent.service
 fi
 
 %preun

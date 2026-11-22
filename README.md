@@ -140,6 +140,7 @@ Latest local verification: **2026-11-21**.
 | macOS Darwin build (amd64/arm64) | **PASS locally**; `macos-latest` job added to CI; no live hardware |
 | File secrets + real Vault KV v2 | **PASS**, including precedence and fail-closed cases |
 | Clean install from Git clone, core + Kraken | **PASS**; API smoke **21/21**; Kraken healthy |
+| Persistence contracts | `scripts/persistence_check.py` **PASS** (static + container policies); the live Windows service was not installed because this shell is not elevated; a real reboot remains a gate |
 | Unified capability modes | `full`, `sensor`, `endpoint` via token/installer/`--mode`; one `agent_type=unified` record in every mode | **PASS locally** |
 | Docker hardening | Compose valid, CPU/RAM/PID limits, `no-new-privileges`, non-root broker, sensors internal by default | **PASS locally** |
 | Branch/PR CI | CI now runs on `dev`, `main`, `feat/**`, pull requests and tags; release job remains tag-only | **PASS — run 44916543187 (non-release jobs); tag job not run** |
@@ -157,7 +158,7 @@ Not verified locally: hosted CI/tag workflow, bare-metal Linux, Windows Server l
 | [Operations](docs/OPERATIONS.md) | Install, upgrade, backup/restore and PKI. |
 | [Pilot runbook](docs/PILOT_RUNBOOK.md) | Pilot deployment and acceptance. |
 | [Release gate](docs/RELEASE_GATE_4.3.md) | What is green, what remains, and allowed claims. |
-| [Production validation](docs/PRODUCTION_VALIDATION.md) | Soak, DR, HA, AP-126/127 and governance harnesses, with external inputs and limits. |
+| [Production validation](docs/PRODUCTION_VALIDATION.md) | Soak, DR, HA and AP-126/127 harnesses, with external inputs and limits. |
 | [Persistence](docs/PERSISTENCE.md) | What restarts after a reboot, what does not, and the Docker daemon prerequisite. |
 | [Threat model](docs/THREAT_MODEL.md) | Assets, trust boundaries and mitigations. |
 | [Benchmarks](docs/BENCHMARK.md) | Load methodology and measured numbers. |

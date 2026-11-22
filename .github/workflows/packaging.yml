@@ -51,6 +51,7 @@ jobs:
             dist/*.msi
             dist/*.cer
             dist/*.sha256
+            dist/*.signing.json
           if-no-files-found: error
 
   packaging_windows_install:
@@ -128,6 +129,7 @@ jobs:
             dist/*.deb
             dist/*.asc
             dist/*.sha256
+            dist/*.signing.json
           if-no-files-found: error
 
   packaging_linux_install:
@@ -273,7 +275,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: aegis-agent-msi-production
-          path: dist/*.msi
+          path: |
+            dist/*.msi
+            dist/*.signing.json
           if-no-files-found: error
 
   production_linux:
@@ -307,4 +311,5 @@ jobs:
             dist/*.deb
             dist/*.asc
             dist/*.sha256
+            dist/*.signing.json
           if-no-files-found: error

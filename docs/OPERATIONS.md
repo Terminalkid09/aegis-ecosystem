@@ -8,8 +8,7 @@ the orchestrator (see `docs/SECRETS.md`); a local `.env` is for the lab only.
 For incidents, use the dedicated runbooks in [`runbooks/`](runbooks/): compromised
 agent, compromised Brain, compromised Kraken, malware escape, backup and restore.
 They are part of the release gate, not appendices. The executable soak, DR, HA
-and AP-126/127 gates, plus the experimental self-improvement prototype, are
-documented in
+and AP-126/127 gates are documented in
 [PRODUCTION_VALIDATION.md](PRODUCTION_VALIDATION.md).
 
 ## 1. Clean install

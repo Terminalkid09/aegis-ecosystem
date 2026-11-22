@@ -1,4 +1,4 @@
-# Production validation — soak, DR, HA, AP-126/127 and governance
+# Production validation — soak, DR, HA and AP-126/127
 
 Status: **the executable harness exists; the external evidence is still an
 operator input.** This document separates what the repository can prove from
@@ -37,11 +37,15 @@ python scripts/soak_7d.py --agents 20 --duration 7d \
 ```
 
 The runner writes `soak-<tag>.jsonl` (one sample every five minutes) and
-`soak-<tag>.json`. It fails on any enrollment/HTTP error, a non-zero
-`aegis_events_lost_total` delta, a readiness failure, or more than
-`--max-rss-growth-mb` (default 128 MiB) of container growth. The random
-`soak-*` agents remain in the pilot database as labelled test data; use a
-disposable database or clean them up with the normal retention process.
+`soak-<tag>.json`. On Windows it holds `ES_SYSTEM_REQUIRED` so the workstation
+does not sleep during the run. It fails on any enrollment/HTTP error, a
+non-zero `aegis_events_lost_total` delta, a readiness failure, more than
+`--max-rss-growth-mb` (default 128 MiB) of container growth, or a wall-clock gap
+longer than two sample intervals. A laptop that suspends overnight has not
+completed a continuous soak; use `--allow-gaps` only for debugging, never for
+the release evidence. The random `soak-*` agents remain in the pilot database
+as labelled test data; use a disposable database or clean them up with the
+normal retention process.
 
 A 7-day run cannot be shortened for a production claim. A 10-minute run is a
 smoke test; it is useful in CI, but it is not the soak gate.
@@ -128,39 +132,6 @@ PYTHONPATH=aegis-brain python scripts/detection_quality_corpus.py \
 A synthetic corpus is an engine regression test only. It is not a production
 detection-quality claim.
 
-## Self-improvement — governed, not autonomous
-
-`scripts/self_improvement.py` implements the safe loop:
-
-1. evaluate a candidate rule against a corpus;
-2. enforce recall/FPR thresholds;
-3. require a named approver and change ticket;
-4. sign the promotion record with an Ed25519/RSA key;
-5. write a canary descriptor and keep a previous record for rollback.
-
-It never edits live rules or promotes a candidate that fails the gate:
-
-```bash
-python scripts/self_improvement.py evaluate candidate.json \
-  --corpus real-corpus.jsonl --min-recall 0.95 --max-fpr 0.05
-python scripts/self_improvement.py promote candidate.json \
-  --corpus real-corpus.jsonl --approved-by security-lead \
-  --approval-ticket CHG-123 --signing-key /secure/detection-signing.pem \
-  --state-dir dist/detection-state --canary
-python scripts/self_improvement.py rollback --state-dir dist/detection-state \
-  --approved-by security-lead --approval-ticket CHG-124
-```
-
-The canary file is an input to the deployment process, not an automatic live
-switch. A real canary needs the operator's fleet and an observation window.
-
-This pipeline is **experimental and is not a 4.3 release gate**. It has no
-connection to the live rule deployment API and has not been evaluated against
-the real AP-127 corpus. The low-complexity, production-relevant part is the
-offline corpus evaluation; signed promotion/canary/rollback should stay behind
-the operator's change process until that integration exists. A fully autonomous
-self-modifying detector is explicitly out of scope.
-
 ## Signing and MDM
 
 Production Authenticode, GPG and cosign identities are operator secrets and are
@@ -219,7 +190,7 @@ These are deliberate boundaries, not hidden defaults:
 
 | Gate | Executable now | Still needs operator input |
 |---|---|---|
-| 7-day soak | `scripts/soak_7d.py` | seven real days on the pilot stack |
+| 7-day soak | `scripts/soak_7d.py` with sleep guard and gap detection | seven continuous real days on the pilot stack |
 | Encrypted DB restore | `scripts/test-restore.sh` | real backup and retention policy |
 | Encrypted DB+PKI drill | `scripts/dr_drill.sh` | live-volume copy and CA inspection |
 | Same-host replica loss | `scripts/ha_failure_drill.sh` | HA overlay running |
@@ -229,6 +200,5 @@ These are deliberate boundaries, not hidden defaults:
 | Production signatures | CI jobs | certificate/GPG/cosign identity |
 | MDM/Intune/GPO | templates and local validation | real tenant and clean managed host |
 | Multi-node Kraken lab | 3-container simulation | true separate hosts and network zones |
-| Self-improvement (experimental) | evaluate/promote/rollback prototype | real AP-127 corpus, rule deployment API and approval window; not a 4.3 release gate |
 
 No row marked "still needs" is claimed as PASS by this repository.

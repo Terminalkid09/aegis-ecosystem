@@ -133,11 +133,9 @@ esterno al repository locale.
   They emit JSON evidence and fail closed on missing inputs; none is a
   substitute for the real run. `docs/PRODUCTION_VALIDATION.md` defines the
   operator inputs and the acceptance boundary.
-- AP-126 evidence gate (`scripts/ap126_evidence.py`), an **experimental**
-  detection-candidate prototype (`scripts/self_improvement.py`: corpus gate,
-  named approval, signed promotion, canary and rollback) and a three-node
-  Kraken lab simulation (`deploy/kraken-lab/`). The last one is explicitly
-  single-host, not a true multi-host or network-partition test.
+- AP-126 evidence gate (`scripts/ap126_evidence.py`) and a three-node Kraken
+  lab simulation (`deploy/kraken-lab/`). The lab is explicitly single-host,
+  not a true multi-host or network-partition test.
 - Optional Intune/GPO wrappers for the existing MSI (`deploy/mdm/`). They do not
   replace the MSI or the default one-liner: they verify the production
   signature, provision the one-shot token and provide local post-deployment
@@ -146,6 +144,13 @@ esterno al repository locale.
   contract explicit for Docker Desktop, Linux Docker Engine, the Windows MSI,
   systemd and OpenWrt. The helper only configures the current user's Docker
   Desktop startup; it does not claim pre-login server availability.
+- `scripts/persistence_check.py` verifies the checked-in reboot/crash contracts
+  without changing the host. `--live-linux`, `--live-windows` and `--containers`
+  are explicit opt-ins; a manually started agent is reported as not installed.
+- Package builds now write a `.signing.json` sidecar with `mode=test`,
+  `production` or `unsigned`. Test-signed CI artifacts cannot be mistaken for a
+  release artifact, and a production release requires a `Valid` Authenticode
+  signature with timestamp (MSI) or the operator GPG key (deb).
 - Test di integrazione live del sensor Go con Brain finto: enrollment, CSR
   firmata da una CA di test, salvataggio identità, heartbeat/telemetria,
   comandi batch, ack, scan Discovery e verifica dell'header `X-Client-Cert-Hash`.
@@ -163,10 +168,20 @@ esterno al repository locale.
   serviva l'installer one-liner con `503`, pur essendo lo stack sano.
 - Persistenza: l'MSI configura il recovery del servizio `AegisAgent` (tre
   restart a 5 s, reset dopo un giorno) oltre all'avvio automatico; l'unità
-  Linux usa `Restart=always`. I container Compose usano già
-  `restart: unless-stopped`, ma richiedono che il demone Docker sia abilitato
-  al boot. `docs/PERSISTENCE.md` separa ciò che riparte davvero da ciò che
-  dipende dall'host o dal lab.
+  Linux usa `Restart=always` e `StartLimitIntervalSec=0`; il one-liner Windows
+  verifica `AUTOMATIC` e le failure action prima di dichiarare il successo, e
+  attende la chiusura di un servizio marcato per la cancellazione. I pacchetti
+  deb/RPM e l'ipk falliscono l'installazione se non riescono ad abilitare il
+  servizio al boot. I container Compose usano `restart: unless-stopped`, ma
+  richiedono che il demone Docker sia abilitato. `docs/PERSISTENCE.md` separa
+  ciò che riparte davvero da ciò che dipende dall'host o dal lab.
+- Il soak `scripts/soak_7d.py` tiene sveglio Windows con
+  `ES_SYSTEM_REQUIRED` e fallisce se il wall-clock ha un buco superiore a due
+  intervalli di campionamento. Un portatile sospeso non produce più un falso
+  "7 giorni": il report dichiara `sleep_guard`, i gap e `require_continuous`.
+- Rimosso il prototipo sperimentale `scripts/self_improvement.py` e il suo
+  test. La 4.3 non contiene più componenti di auto-modifica delle detection;
+  AP-126/AP-127 restano gate di evidenza esterna, non auto-improvement.
 - CI now derives the Docker socket GID for the non-root Kraken broker and
   validates Vault addresses before `urlopen`; the Vault SSL context still uses
   the verified constructor with an explicit lab-only opt-out. Live telemetry

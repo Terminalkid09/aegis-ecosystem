@@ -1,6 +1,6 @@
 # Persistence and reboot behavior
 
-Status: 2026-11-21.
+Status: 2026-11-22.
 
 This page separates three different guarantees that are often confused:
 
@@ -21,6 +21,69 @@ This page separates three different guarantees that are often confused:
 | Kraken profile containers | Yes, when the Docker daemon starts | Yes, `restart: unless-stopped` | App, sensors, broker, DB and Redis. One-shot init/sandbox-image helpers are intentionally `restart: "no"`. |
 | `deploy/kraken-lab/` overlay | No | No | It is a single-host lab harness; each node is deliberately `restart: "no"`. |
 | A router that only routes packets | Not applicable | Not applicable | Aegis does not install a component on a plain router; only the OpenWrt ipk path applies. |
+
+## Privileges: one elevation, not one per boot
+
+The Windows MSI is per-machine and installs `AegisAgent` as a `LocalSystem`
+service. The one-time `msiexec`/elevated PowerShell is the only UAC prompt; the
+service manager starts it at boot with no interactive prompt and no dependency
+on the logged-in user. The generated one-liner uses the same service model.
+
+Linux deb/RPM installs as root, enables `aegis-agent.service`, and systemd
+starts it as root at boot. The Linux one-liner does the same through
+`aegis-unified.service`. OpenWrt's procd service is enabled by the package and
+runs as root. A server or router has no UAC prompt because there is no Windows
+desktop; the install is performed once by the administrator/package manager.
+
+Docker Desktop is the exception: it is a per-user desktop application. The
+`scripts/install-autostart.ps1` Run key covers a workstation after sign-in; it
+does not provide pre-login availability. Use Linux Docker Engine for an
+unattended server.
+
+## Crash simulation (not a reboot)
+
+These checks prove the service supervisor recovers from a killed process. They
+do **not** prove host boot and do not replace a reboot test. Run them only on a
+test host.
+
+Windows, elevated PowerShell:
+
+```powershell
+$p = Get-Process aegis-agent -ErrorAction Stop
+Stop-Process -Id $p.Id -Force
+Start-Sleep -Seconds 8
+Get-Service AegisAgent
+Get-Process aegis-agent
+```
+
+Linux:
+
+```bash
+systemctl kill -s KILL --kill-who=main aegis-agent
+sleep 8
+systemctl is-active aegis-agent
+systemctl show -p MainPID --value aegis-agent
+```
+
+OpenWrt:
+
+```sh
+kill -9 "$(pidof aegis-agent)"
+sleep 8
+pidof aegis-agent
+```
+
+The repository check is:
+
+```bash
+python scripts/persistence_check.py --live-linux
+python scripts/persistence_check.py --live-windows
+python scripts/persistence_check.py --containers
+```
+
+`--live-windows` reports `AegisAgent is not installed` instead of pretending a
+process is a service. That distinction matters: a manually started
+`aegis-agent.exe` does not survive a reboot.
 
 ## Docker host prerequisite
 

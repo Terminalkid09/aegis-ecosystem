@@ -168,6 +168,23 @@ if ($productionSigning) {
 
 $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $msi
 "$($hash.Hash.ToLower())  $(Split-Path -Leaf $msi)" |
-    Set-Content -LiteralPath "$msi.sha256" -Encoding ascii
+    Set-Content -LiteralPath "${msi}.sha256" -Encoding ascii
+
+# A test signature is valid only for CI/local smoke. The sidecar makes that
+# explicit even if the file is copied out of the workflow artifact.
+$mode = if ($productionSigning) { "production" } elseif ($TestSign -or $CertificateThumbprint) { "test" } else { "unsigned" }
+$finalSignature = Get-AuthenticodeSignature -FilePath $msi
+$signingInfo = [ordered]@{
+    schema = "aegis-package-signing-v1"
+    package = Split-Path -Leaf $msi
+    mode = $mode
+    status = [string]$finalSignature.Status
+    signer = if ($finalSignature.SignerCertificate) { $finalSignature.SignerCertificate.Subject } else { $null }
+    timestamp = if ($finalSignature.TimeStamperCertificate) { $finalSignature.TimeStamperCertificate.Subject } else { $null }
+    sha256 = $hash.Hash.ToLower()
+}
+$signingInfo | ConvertTo-Json -Depth 4 |
+    Set-Content -LiteralPath "${msi}.signing.json" -Encoding ascii
 Write-Host "MSI: $msi"
 Write-Host "SHA256: $($hash.Hash.ToLower())"
+Write-Host "Signing mode: $mode ($($finalSignature.Status))"

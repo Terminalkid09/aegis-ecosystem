@@ -175,7 +175,10 @@ remaining operator inputs and evidence, not missing packaging code:
   provider-agnostic Authenticode signing, production GPG mode, cosign keyless
   release signing and clean-host install/uninstall CI;
 - **External input:** the real Authenticode certificate/key and GPG key must be
-  supplied by the operator; CI uses test signing only;
+  supplied by the operator; CI uses test signing only. Test-signed MSI/deb
+  artifacts are never release artifacts; each package carries a
+  `.signing.json` sidecar and a release requires `mode=production`, a `Valid`
+  Authenticode signature with timestamp and the operator GPG key;
 - **External input:** MDM/Intune/GPO tenant validation requires the customer's
   tenant; the clean Windows runner and MSI properties are ready;
 - 7-day soak with memory/leak checks, restart and duplicate-action visibility;

@@ -84,7 +84,7 @@ EOF
 
 cat > "$STAGE/control/postinst" <<'EOF'
 #!/bin/sh
-[ -n "${IPKG_INSTROOT:-}" ] || /etc/init.d/aegis-agent enable || true
+[ -n "${IPKG_INSTROOT:-}" ] || /etc/init.d/aegis-agent enable
 exit 0
 EOF
 cat > "$STAGE/control/prerm" <<'EOF'

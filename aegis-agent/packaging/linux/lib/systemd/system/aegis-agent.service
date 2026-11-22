@@ -3,6 +3,9 @@ Description=Aegis unified endpoint and sensor agent
 Documentation=https://github.com/Terminalkid09/aegis-ecosystem
 After=network-online.target
 Wants=network-online.target
+# A crash loop must not exhaust the default start limit and leave the endpoint
+# down until an operator logs in.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

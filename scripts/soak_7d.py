@@ -73,6 +73,43 @@ def parse_mem_bytes(value: str) -> int | None:
     return int(float(number) * factor)
 
 
+def continuity_gaps(timestamps: list[float], interval: float) -> list[float]:
+    """Return wall gaps longer than two sample intervals.
+
+    A suspended laptop or a sleeping host produces a syntactically valid JSONL
+    file with a missing night. That is not a continuous seven-day soak; the
+    caller must fail the run instead of averaging over the hole.
+    """
+    threshold = max(interval * 2.0, interval + 30.0)
+    return [
+        round(current - previous, 1)
+        for previous, current in zip(timestamps, timestamps[1:])
+        if current - previous > threshold
+    ]
+
+
+def _keep_awake() -> bool:
+    """Best-effort Windows sleep guard for a local soak."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        # ES_CONTINUOUS | ES_SYSTEM_REQUIRED: keep the system awake, not the display.
+        return bool(ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001))
+    except Exception:
+        return False
+
+
+def _release_awake() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+    except Exception:
+        pass
+
+
 def parse_lost(text: str) -> int:
     """Sum every ``aegis_events_lost_total`` sample, including labelled series."""
     total = 0
@@ -149,6 +186,12 @@ def evaluate(report: dict[str, Any], max_rss_growth_mb: float | None) -> list[st
         failures.append(f"server lost delta is {report.get('lost_delta')!r}, expected 0")
     if report.get("health_failures", 0):
         failures.append(f"readiness failures: {report['health_failures']}")
+    gaps = report.get("continuity_gaps_s") or []
+    if gaps and report.get("require_continuous", True):
+        failures.append(
+            "soak was not continuous; wall-clock gap(s): "
+            + ", ".join(f"{gap:.1f}s" for gap in gaps)
+        )
     if max_rss_growth_mb is not None:
         for name, growth in report.get("rss_growth_mb", {}).items():
             if growth is not None and growth > max_rss_growth_mb:
@@ -192,6 +235,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="fail if a container grows more than this; 0 disables")
     parser.add_argument("--require-docker", action="store_true",
                         help="fail if Docker RSS sampling is unavailable")
+    parser.add_argument("--allow-gaps", action="store_true",
+                        help="do not fail when the host sleeps between samples")
     parser.add_argument("--tag", default=datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
     args = parser.parse_args(argv)
 
@@ -235,6 +280,9 @@ def main(argv: list[str] | None = None) -> int:
         for index in range(args.agents)
     ]
     started = time.monotonic()
+    started_wall = time.time()
+    sleep_guard = _keep_awake()
+    sample_wall_times = [started_wall]
     for thread in threads:
         thread.start()
 
@@ -246,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         while time.monotonic() < stop_at:
             now = time.monotonic()
+            wall_now = time.time()
+            sample_wall_times.append(wall_now)
             healthy = sample_health(args.base)
             if not healthy:
                 health_failures += 1
@@ -264,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
             _write_jsonl(samples_path, {
                 "at": datetime.now(timezone.utc).isoformat(),
                 "elapsed_s": round(now - started, 1),
+                "sleep_guard": sleep_guard,
                 "healthy": healthy,
                 "lost": lost,
                 "stats": snapshot,
@@ -276,7 +327,10 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         for thread in threads:
             thread.join(timeout=max(1.0, stop_at - time.monotonic()) + 5)
+        _release_awake()
     elapsed = time.monotonic() - started
+    wall_elapsed = time.time() - started_wall
+    gaps = continuity_gaps(sample_wall_times, args.sample_interval)
     lost_after = sample_lost(args.base)
     lost_delta = (
         lost_after - lost_before
@@ -292,11 +346,15 @@ def main(argv: list[str] | None = None) -> int:
         "schema": "aegis-soak-v1",
         "tag": args.tag,
         "base": args.base,
-        "started_at": datetime.fromtimestamp(
-            time.time() - elapsed, timezone.utc).isoformat(),
+        "started_at": datetime.fromtimestamp(started_wall, timezone.utc).isoformat(),
         "finished_at": datetime.now(timezone.utc).isoformat(),
         "requested_duration_s": duration,
-        "elapsed_s": round(elapsed, 1),
+        "elapsed_s": round(wall_elapsed, 1),
+        "monotonic_elapsed_s": round(elapsed, 1),
+        "sleep_guard": sleep_guard,
+        "require_continuous": not args.allow_gaps,
+        "continuity_gaps_s": gaps,
+        "max_gap_s": max(gaps) if gaps else 0.0,
         "agents": args.agents,
         "samples": samples,
         "samples_path": str(samples_path),
@@ -313,6 +371,8 @@ def main(argv: list[str] | None = None) -> int:
         "max_rss_growth_mb": args.max_rss_growth_mb if args.max_rss_growth_mb > 0 else None,
     }
     failures = evaluate(report, report["max_rss_growth_mb"])
+    if os.name == "nt" and not sleep_guard and not args.allow_gaps:
+        failures.append("Windows sleep guard could not be enabled; continuity is not guaranteed")
     report["failures"] = failures
     report["passed"] = not failures
     report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n",

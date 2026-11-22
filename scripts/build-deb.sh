@@ -130,5 +130,12 @@ if [ "$SKIP_SIGN" != "1" ]; then
 fi
 
 (cd "$OUT_DIR" && sha256sum "$(basename "$DEB")" > "$(basename "$DEB").sha256")
+SIGNING_MODE_RESULT="$SIGNING_MODE"
+if [ "$SKIP_SIGN" = "1" ]; then SIGNING_MODE_RESULT="unsigned"; fi
+DEB_HASH="$(sha256sum "$DEB" | awk '{print $1}')"
+cat > "$DEB.signing.json" <<EOF
+{"schema":"aegis-package-signing-v1","package":"$(basename "$DEB")","mode":"$SIGNING_MODE_RESULT","sha256":"$DEB_HASH"}
+EOF
 echo "DEB: $DEB"
 echo "SHA256: $(cut -d' ' -f1 "$DEB.sha256")"
+echo "Signing mode: $SIGNING_MODE_RESULT"
