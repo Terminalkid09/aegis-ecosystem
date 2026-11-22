@@ -379,6 +379,27 @@ def wait_ready(base: str, wait: int) -> int:
     return 0
 
 
+def bootstrap_pki() -> int:
+    """Create the CA/manifest key once, before any agent installer is served.
+
+    The one-liner needs the Ed25519 manifest public key. Without it the
+    installer fails closed with 503, which is correct but makes a fresh clone
+    look broken. This is idempotent: an existing ca.crt is left untouched and
+    the CA private key is never read or printed.
+    """
+    present = run(["docker", "compose", "exec", "-T", "aegis-brain",
+                   "test", "-f", "/app/pki/ca.crt"], timeout=30)
+    if present.returncode == 0:
+        return 0
+    log("PKI bootstrap (CA + manifest key)...")
+    r = run(["docker", "compose", "exec", "-T", "aegis-brain",
+             "python", "-m", "app.services.pki", "--dir", "/app/pki"], timeout=120)
+    if r.returncode != 0:
+        log(f"PKI bootstrap fallito:\n{(r.stderr or r.stdout or '')[-800:]}", "!")
+        return 1
+    return 0
+
+
 def start_agents() -> int:
     sys.path.insert(0, SCRIPTS)
     import pilot
@@ -580,6 +601,8 @@ def cmd_update(args) -> int:
         return 1
     if wait_ready("http://127.0.0.1:8000", args.wait) != 0:
         return 1
+    if bootstrap_pki() != 0:
+        return 1
     log("aggiornamento completato: dati preservati (volume DB intatto, "
         "migrazioni applicate all'avvio).")
 
@@ -629,6 +652,8 @@ def main() -> int:
     if compose_up("ollama" if ai_profile_requested() else "light") != 0:
         return 1
     if wait_ready("http://127.0.0.1:8000", 180) != 0:
+        return 1
+    if bootstrap_pki() != 0:
         return 1
 
     # Bootstrap PRIMA di agenti e smoke: il .env riceve le credenziali admin

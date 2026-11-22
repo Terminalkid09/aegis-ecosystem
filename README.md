@@ -69,7 +69,7 @@ cd aegis-ecosystem
 python scripts/setup.py
 ```
 
-`setup.py` generates a `.env` with random secrets, starts the stack, waits for readiness, bootstraps the first admin and runs the API smoke test. The admin password is printed **once** and is not written back to `.env`.
+`setup.py` generates a `.env` with random secrets, starts the stack, waits for readiness, initializes the CA/manifest key (PKI), bootstraps the first admin and runs the API smoke test. The admin password is printed **once** and is not written back to `.env`.
 
 Update without touching the database volume:
 

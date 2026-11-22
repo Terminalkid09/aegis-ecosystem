@@ -158,6 +158,9 @@ esterno al repository locale.
 
 ### Fixed
 
+- `scripts/setup.py` inizializza la PKI (CA + chiave manifest) dopo la
+  readiness e prima dell'admin/smoke. Senza questo passo un clone pulito
+  serviva l'installer one-liner con `503`, pur essendo lo stack sano.
 - Persistenza: l'MSI configura il recovery del servizio `AegisAgent` (tre
   restart a 5 s, reset dopo un giorno) oltre all'avvio automatico; l'unità
   Linux usa `Restart=always`. I container Compose usano già
