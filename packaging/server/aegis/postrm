@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || true
+fi
+
+# The database, PKI, artifacts and /etc/aegis/server.env are intentionally kept.
+# Remove them only with an explicit purge/backup procedure.
+exit 0

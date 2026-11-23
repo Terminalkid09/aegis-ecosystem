@@ -7,9 +7,16 @@ the orchestrator (see `docs/SECRETS.md`); a local `.env` is for the lab only.
 
 For incidents, use the dedicated runbooks in [`runbooks/`](runbooks/): compromised
 agent, compromised Brain, compromised Kraken, malware escape, backup and restore.
-They are part of the release gate, not appendices. The executable soak, DR, HA
-and AP-126/127 gates are documented in
-[PRODUCTION_VALIDATION.md](PRODUCTION_VALIDATION.md).
+They are operator runbooks. The executable DR, HA and AP-126/127 harnesses are
+documented in [PRODUCTION_VALIDATION.md](PRODUCTION_VALIDATION.md). The soak in
+that document is an internal test harness: it is not shipped, is not a product
+component and is never a customer install step.
+
+For a package-based customer install, see [PACKAGING.md](PACKAGING.md). The
+MSI and the agent deb install only the endpoint; the complete server stacks use
+the `aegis` and `kraken` debs. `aegis` includes the dashboard/frontend;
+`aegis-suite` is the metapackage/bundle that installs both server stacks. The
+agent remains an endpoint package and is not installed by the suite installer.
 
 ## 1. Clean install
 
@@ -22,7 +29,9 @@ curl -sk https://aegis.local/api/v1/health  # {"status":"ok"}
 
 Prerequisites: Docker + Compose v2, Python 3.15+ for
 `scripts/run_integration_tests.py`, and `POSTGRES_PORT`/`REDIS_PORT_EXTERNAL`
-reachable on 127.0.0.1. Compose restart policies only take effect if the Docker
+reachable on 127.0.0.1. A customer install does not run `setup.py` or this
+manual command sequence; use the server packages documented in
+[PACKAGING.md](PACKAGING.md). Compose restart policies only take effect if the Docker
 daemon itself starts at boot; see [PERSISTENCE.md](PERSISTENCE.md) for the
 Linux and Windows checks. See `scripts/run_integration_tests.py --help` and
 `aegis-brain/tests/conftest.py` (`TEST_DATABASE_URL`/`REQUIRE_INTEGRATION=1` for

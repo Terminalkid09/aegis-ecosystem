@@ -1,0 +1,260 @@
+name: aegis-kraken
+
+# Standalone Kraken stack: app, sensors, broker, RDP endpoint, private
+# PostgreSQL and private Redis. It is independent from the Aegis core stack;
+# signed ingest and SSO are opt-in and disabled in the generated env.
+services:
+  aegis-kraken-db:
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    container_name: aegis-kraken-db
+    restart: unless-stopped
+    mem_limit: ${AEGIS_KRAKEN_DB_MEM_LIMIT:-512m}
+    cpus: "${AEGIS_KRAKEN_DB_CPUS:-0.50}"
+    pids_limit: ${AEGIS_KRAKEN_DB_PIDS:-200}
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      POSTGRES_DB: krakendb
+      POSTGRES_USER: kraken
+      POSTGRES_PASSWORD: ${KRAKEN_DB_PASSWORD:?KRAKEN_DB_PASSWORD must be set}
+    volumes:
+      - kraken_pgdata:/var/lib/postgresql/data
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kraken -d krakendb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  aegis-kraken-redis:
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    container_name: aegis-kraken-redis
+    restart: unless-stopped
+    mem_limit: ${AEGIS_KRAKEN_REDIS_MEM_LIMIT:-256m}
+    cpus: "${AEGIS_KRAKEN_REDIS_CPUS:-0.25}"
+    pids_limit: ${AEGIS_KRAKEN_REDIS_PIDS:-100}
+    security_opt:
+      - no-new-privileges:true
+    command: ["sh", "-c", "redis-server --requirepass \"$${KRAKEN_REDIS_PASSWORD}\""]
+    environment:
+      KRAKEN_REDIS_PASSWORD: ${KRAKEN_REDIS_PASSWORD:?KRAKEN_REDIS_PASSWORD must be set}
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${KRAKEN_REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Build-only helper: the broker starts sandbox containers by image name.
+  aegis-kraken-sandbox-image:
+    build:
+      context: ./services/kraken
+      dockerfile: Dockerfile.sandbox
+    image: kraken_sandbox:latest
+    container_name: aegis-kraken-sandbox-image
+    network_mode: none
+    restart: "no"
+    entrypoint: ["/bin/true"]
+
+  aegis-kraken-init:
+    image: alpine:3.19
+    container_name: aegis-kraken-init
+    restart: "no"
+    command: ["sh", "-c", "mkdir -p /data/malware /data/logs && chown -R 1000:1000 /data"]
+    volumes:
+      - kraken_data:/data
+
+  aegis-kraken-broker:
+    build:
+      context: ./services/kraken
+      dockerfile: Dockerfile.broker
+    container_name: aegis-kraken-broker
+    restart: unless-stopped
+    mem_limit: ${AEGIS_KRAKEN_BROKER_MEM_LIMIT:-512m}
+    cpus: "${AEGIS_KRAKEN_BROKER_CPUS:-0.50}"
+    pids_limit: ${AEGIS_KRAKEN_BROKER_PIDS:-200}
+    group_add:
+      - "${DOCKER_GID:-0}"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
+      SANDBOX_IMAGE: kraken_sandbox
+      MALWARE_DIR: /app/data/malware
+      MALWARE_MAX_FILE_BYTES: ${MALWARE_MAX_FILE_BYTES:-67108864}
+      MALWARE_MAX_SESSION_BYTES: ${MALWARE_MAX_SESSION_BYTES:-268435456}
+      MALWARE_RETENTION_DAYS: ${MALWARE_RETENTION_DAYS:-30}
+      MALWARE_MAX_TOTAL_BYTES: ${MALWARE_MAX_TOTAL_BYTES:-5368709120}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - kraken_data:/app/data
+    depends_on:
+      aegis-kraken-init:
+        condition: service_completed_successfully
+    networks:
+      - kraken_internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  aegis-kraken:
+    build:
+      context: ./services/kraken
+      dockerfile: Dockerfile
+    image: aegis-kraken:local
+    container_name: aegis-kraken
+    restart: unless-stopped
+    mem_limit: ${AEGIS_KRAKEN_MEM_LIMIT:-1g}
+    cpus: "${AEGIS_KRAKEN_CPUS:-1.0}"
+    pids_limit: ${AEGIS_KRAKEN_PIDS:-300}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    expose:
+      - "8000"
+    ports:
+      - "127.0.0.1:${KRAKEN_PORT_EXTERNAL:-8001}:8000"
+    environment:
+      DEBUG: "false"
+      PUBLIC_BASE_PATH: ${KRAKEN_PUBLIC_BASE_PATH:-}
+      SECRET_KEY: ${KRAKEN_SECRET_KEY:?KRAKEN_SECRET_KEY must be set}
+      INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set}
+      ALLOW_REGISTRATION: "false"
+      DATABASE_URL: postgresql+asyncpg://kraken:${KRAKEN_DB_PASSWORD:?KRAKEN_DB_PASSWORD must be set}@aegis-kraken-db:5432/krakendb
+      REDIS_URL: redis://:${KRAKEN_REDIS_PASSWORD:?KRAKEN_REDIS_PASSWORD must be set}@aegis-kraken-redis:6379/0
+      REDIS_PASSWORD: ${KRAKEN_REDIS_PASSWORD:?KRAKEN_REDIS_PASSWORD must be set}
+      KRAKEN_SSO_ENABLED: ${KRAKEN_SSO_ENABLED:-false}
+      KRAKEN_SSO_SECRET: ${KRAKEN_SSO_SECRET:?KRAKEN_SSO_SECRET must be set}
+      SANDBOX_BROKER_URL: http://aegis-kraken-broker:8100
+      SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
+      SENSOR_CONFIG_SIGNING_KEY: ${KRAKEN_SENSOR_CONFIG_SIGNING_KEY:-}
+      FILE_ANALYSIS_ENABLED: ${KRAKEN_FILE_ANALYSIS_ENABLED:-true}
+      FILE_ANALYSIS_MAX_BYTES: ${KRAKEN_FILE_ANALYSIS_MAX_BYTES:-67108864}
+      FILE_ANALYSIS_TIMEOUT_S: ${KRAKEN_FILE_ANALYSIS_TIMEOUT_S:-30}
+      FILE_ANALYSIS_STORAGE_DIR: /app/data/samples
+      FILE_ANALYSIS_POLL_INTERVAL_S: ${KRAKEN_FILE_ANALYSIS_POLL_INTERVAL_S:-1}
+      OBJECT_STORE_BACKEND: ${KRAKEN_OBJECT_STORE_BACKEND:-local}
+      DETONATION_ENABLED: ${KRAKEN_DETONATION_ENABLED:-false}
+      DETONATION_URL: ${KRAKEN_DETONATION_URL:-}
+      DETONATION_TOKEN: ${KRAKEN_DETONATION_TOKEN:-}
+      MALWARE_RETENTION_DAYS: ${MALWARE_RETENTION_DAYS:-30}
+      MALWARE_MAX_TOTAL_BYTES: ${MALWARE_MAX_TOTAL_BYTES:-5368709120}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:${KRAKEN_PORT_EXTERNAL:-8001}}
+      AEGIS_INGEST_ENABLED: ${KRAKEN_INGEST_ENABLED:-false}
+      AEGIS_INGEST_URL: ${KRAKEN_INGEST_URL:-}
+      AEGIS_INGEST_KEY: ${KRAKEN_INGEST_KEY:-}
+      AEGIS_INGEST_SECRET: ${KRAKEN_INGEST_SECRET:-}
+      AEGIS_INGEST_TIMEOUT_S: ${AEGIS_INGEST_TIMEOUT_S:-5}
+    volumes:
+      - kraken_data:/app/data
+    depends_on:
+      aegis-kraken-init:
+        condition: service_completed_successfully
+      aegis-kraken-db:
+        condition: service_healthy
+      aegis-kraken-redis:
+        condition: service_healthy
+      aegis-kraken-broker:
+        condition: service_healthy
+    networks:
+      - default
+      - kraken_internal
+      - aegis_shared
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  aegis-kraken-rdp:
+    build:
+      context: ./services/kraken
+      dockerfile: rdp/Dockerfile
+    image: aegis-kraken-rdp:local
+    container_name: aegis-kraken-rdp
+    restart: unless-stopped
+    mem_limit: ${AEGIS_KRAKEN_RDP_MEM_LIMIT:-1g}
+    cpus: "${AEGIS_KRAKEN_RDP_CPUS:-1.0}"
+    pids_limit: ${AEGIS_KRAKEN_RDP_PIDS:-300}
+    environment:
+      INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set}
+      KRAKEN_RDP_INGEST_ENABLED: ${KRAKEN_RDP_INGEST_ENABLED:-true}
+      KRAKEN_RDP_INGEST_URL: ${KRAKEN_RDP_INGEST_URL:-http://aegis-kraken:8000}
+      KRAKEN_RDP_SENSOR_PORT: ${KRAKEN_RDP_SENSOR_PORT:-3389}
+      KRAKEN_RDP_LOG_PATHS: ${KRAKEN_RDP_LOG_PATHS:-/var/log/auth.log,/var/log/xrdp.log,/var/log/xrdp-sesman.log}
+    depends_on:
+      aegis-kraken:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "3389"
+    networks:
+      - default
+      - kraken_internal
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/3389'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  aegis-kraken-sensors:
+    build:
+      context: ./services/kraken
+      dockerfile: Dockerfile
+    image: aegis-kraken:local
+    container_name: aegis-kraken-sensors
+    restart: unless-stopped
+    command: python honeypot/runner.py
+    mem_limit: ${AEGIS_KRAKEN_SENSORS_MEM_LIMIT:-512m}
+    cpus: "${AEGIS_KRAKEN_SENSORS_CPUS:-0.50}"
+    pids_limit: ${AEGIS_KRAKEN_SENSORS_PIDS:-200}
+    environment:
+      INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set}
+      SANDBOX_API_URL: http://aegis-kraken:8000/api/v1/containers
+      SSH_SENSOR_PORT: 2222
+      HTTP_SENSOR_PORT: 8080
+      FTP_SENSOR_PORT: 2121
+      TELNET_SENSOR_PORT: 2323
+      SMB_SENSOR_PORT: 4445
+      RDP_SENSOR_PORT: 33890
+      SMB_SENSOR_ENGINE: ${KRAKEN_SMB_ENGINE:-impacket}
+      SMB_SHARE_NAME: ${KRAKEN_SMB_SHARE:-Finance$}
+      SMB_SERVER_NAME: ${KRAKEN_SMB_SERVER_NAME:-FILESERVER01}
+      SENSOR_PROTOCOLS: ${KRAKEN_SENSOR_PROTOCOLS:-ssh,http,ftp,telnet,smb,rdp}
+      FTP_PASV_MIN_PORT: ${KRAKEN_FTP_PASV_MIN:-30000}
+      FTP_PASV_MAX_PORT: ${KRAKEN_FTP_PASV_MAX:-30009}
+      FTP_PASV_ADVERTISE_HOST: ${KRAKEN_FTP_PASV_ADVERTISE_HOST:-}
+      SENSOR_CONFIG_SIGNING_KEY: ${KRAKEN_SENSOR_CONFIG_SIGNING_KEY:-}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      aegis-kraken:
+        condition: service_healthy
+    networks:
+      - default
+      - kraken_internal
+
+volumes:
+  kraken_pgdata:
+  kraken_data:
+
+networks:
+  kraken_internal:
+    internal: true
+  # Cross-stack network; the aegis-suite metapackage is what wires the shared
+  # SSO/ingest secrets. A standalone Kraken install still gets the network.
+  aegis_shared:
+    name: aegis_shared

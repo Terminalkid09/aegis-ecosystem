@@ -1,54 +1,36 @@
-# Production validation — soak, DR, HA and AP-126/127
+# Production validation — internal tests, soak, DR, HA and AP-126/127
 
 Status: **the executable harness exists; the external evidence is still an
-operator input.** This document separates what the repository can prove from
-what only a real certificate, tenant, isolated lab, corpus and seven-day run
-can prove.
+operator input.** The 4.3 seven-day soak is deferred by decision; this document
+separates what the repository can prove from what only a real certificate,
+tenant, isolated lab, corpus and a future scheduled soak can prove.
 
-## 7-day soak — what it is
+> **The soak is an internal test harness, not a product component.** It is not
+> shipped in the MSI, the agent deb or the server packages; a customer never
+> runs it and it is not a prerequisite for a customer installation. It is kept
+> here for the release team's own endurance testing.
 
-A soak is a long-running, low-to-moderate synthetic workload. Ten or twenty
-agents enroll, send heartbeats and report events continuously for seven days
-while the runner samples readiness, the server's lost-event counter and the RSS
-of the application containers. It is looking for a different class of defect
-than a load test:
+## 7-day soak — deferred to the next Aegis feature cycle
 
-| Question | Short test | 7-day soak |
-|---|---|---|
-| Does the API work? | yes | yes |
-| Does memory grow slowly? | usually invisible | measured across days |
-| Do queues, retries or Redis keys accumulate? | usually invisible | visible in samples |
-| Does a nightly job or log rotation break ingest? | no | yes |
-| Does an agent reconnect after transient failures? | no | yes |
-| Is an event silently lost? | one counter sample | continuous counter check |
+Decision (2026-11-22): **4.3.0 does not wait for a new seven-day soak.** The
+v4.0.0 soak passed, and the 4.3 delta is small enough that the residual
+endurance risk is accepted for the controlled pilot. The current 4.3 sample
+`fresh-7d-20261122-103335` proves that the harness starts and samples a healthy
+stack; it is **not** a completed soak and is not release evidence.
 
-It does **not** prove detection quality (AP-127), malware isolation (AP-126),
-multi-host failover, or that a real attacker cannot evade a rule. A seven-day
-soak is a duration requirement because leaks and slow backlogs are a function
-of time, not request count.
+The soak moves to the next Aegis feature cycle, after the firewall/DNS policy
+work and the sensor, telemetry and process improvements. The sequence is:
 
-Run it against a dedicated pilot stack, never production:
+1. run the seven-day Aegis soak on that feature set;
+2. release the Aegis changes;
+3. run the seven-day Kraken soak;
+4. release the Kraken changes.
 
-```bash
-# AGENT_ENROLL_KEY in the environment or .env
-python scripts/soak_7d.py --agents 20 --duration 7d \
-  --base https://aegis.local --out-dir artifacts/soak-2026-11 \
-  --containers aegis-brain,aegis-link --require-docker
-```
-
-The runner writes `soak-<tag>.jsonl` (one sample every five minutes) and
-`soak-<tag>.json`. On Windows it holds `ES_SYSTEM_REQUIRED` so the workstation
-does not sleep during the run. It fails on any enrollment/HTTP error, a
-non-zero `aegis_events_lost_total` delta, a readiness failure, more than
-`--max-rss-growth-mb` (default 128 MiB) of container growth, or a wall-clock gap
-longer than two sample intervals. A laptop that suspends overnight has not
-completed a continuous soak; use `--allow-gaps` only for debugging, never for
-the release evidence. The random `soak-*` agents remain in the pilot database
-as labelled test data; use a disposable database or clean them up with the
-normal retention process.
-
-A 7-day run cannot be shortened for a production claim. A 10-minute run is a
-smoke test; it is useful in CI, but it is not the soak gate.
+The harness remains internal: `scripts/soak_7d.py` is not shipped in the MSI,
+the agent deb or the server packages, a customer never runs it, and it is not a
+4.3 release gate or a customer prerequisite. It is a duration test for leaks,
+queues, retries and nightly jobs; a short run is a smoke test, and the
+seven-day duration is not compressed when the test is scheduled.
 
 ## Backup/restore drill
 
@@ -174,11 +156,12 @@ These are deliberate boundaries, not hidden defaults:
   create the lab.
 - **AP-127 needs a frozen labelled corpus with provenance.** A synthetic fixture
   is an engine regression test only. The output must retain `corpus_sha256`.
-- **Soak agents are test records.** `soak-*` agents remain in the pilot
-  database unless the operator uses a disposable database or removes them by
-  the normal retention process.
-- **The seven-day duration is not compressed.** A shorter run may be a smoke
-  test, but it is not the production soak gate.
+- **Soak agents are internal test records.** `soak-*` agents remain in the
+  pilot database unless the operator uses a disposable database or removes them
+  by the normal retention process.
+- **When scheduled, the seven-day duration is not compressed.** A shorter run
+  may be a smoke test, but it is not the soak evidence. This is an internal test
+  boundary, not a customer requirement.
 - **No automatic failover is triggered by the harness.** The multi-host drill
   waits for the operator's managed-service failover; without that external
   action it fails.
@@ -190,7 +173,7 @@ These are deliberate boundaries, not hidden defaults:
 
 | Gate | Executable now | Still needs operator input |
 |---|---|---|
-| 7-day soak | `scripts/soak_7d.py` with sleep guard and gap detection | seven continuous real days on the pilot stack |
+| 7-day soak (deferred) | `scripts/soak_7d.py` with sleep guard and gap detection | not a 4.3 gate; scheduled in the next Aegis cycle after firewall/DNS and sensor/telemetry/process work |
 | Encrypted DB restore | `scripts/test-restore.sh` | real backup and retention policy |
 | Encrypted DB+PKI drill | `scripts/dr_drill.sh` | live-volume copy and CA inspection |
 | Same-host replica loss | `scripts/ha_failure_drill.sh` | HA overlay running |

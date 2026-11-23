@@ -1,0 +1,18 @@
+Package: kraken
+Version: __VERSION__
+Section: admin
+Priority: optional
+Architecture: amd64
+Maintainer: Aegis <ops@aegis.local>
+Installed-Size: __SIZE__
+Depends: ca-certificates, docker.io | docker-ce | docker-ee
+Recommends: docker-compose-v2 | docker-compose-plugin
+Conflicts: aegis-kraken
+Replaces: aegis-kraken
+Description: Kraken deception stack (app, sensors, broker, RDP, PostgreSQL, Redis)
+ Installs the complete standalone Kraken microservice stack and a systemd unit
+ that builds the images from the packaged source and brings the stack up at
+ boot. It has its own database, Redis, credentials and lifecycle; it can be
+ installed with or without the Aegis package. Docker Engine with the Compose v2
+ plugin is required.
+Homepage: https://github.com/Terminalkid09/aegis-ecosystem

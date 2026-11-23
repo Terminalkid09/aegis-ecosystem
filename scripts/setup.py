@@ -34,6 +34,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -75,6 +76,25 @@ def die(msg: str) -> int:
 
 
 # ---------------------------------------------------------------- preflight
+
+def free_tcp_port(preferred: int = 3000) -> int:
+    """Return a usable local dashboard port.
+
+    Port 3000 is frequently occupied by a dev server on a workstation. Prefer
+    the configured value, then try 3000-3099; never silently reuse a port that
+    is already listening.
+    """
+    candidates = [preferred] + [p for p in range(3000, 3100) if p != preferred]
+    for port in candidates:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError("no free dashboard port in 3000-3099")
+
 
 def preflight() -> int:
     problems = []
@@ -120,6 +140,10 @@ def ensure_env() -> str:
     master_key = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
     domain = (os.environ.get("AEGIS_DOMAIN") or "aegis.local").strip()
     acme_email = (os.environ.get("ACME_EMAIL") or "internal").strip()
+    try:
+        ui_port = int(os.environ.get("AEGIS_UI_PORT") or free_tcp_port())
+    except (ValueError, RuntimeError) as exc:
+        raise SystemExit(f"AEGIS_UI_PORT: {exc}") from exc
     if domain not in ("aegis.local", "localhost") and acme_email == "internal":
         log("ATTENZIONE: AEGIS_DOMAIN e' un dominio pubblico ma ACME_EMAIL=internal; "
             "Caddy userebbe la CA interna. Imposta ACME_EMAIL con un indirizzo reale.")
@@ -136,15 +160,17 @@ def ensure_env() -> str:
         "BRAIN_PORT_EXTERNAL": "8000",
         "LINK_PORT_EXTERNAL": "8088",
         "OLLAMA_PORT_EXTERNAL": "11435",
+        "AEGIS_UI_PORT": str(ui_port),
         "AEGIS_API_KEY": secrets.token_hex(32),
         "AGENT_ENROLL_KEY": secrets.token_hex(16),
         "JWT_SECRET": secrets.token_hex(32),
         "MASTER_KEY_B64": master_key,
         "JWT_ALGORITHM": "HS256",
         "JWT_EXPIRE_MINUTES": "60",
-        # Only the direct localhost:3000 dashboard is plain HTTP. aegis.local
-        # is served by Caddy over HTTPS, so its cookie must remain Secure even
-        # though the hostname is not a public FQDN.
+        # Only the direct localhost dashboard is plain HTTP. Aegis.local is
+        # served by Caddy over HTTPS, so its cookie must remain Secure even
+        # though the hostname is not a public FQDN. The local port is selected
+        # above because 3000 is often occupied on a workstation.
         "AEGIS_DEBUG": "false",
         "AEGIS_ALLOW_OPEN_REGISTRATION": "false",
         "AEGIS_COOKIE_SECURE": "false" if domain == "localhost" else "true",
@@ -156,7 +182,7 @@ def ensure_env() -> str:
         # POST/PATCH requests through https://<domain> fail CSRF checks with
         # 403 even though the dashboard loads correctly. PUBLIC_BASE_URL is
         # used by OIDC callbacks and deployment links and must match.
-        "ALLOWED_ORIGINS": f"https://{domain},http://localhost:3000,http://localhost:5173",
+        "ALLOWED_ORIGINS": f"https://{domain},http://localhost:{ui_port},http://localhost:5173",
         "PUBLIC_BASE_URL": f"https://{domain}",
         "VITE_API_URL": "/api/v1",
         "AEGIS_AGENT_ID": "agent-001",
@@ -669,7 +695,9 @@ def main() -> int:
 
     print()
     log("=== AEGIS PRONTO ===", "+")
-    print(f"  Dashboard:   http://localhost:3000   (login: {email})")
+    env = read_env()
+    ui_port = env.get("AEGIS_UI_PORT", "3000")
+    print(f"  Dashboard:   http://localhost:{ui_port}   (login: {email})")
     if password:
         print(f"  Password:    {password}   (mostrata una sola volta, NON salvata in .env)")
     else:

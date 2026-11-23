@@ -70,6 +70,22 @@ def static_failures() -> list[str]:
     if "systemctl is-enabled --quiet aegis-agent.service" not in postinst:
         failures.append("deb postinst does not verify boot enablement")
 
+    for pkg, unit_name in (("aegis", "aegis"),
+                           ("kraken", "kraken")):
+        unit = _text(f"packaging/server/{pkg}/{unit_name}.service")
+        for needle in ("Wants=docker.service", "After=docker.service",
+                       "User=root", "ExecStartPre=", "ExecStart=", "ExecStop=",
+                       "WantedBy=multi-user.target"):
+            if needle not in unit:
+                failures.append(f"{pkg} unit is missing {needle}")
+        server_postinst = _text(f"packaging/server/{pkg}/postinst")
+        if "systemctl is-enabled --quiet" not in server_postinst:
+            failures.append(f"{pkg} postinst does not verify boot enablement")
+        if "AEGIS_PACKAGE_SKIP_START" not in server_postinst:
+            failures.append(f"{pkg} postinst cannot be tested without starting Docker")
+        if "images.ok" not in server_postinst:
+            failures.append(f"{pkg} postinst does not invalidate the image marker")
+
     compose = "\n".join(
         p.read_text(encoding="utf-8") for p in ROOT.glob("docker-compose*.yml")
     )
@@ -84,8 +100,11 @@ def static_failures() -> list[str]:
 
 
 def _run(command: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, check=False, text=True, capture_output=True,
-                          timeout=timeout)
+    try:
+        return subprocess.run(command, check=False, text=True,
+                              capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(command, 124, "", "timeout")
 
 
 def live_linux() -> list[str]:

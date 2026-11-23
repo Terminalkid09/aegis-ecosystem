@@ -1,0 +1,24 @@
+[Unit]
+Description=Kraken deception stack (app, sensors, broker, RDP, PostgreSQL, Redis)
+Documentation=https://github.com/Terminalkid09/aegis-ecosystem/blob/dev/docs/PACKAGING.md
+# See aegis.service: Wants tolerates Docker Desktop WSL, while a real Docker
+# Engine is still ordered before this unit.
+Wants=network-online.target
+Wants=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+Group=root
+UMask=0027
+WorkingDirectory=/opt/aegis/kraken
+EnvironmentFile=-/etc/aegis/kraken.env
+ExecStartPre=/usr/local/lib/aegis/build-kraken.sh
+ExecStart=/usr/local/lib/aegis/kraken-up.sh
+ExecStop=/usr/local/lib/aegis/kraken-down.sh
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

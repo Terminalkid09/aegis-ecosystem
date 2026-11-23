@@ -28,6 +28,8 @@ Get-ChildItem -Path "unified-*" -ErrorAction SilentlyContinue | ForEach-Object {
 Write-Host "[4/4] Verifica health..." -ForegroundColor Cyan
 try { (Invoke-WebRequest -Uri "http://localhost:8000/health/live" -UseBasicParsing -TimeoutSec 10).Content | Select-Object -First 1 } catch { Write-Warning $_ }
 if ($Mode -eq "pilot") { Write-Host "PKI bootstrap: docker compose exec aegis-brain python -m app.services.pki --dir /app/pki" -ForegroundColor Yellow }
-Write-Host "[OK] Deploy $Mode completato. Dashboard: http://localhost:3000  API: http://localhost:8000" -ForegroundColor Green
+$uiPort = (Select-String -Path ".env" -Pattern '^AEGIS_UI_PORT=(\d+)' | Select-Object -First 1).Matches.Groups[1].Value
+if (-not $uiPort) { $uiPort = "3000" }
+Write-Host "[OK] Deploy $Mode completato. Dashboard: http://localhost:$uiPort  API: http://localhost:8000" -ForegroundColor Green
 Write-Host "[INFO] Primo admin (se non esiste): docker compose exec aegis-brain python -m app.admin bootstrap admin@aegis.local '<password-forte>'" -ForegroundColor Yellow
 Write-Host "[INFO] Verifica admin esistenti: docker compose exec aegis-brain python -m app.admin list" -ForegroundColor Yellow

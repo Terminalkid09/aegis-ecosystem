@@ -14,6 +14,83 @@ the tag audit and the release policy.
 
 ## [4.3.0] - 2026-11-19
 
+### Packaging server e persistenza (2026-11-22)
+
+- `ak update` non e' piu' interattivo: apt/dpkg girano con
+  `DEBIAN_FRONTEND=noninteractive` e `--force-confdef`/`--force-confold`, quindi
+  un aggiornamento remoto non si blocca su una domanda debconf e non riscrive
+  `server.env`/`kraken.env`. Trovato testando 4.3.0 -> 4.3.1 in un container.
+- `ak start --wait` (con `--timeout`, default 300s per componente) attende che i
+  container siano running e senza health `starting`/`unhealthy`; su Windows il
+  comportamento era gia' `compose up --wait` e ora accetta gli stessi flag.
+- `ak doctor` riporta il budget memoria: RAM host, limite dell'engine Docker, uso
+  per container e, dentro WSL, il promemoria che il numero e' il tetto della VM e
+  non il consumo di Aegis.
+- CI: job `release_assets` sui tag `v*` che attende la release creata da `ci.yml`
+  e allega i pacchetti con i checksum, senza mai sovrascrivere un asset
+  pubblicato; la validazione MSI sopprime solo `ICE61` (downgrade voluto) e
+  mantiene attivi gli altri ICE.
+
+- Aggiunti i pacchetti completi `aegis` (Brain, Link, dashboard/frontend,
+  PostgreSQL, Redis, Caddy, backup) e `kraken` (app, sensori, broker, RDP,
+  database e Redis privati), più il meta-pacchetto `aegis-suite` e il bundle
+  `aegis-suite-<version>.tar.gz` per scaricare entrambi gli stack insieme. Ogni
+  stack conserva il proprio file systemd, i propri segreti in `/etc/aegis/*.env`
+  e il proprio ciclo di vita; l'agente MSI/deb resta solo endpoint e il bundle
+  non lo installa sul server.
+- `aegis-suite` non è solo un elenco di dipendenze: il suo post-install crea la
+  rete condivisa `aegis_shared`, allinea i segreti SSO/ingest, punta Kraken a
+  `aegis-brain:8000`, abilita l'integrazione e serve la UI sotto `/kraken/`.
+  Installare i due pacchetti separatamente non li collega.
+- Aggiunto il comando operativo `ak`, esposto da entrambi i pacchetti server
+  tramite `update-alternatives` senza conflitti di file: `ak start/stop/restart`
+  gestiscono systemd, mentre `ak status/ps/logs/doctor/url` mostrano lo stato
+  reale di unit e container. `ak configure` cambia hostname pubblico, email ACME,
+  URL pubblico e porta locale senza riscrivere i segreti. `ak --help` e
+  `ak help <command>` sono la documentazione locale; il server resta headless e
+  non crea un'icona desktop. Riferimento completo in `docs/AK_CLI.md`.
+- La dashboard non è più cablata alla porta host 3000: `AEGIS_UI_PORT` è
+  configurabile, il pacchetto sceglie automaticamente il primo slot libero in
+  `3000-3099` se la porta richiesta è occupata e registra il valore in
+  `/etc/aegis/server.env`. L'installazione `aegis` usa debconf per dominio,
+  email ACME e porta; gli stessi valori sono preseedabili via ambiente o
+  modificabili con `ak configure`. Il dominio pubblico resta distinto dal
+  percorso Docker Desktop dell'agente MSI.
+- La matrice Windows ora è completa come quella deb: `aegis-server` installa
+  solo Aegis, `kraken-server` solo Kraken, `aegis-suite` entrambi; l'MSI agente
+  resta solo endpoint. Ogni pacchetto è autosufficiente, espone `ak.cmd` nel
+  `PATH` di macchina e genera il proprio `server.env`/`kraken.env` al primo
+  `ak start`. Aegis e suite chiedono FQDN/email ACME/porta; Kraken-only non ha
+  un bordo TLS pubblico. Usano Docker Desktop, quindi l'avvio è al login
+  (`ak start` o scheduled task), non pre-login.
+- Aggiunto `ak update` su Linux e Windows: risolve l'ultima release stabile o
+  una versione esplicita, verifica il checksum SHA-256, preserva FQDN/email/
+  porta, aggiorna CLI e payload e riavvia i servizi. Un downgrade richiede
+  `--allow-downgrade` e un backup del database verificato. Aggiunta la
+  [release policy](docs/RELEASE_POLICY.md): 4.3.x corrente, 4.2.x precedente,
+  <=4.1.x EOL; gli artefatti pubblicati restano immutati.
+- Validazione FQDN/email più rigorosa su Linux e Windows, con rifiuto di un
+  dominio pubblico senza email ACME, URL pubblico non coerente e label DNS
+  non valide. La configurazione Windows resta valida anche per Kraken-only,
+  che usa un env separato.
+- Verificato lo stack Aegis+Kraken su Docker Desktop/Windows: Brain, Link,
+  frontend, Caddy, Kraken, sensori e broker healthy, HTTP 200 su Brain,
+  frontend, Kraken e Caddy. Il pacchetto Windows riusa lo stesso runtime e la
+  stessa sorgente; resta la differenza di boot timing, non un componente mancante.
+- La firma di default dei pacchetti server è self-signed (chiave GPG locale
+  esportata come `aegis-pilot-signing-key.asc`): è accettata per il pilot, non è
+  una identità pubblica e non viene mai etichettata come production. La firma
+  production resta un input dell'operatore. GPG è opzionale per un pilot locale:
+  `SIGNING_MODE=unsigned` è disponibile e SHA-256 resta il controllo di
+  integrità.
+- Il soak 7 giorni è dichiarato test interno e **rinviato al ciclo successivo**,
+  dopo firewall/DNS e i miglioramenti a sensori, telemetria e processi. La 4.3.0
+  non lo aspetta: il soak v4.0.0 era passato e il delta 4.3 è piccolo; il primo
+  campione 4.3 non è un soak completato. Il runner non è nei pacchetti e non è
+  una richiesta al cliente.
+- Documentato il reset WSL2 (`wsl --shutdown`) che ha risolto il timeout
+  `HCS_E_CONNECTION_TIMEOUT` del VM condiviso con Docker Desktop.
+
 ### Aegis Agent 4.3.0 — parità funzionale NodeTrace e Guard
 
 **Stato: release 4.3.0 per pilot controllati.** Il runtime Go e il profilo

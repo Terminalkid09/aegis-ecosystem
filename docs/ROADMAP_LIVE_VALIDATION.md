@@ -189,9 +189,43 @@ Not allowed:
 - “production-ready detection quality”;
 - “agent rollback tested” (it is outside 4.3.0).
 
+## Phase 5 — Windows server pre-login availability (post-4.3, not scheduled)
+
+**Outcome:** the Windows server is available before any user logs in, matching
+the Linux systemd unit instead of depending on Docker Desktop's per-user
+session.
+
+**Why this cannot be a flag:** Linux containers need the Linux kernel. On Linux
+`dockerd` is a native process and systemd owns it as `docker.service`; on Windows
+the engine can only run inside a VM, and Docker Desktop owns that WSL2 VM as a
+per-user desktop application. The Windows packages are already native (MSI,
+`ak.ps1`, wizard, env generation, ACL, registry, `PATH`); only the engine's
+lifecycle is not.
+
+**Options to evaluate:**
+
+1. a service wrapper (Task Scheduler at startup or a real service) that starts
+   the WSL distribution and `dockerd` as SYSTEM, then lets
+   `restart: unless-stopped` bring the containers back — closest to
+   `docker.service`, but unsupported by Docker and sensitive to Docker Desktop
+   updates;
+2. a Hyper-V Linux VM with Docker Engine, managed by a Windows service, with
+   explicit port forwarding and backup/restore of the VM disk;
+3. native Windows services for Brain, Link, frontend/Caddy and Kraken, with the
+   same data directory, ACL, certificate and backup contracts as the Linux
+   packages (largest change; needs Windows images or a native port).
+
+**Complexity:** high. It changes the service account, secret ACLs, certificate
+renewal, upgrade/rollback, Docker socket permissions and the database restore
+boundary. It is not a wizard or MSI cosmetic change. The current Docker Desktop
+path remains supported at login. Option 1 also has to be checked against the
+Docker Desktop licence terms for server use. This item is a roadmap decision, not a 4.3
+delivery and not a claim that the current package starts before login.
+
 ## References
 
 - `docs/RELEASE_GATE_4.3.md`
+- `docs/RELEASE_POLICY.md`
 - `docs/benchmarks/4.3/detection-quality.md`
 - `docs/archive/ARCHITECTURE_AEGIS_KRAKEN.md`
 - AP-126, AP-127 in YouTrack

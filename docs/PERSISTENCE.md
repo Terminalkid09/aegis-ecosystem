@@ -17,6 +17,8 @@ This page separates three different guarantees that are often confused:
 | Linux agent, deb/RPM | Yes, the package enables `aegis-agent.service` | Yes, the unit uses `Restart=always` | The package enables but does not start the unit; provision the token first. |
 | Linux agent, one-liner | Yes, `systemctl enable --now aegis-unified.service` | Yes, `Restart=always` | The generated unit is independent from the package unit. |
 | OpenWrt agent, ipk | Yes, `postinst` enables the procd service | Yes, `procd_set_param respawn` | Only when the router is an OpenWrt host with the ipk installed. |
+| Aegis platform package (`aegis`) | Yes, `aegis.service` is enabled | Yes, containers use `restart: unless-stopped`; the oneshot unit is the boot bring-up | Complete stack including dashboard. First start builds images; `/etc/aegis/server.env` is generated once. |
+| Kraken package (`kraken`) | Yes, `kraken.service` is enabled | Yes, same model | Complete standalone Kraken stack; separate package, database, Redis and secrets. |
 | Aegis core containers | Yes, when the Docker daemon starts | Yes, `restart: unless-stopped` | Postgres, Redis, Brain, Link, frontend, Caddy and backup. |
 | Kraken profile containers | Yes, when the Docker daemon starts | Yes, `restart: unless-stopped` | App, sensors, broker, DB and Redis. One-shot init/sandbox-image helpers are intentionally `restart: "no"`. |
 | `deploy/kraken-lab/` overlay | No | No | It is a single-host lab harness; each node is deliberately `restart: "no"`. |
@@ -36,9 +38,10 @@ runs as root. A server or router has no UAC prompt because there is no Windows
 desktop; the install is performed once by the administrator/package manager.
 
 Docker Desktop is the exception: it is a per-user desktop application. The
-`scripts/install-autostart.ps1` Run key covers a workstation after sign-in; it
-does not provide pre-login availability. Use Linux Docker Engine for an
-unattended server.
+Windows server MSI installs `ak` and the Compose payload, but the first bring-up
+is `ak start` after sign-in; `scripts/install-autostart.ps1` can start Docker
+Desktop from the current user's Run key. Neither provides pre-login
+availability. Use Linux Docker Engine for an unattended server.
 
 ## Crash simulation (not a reboot)
 
@@ -72,6 +75,28 @@ kill -9 "$(pidof aegis-agent)"
 sleep 8
 pidof aegis-agent
 ```
+
+### WSL2 lab host: reset the shared VM
+
+A long-running Docker Desktop WSL distro can leave the shared WSL utility VM
+wedged. The symptom is `Wsl/Service/CreateInstance/HCS_E_CONNECTION_TIMEOUT`
+when starting **any** other distro (both Ubuntu and Kali failed here) while
+`docker-desktop` remains running. It is a WSL host failure, not an agent
+package failure.
+
+Recovery and diagnosis:
+
+```powershell
+wsl --shutdown
+wsl --terminate Ubuntu
+wsl -d Ubuntu -- uname -r
+```
+
+On 2026-11-22 the shutdown restored Ubuntu in 9 seconds with
+`networkingMode=mirrored` unchanged; the distro VHD was healthy. Enable systemd
+in `/etc/wsl.conf` (`[boot]` `systemd=true`) before testing service persistence.
+`wsl --shutdown` also stops Docker Desktop's WSL backend; verify
+`docker compose ps` and the containers' health after restarting Docker Desktop.
 
 The repository check is:
 
@@ -121,6 +146,13 @@ pre-login availability. For an unattended server, use Linux with Docker Engine
 enabled at boot, or an operator-managed Windows service with a supported
 container runtime; Docker Desktop is not a substitute for that.
 
+The reason is architectural, not a missing flag: Linux containers need the Linux
+kernel, so on Windows the engine runs inside a VM that Docker Desktop owns as a
+per-user application. There is no `docker.service` equivalent to enable with
+`sc.exe`. A pre-login path would need a service wrapper that starts the WSL
+distribution and `dockerd` (or a Hyper-V Linux VM) and is tracked as Phase 5 in
+[ROADMAP_LIVE_VALIDATION.md](ROADMAP_LIVE_VALIDATION.md).
+
 ## Agent verification
 
 Windows:
@@ -143,6 +175,20 @@ systemctl show -p Restart aegis-agent
 
 The expected values are `enabled` and `Restart=always`. The one-liner uses
 `aegis-unified.service` instead of the packaged unit.
+
+Server packages:
+
+```bash
+systemctl is-enabled aegis kraken
+systemctl show -p Restart --value aegis
+systemctl show -p Restart --value kraken
+```
+
+The units are oneshot boot bring-up; `Restart` is empty by design, while the
+containers carry `restart: unless-stopped`. Both units must be `enabled`.
+They run as `root` because they need the Docker socket and host-level bring-up;
+the generated `/etc/aegis/*.env` files are root-owned `0600`. Their first start
+builds images and needs network access.
 
 OpenWrt:
 
@@ -172,3 +218,12 @@ overlay and one-shot helpers fall into this category.
   is availability, not tamper-proofing.
 - Windows Server live validation and Linux bare-metal validation remain release
   gates; this document records the configured behavior, not a new certification.
+- The server packages' first start needs network access to build OCI images; an
+  offline/prebuilt image bundle is not shipped in 4.3.
+- A real host reboot with the server packages installed is still required. This
+  host verified package layout, `0644` units, `0600` secrets and enablement;
+  `systemd-analyze verify` only reports the missing `docker.service` because
+  Docker Desktop is not integrated into this WSL distro and has no Docker CLI or
+  socket there. The units now use `Wants=docker.service`, so a Docker Desktop
+  WSL socket can start them when the CLI is present. A host with Docker Engine
+  must still start the unit and reboot.

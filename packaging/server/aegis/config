@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+# Debian's config script runs before unpack/configure. Noninteractive installs
+# receive the template defaults; unattended operators can preseed the values.
+[ -r /usr/share/debconf/confmodule ] || exit 0
+. /usr/share/debconf/confmodule
+
+db_input high aegis/domain || true
+db_input high aegis/acme_email || true
+db_input medium aegis/ui_port || true
+db_go || true

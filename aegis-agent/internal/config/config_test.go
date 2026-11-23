@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -279,5 +280,30 @@ func TestReadEnrollTokenPrefersFile(t *testing.T) {
 	}
 	if token != "file-token" {
 		t.Fatalf("token = %q", token)
+	}
+}
+
+func TestGuardURLsAcceptOriginAndAPIBase(t *testing.T) {
+	cases := []struct {
+		name   string
+		server string
+		want   string
+	}{
+		{"origin", "https://aegis.local", "https://aegis.local/api/v1/enroll/enroll"},
+		{"origin with trailing slash", "https://aegis.local/", "https://aegis.local/api/v1/enroll/enroll"},
+		{"deployment manager API base", "https://soc.example.com/api/v1", "https://soc.example.com/api/v1/enroll/enroll"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{ServerURL: tc.server}
+			cfg.deriveGuardURLs()
+			if cfg.GuardEnrollURL != tc.want {
+				t.Fatalf("GuardEnrollURL = %q, want %q", cfg.GuardEnrollURL, tc.want)
+			}
+			wantCommands := strings.TrimSuffix(tc.want, "/enroll/enroll") + "/telemetry/commands"
+			if cfg.GuardCommandsURL != wantCommands {
+				t.Fatalf("GuardCommandsURL = %q, want %q", cfg.GuardCommandsURL, wantCommands)
+			}
+		})
 	}
 }

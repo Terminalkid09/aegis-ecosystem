@@ -63,6 +63,15 @@ a confidence signal instead of a flat boolean. See [YARA feeds](docs/YARA_FEEDS.
 
 Requirements: **Docker Desktop running** and **Python 3.15+**. Endpoint agents are installed separately from the dashboard.
 
+The agent MSI and agent deb install only the endpoint. A customer server install
+uses `aegis`, `kraken`, or `aegis-suite` on Linux/Windows: the Windows matrix is
+`aegis-server`, `kraken-server` and `aegis-suite`, all self-contained and using
+Docker Desktop; see [Packaging](docs/PACKAGING.md). The server packages expose
+`ak` for `start`, `stop`, `status`, `logs`, `doctor`, `configure` and `update`;
+the Windows MSIs put `ak` on the machine `PATH`. Try `ak --help` after install.
+The full reference is [the `ak` CLI](docs/AK_CLI.md). The `setup.py` path below
+remains the developer/source-tree workflow.
+
 ```bash
 git clone https://github.com/Terminalkid09/aegis-ecosystem.git
 cd aegis-ecosystem
@@ -93,7 +102,7 @@ a real ACME email, and keep `ALLOWED_ORIGINS`/`PUBLIC_BASE_URL` on the same host
 Caddy obtains and renews a Let's Encrypt certificate automatically. No domain or
 certificate is hardcoded in the repository.
 
-The default dashboard is `http://localhost:3000`; the Brain API is `http://localhost:8000`. Never expose the lab stack directly to the Internet.
+The default dashboard is `http://localhost:3000`; set `AEGIS_UI_PORT` to change it, and the server package falls back to the first free port in `3000-3099` if it is occupied. The Brain API is `http://localhost:8000`. Never expose the lab stack directly to the Internet.
 
 Caddy is the production TLS/reverse-proxy edge when it runs with a real FQDN,
 ACME and the mTLS overlay; it is not a complete HA or monitoring solution. Run
@@ -156,9 +165,12 @@ Not verified locally: hosted CI/tag workflow, bare-metal Linux, Windows Server l
 | [Secrets](docs/SECRETS.md) | File, Docker/Kubernetes and Vault configuration. |
 | [OIDC](docs/OIDC.md) | SSO configuration, role mapping and break-glass. |
 | [Operations](docs/OPERATIONS.md) | Install, upgrade, backup/restore and PKI. |
+| [Packaging](docs/PACKAGING.md) | Endpoint vs server packages, contents and customer install. |
+| [Release policy](docs/RELEASE_POLICY.md) | Supported lines, artifact retention, update and downgrade rules. |
+| [`ak` CLI](docs/AK_CLI.md) | Server commands, privileges, updates, port/URL configuration and exit codes. |
 | [Pilot runbook](docs/PILOT_RUNBOOK.md) | Pilot deployment and acceptance. |
 | [Release gate](docs/RELEASE_GATE_4.3.md) | What is green, what remains, and allowed claims. |
-| [Production validation](docs/PRODUCTION_VALIDATION.md) | Soak, DR, HA and AP-126/127 harnesses, with external inputs and limits. |
+| [Production validation](docs/PRODUCTION_VALIDATION.md) | Internal test harnesses (soak, DR, HA, AP-126/127), with external inputs and limits. |
 | [Persistence](docs/PERSISTENCE.md) | What restarts after a reboot, what does not, and the Docker daemon prerequisite. |
 | [Threat model](docs/THREAT_MODEL.md) | Assets, trust boundaries and mitigations. |
 | [Benchmarks](docs/BENCHMARK.md) | Load methodology and measured numbers. |

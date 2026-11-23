@@ -31,6 +31,14 @@ def test_release_rejects_test_and_unsigned_packages(tmp_path: Path) -> None:
     assert release_smoke.check_signing_sidecars(tmp_path)
 
 
+def test_release_accepts_self_signed_only_with_the_explicit_pilot_override(tmp_path: Path) -> None:
+    _sidecar(tmp_path / "pilot.deb.signing.json",
+             schema="aegis-package-signing-v1", package="pilot.deb",
+             mode="self-signed", sha256="0" * 64)
+    assert release_smoke.check_signing_sidecars(tmp_path)
+    assert release_smoke.check_signing_sidecars(tmp_path, allow_self_signed=True) == []
+
+
 def test_release_accepts_only_a_valid_timestamped_production_msi(tmp_path: Path) -> None:
     _sidecar(tmp_path / "ok.msi.signing.json",
              schema="aegis-package-signing-v1", package="ok.msi",

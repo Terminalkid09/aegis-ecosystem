@@ -1,6 +1,6 @@
 # Aegis 4.3 — Release Gate
 
-Status: 2026-11-21. **No `v4.3.0` tag has been cut and nothing is published.**
+Status: 2026-11-22. **No `v4.3.0` tag has been cut and nothing is published.**
 The 4.3 production-path work is on `release/4.3.0` (PR #18):
 provider-agnostic Authenticode signing, production GPG mode, cosign keyless
 release signing, RPM and ipk packages, xrdp log forwarding and AP-126/AP-127
@@ -8,7 +8,7 @@ harnesses. PR #18 is `MERGEABLE/CLEAN`; its branch CI and packaging runs are
 green. The production validation harnesses are documented in
 [PRODUCTION_VALIDATION.md](PRODUCTION_VALIDATION.md); they are not release
 evidence until executed with the operator's certificate, tenant, lab, corpus
-and seven-day run. The hosted tag run, including the tag-only `release` job, is still
+and a future scheduled soak. The hosted tag run, including the tag-only `release` job, is still
 required before calling the release published. There is no `4.3.0-rc1`: the
 release is cut directly as `v4.3.0`.
 
@@ -35,7 +35,13 @@ hosted tag workflow:
   empty-file handling;
 - clean install core + Kraken: images rebuilt, admin bootstrap, API smoke
   **21/21**, Kraken and sensors healthy; signed ingest delivered one event to
-  the Brain (`sent=1`).
+  the Brain (`sent=1`);
+- Windows Docker Desktop: the same Compose stack was **healthy** (Brain, Link,
+  frontend, Caddy, Kraken, sensors, broker), with HTTP 200 from
+  Brain/frontend/Kraken and Caddy. The Windows server MSI now packages that
+  payload and was built plus administratively extracted. Aegis, Kraken and
+  suite now pass a clean-host install/CLI/PATH/uninstall test on Windows; a
+  pre-login service remains a host gate.
 
 The post-audit hardening was re-verified live through Caddy: password reset
 invalidates every pre-reset JWT and trusted device (DB `token_version`
@@ -62,12 +68,45 @@ skips; the new job is not a substitute for the hosted tag gate.
 
 Still open: **Gate 5** (hosted tag workflow), macOS CI execution (the
 `macos-latest` build/test job is configured, but no live Mac hardware or
-endpoint telemetry is supported), bare-metal Linux, Windows Server live
-validation, the production certificate/key and MDM tenant, the AP-126
-isolated lab with an authorized sample, the AP-127 real corpus, a completed
-seven-day soak, and true multi-host failover. **Do not publish/tag/push as a
+endpoint telemetry is supported), bare-metal Linux, the server-package first
+start/reboot on a real Linux Docker host, the Windows server MSI pre-login
+service, Windows Server live validation, the production
+certificate/key and MDM
+tenant, the AP-126 isolated lab with an authorized sample, the AP-127 real
+corpus, and true multi-host failover. **Do not publish/tag/push as a
 release on the strength of this local run alone.**
 
+## 2026-11-22 packaging and update verification
+
+Executed locally in disposable containers (`debian:bookworm-slim` with systemd,
+`fedora:40`, Docker Desktop 29.5.3). The running development stack was not
+touched, and no release was published.
+
+- **deb install** (`apt install ./aegis_4.3.0_amd64.deb`): `postinst` enables
+  `aegis.service`, `/opt/aegis/server` payload present, `/etc/aegis/server.env`
+  is `0600 root:root`, `ak 4.3.0`;
+- **deb upgrade** 4.3.0 -> 4.3.1 via `ak update --version ... --from <dir>`:
+  SHA-256 verified, CLI and package both 4.3.1;
+- **downgrade guard**: 4.3.1 -> 4.3.0 without `--allow-downgrade` exits 1; with
+  the flag it installs 4.3.0;
+- **tampered checksum** and **missing sidecar** both exit 1 without touching the
+  installed version;
+- **suite** 4.3.0 -> 4.3.1 updates `aegis-suite`, `aegis` and `kraken` together;
+- **RPM**: `dnf install` and `rpm -e` install and remove `aegis-agent` cleanly;
+- **defect found and fixed**: `ak update` re-ran debconf and printed prompt text
+  plus Perl warnings. The updater now runs non-interactively with conffile
+  `--force-confdef`/`--force-confold`; re-tested 4.3.1 -> 4.3.2, zero prompt lines;
+- **ICE61**: `wix msi validate` reports only `WIX1076/ICE61`; with `-sice ICE61`
+  validation is clean. CI suppresses that single ICE by name;
+- **`ak start --wait`** and the `ak doctor` resource report are covered by
+  `scripts/tests/ak_smoke.sh` (PASS in WSL Ubuntu).
+
+Still open after this run: a real `ak update` against GitHub assets (no published
+release contains packages yet; the tag job is wired but has never executed), the
+first start/reboot on a real Linux Docker host, and the Windows pre-login
+service.
+
+## Decision
 ## Decision
 
 **4.3.0 is a product-complete controlled-pilot release, not a certified
@@ -122,6 +161,15 @@ prove a multi-host cluster, TLS throughput or 50,000 independent agent
 processes. The clean-install test proves the Compose/API path, not the native
 Windows/Linux agent service packaging.
 
+## Soak decision
+
+The 4.3.0 controlled pilot ships **without a new seven-day soak**. The v4.0.0
+soak passed, the 4.3 delta is small, and the risk is accepted rather than
+hidden: the current 4.3 sample only proves the harness starts. The soak is
+deferred to the next Aegis feature cycle, after firewall/DNS policy and the
+sensor/telemetry/process work; the sequence is Aegis soak, Aegis release,
+Kraken soak, Kraken release. It is not a 4.3 gate and not a customer step.
+
 ## Six gates
 
 | # | Gate | Status | Evidence / what remains |
@@ -174,14 +222,19 @@ remaining operator inputs and evidence, not missing packaging code:
 - **Delivered:** signed MSI/deb/rpm/ipk paths, native service drop-in,
   provider-agnostic Authenticode signing, production GPG mode, cosign keyless
   release signing and clean-host install/uninstall CI;
-- **External input:** the real Authenticode certificate/key and GPG key must be
-  supplied by the operator; CI uses test signing only. Test-signed MSI/deb
-  artifacts are never release artifacts; each package carries a
-  `.signing.json` sidecar and a release requires `mode=production`, a `Valid`
-  Authenticode signature with timestamp and the operator GPG key;
+- **External input for production GA:** the real Authenticode certificate/key
+  and protected GPG key must be supplied by the operator. The 4.3 controlled
+  pilot accepts explicitly labelled self-signed packages; production GA still
+  requires `mode=production`, a `Valid` Authenticode signature with timestamp
+  and the operator GPG key;
 - **External input:** MDM/Intune/GPO tenant validation requires the customer's
   tenant; the clean Windows runner and MSI properties are ready;
-- 7-day soak with memory/leak checks, restart and duplicate-action visibility;
+- **Deferred by decision:** the seven-day soak (`scripts/soak_7d.py`) is an
+  internal endurance harness. 4.3.0 ships without a new run; the v4.0.0 soak
+  passed and the 4.3 delta is small. It is not shipped in any MSI/deb/server
+  package, not a 4.3 gate and not a customer prerequisite. It is scheduled for
+  the next Aegis feature cycle, followed by the Kraken soak, as documented in
+  [PRODUCTION_VALIDATION.md](PRODUCTION_VALIDATION.md);
 - **AP-126:** the bounded sandbox harness is shipped; executing live malware
   requires an authorized sample and an isolated, snapshot/restore-capable lab;
 - **AP-127:** the labelled-corpus gate with recall/FPR and per-host/day metrics
@@ -210,8 +263,10 @@ for the pilot. AWS is not certified.
 
 ## Not allowed
 
-- “4.3.0 released” or “production GA” while gate 5 is not green or while the
-  production certificate/key and real lab/corpus evidence are missing;
+- “4.3.0 released” while gate 5 is not green; “production GA” while the
+  production certificate/key and real lab/corpus evidence are missing. The
+  controlled pilot may use explicitly labelled self-signed packages; that is not
+  a production-GA claim;
 - “real malware detonation certified”;
 - “AWS tested” or “MinIO tested”;
 - “exactly-once”;

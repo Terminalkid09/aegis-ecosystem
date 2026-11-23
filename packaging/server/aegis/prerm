@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ] && command -v update-alternatives >/dev/null 2>&1; then
+    update-alternatives --remove ak /usr/local/lib/aegis/ak-aegis || true
+fi
+
+if [ "$1" = "remove" ] && command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    systemctl stop aegis.service || true
+    systemctl disable aegis.service || true
+fi
+
+exit 0

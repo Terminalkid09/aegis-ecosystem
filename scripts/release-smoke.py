@@ -38,12 +38,14 @@ def _archive_members(path: Path) -> dict[str, tarfile.TarInfo]:
         return {Path(m.name).name: m for m in archive.getmembers() if m.isfile()}
 
 
-def check_signing_sidecars(root: Path) -> list[str]:
+def check_signing_sidecars(root: Path, *, allow_self_signed: bool = False) -> list[str]:
     """Reject test/unsigned packages copied into a release directory.
 
     The tag bundle normally has no endpoint packages, but an operator may attach
     them. Presence is optional; a present package must carry a production
     sidecar, and a production MSI must have a valid timestamped signature.
+    ``allow_self_signed`` is the explicit pilot override: it accepts a clearly
+    labelled self-signed package but never relabels it as production.
     """
     problems: list[str] = []
     for path in sorted(root.glob("*.signing.json")):
@@ -54,6 +56,8 @@ def check_signing_sidecars(root: Path) -> list[str]:
             continue
         package = str(data.get("package") or path.name.removesuffix(".signing.json"))
         mode = str(data.get("mode") or "")
+        if mode == "self-signed" and allow_self_signed:
+            continue
         if mode != "production":
             problems.append(f"{package}: signing mode is {mode!r}, expected production")
             continue
@@ -128,6 +132,8 @@ def main() -> int:
     parser.add_argument("--require-agent", action="store_true",
                         help="require both unified archives, OTA copies and kernel helpers")
     parser.add_argument("--require-image-sboms", action="store_true")
+    parser.add_argument("--allow-self-signed", action="store_true",
+                        help="pilot override: accept labelled self-signed packages")
     args = parser.parse_args()
     root = Path(args.root).resolve()
     manifest_path = root / "RELEASE_MANIFEST.json"
@@ -205,7 +211,9 @@ def main() -> int:
     if args.require_image_sboms and not manifest.get("image_sboms"):
         print("[X] per-image SBOMs missing from RELEASE_MANIFEST.json")
         return 1
-    signing_problems = check_signing_sidecars(root)
+    signing_problems = check_signing_sidecars(
+        root, allow_self_signed=args.allow_self_signed
+    )
     if signing_problems:
         for problem in signing_problems:
             print(f"[X] {problem}")
