@@ -53,9 +53,11 @@ RUN = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 checks: List[Dict[str, Any]] = []
 errors: List[str] = []
 
-# L'ingest endpoint limita /enroll a 5/minuto per IP (slowapi). Un rollout di
-# flotta passa dallo stesso IP, quindi il test deve rispettare il contratto
-# invece di aggirarlo: la spaziatura e' parte della misura operativa.
+# L'endpoint /enroll limita a 10/minuto per IP (slowapi, `@limiter.limit`).
+# Un rollout di flotta passa dallo stesso IP, quindi il test deve rispettare il
+# contratto invece di aggirarlo: la spaziatura e' parte della misura operativa.
+# 12.2 s (~5/min) e' volutamente meta' del limite consentito: il margine copre
+# la latenza di rete e il fatto che altre chiamate di setup consumano finestra.
 ENROLL_SPACING_S = 12.2
 _enroll_lock = threading.Lock()
 _last_enroll = 0.0

@@ -12,7 +12,7 @@ the tag audit and the release policy.
 > after the batch tags: the full Kraken vertical ships with the hardening
 > fixes, and expansion moves to 4.2+.
 
-## [4.3.0] - 2026-11-19
+## [4.3.0] - 2026-11-23
 
 ### Packaging server e persistenza (2026-11-22)
 
@@ -90,6 +90,43 @@ the tag audit and the release policy.
   una richiesta al cliente.
 - Documentato il reset WSL2 (`wsl --shutdown`) che ha risolto il timeout
   `HCS_E_CONNECTION_TIMEOUT` del VM condiviso con Docker Desktop.
+
+### Validazione approfondita e detection hardening (2026-11-23)
+
+- Aggiunto `scripts/deep_simulation.py`: simulazione end-to-end contro lo stack
+  MSI reale, con 39 casi malevoli, 46 benigni e i casi dual-use inviati come
+  eventi veri attraverso il flusso di enroll. Ogni caso usa un agente dedicato,
+  così la soppressione degli alert per agente/regola/processo non falsa il
+  conteggio. Report in `docs/benchmarks/4.3/DEEP_SIMULATION.md` accanto al JSON
+  grezzo; rieseguibile senza modificare il prodotto.
+- Risultato dell'esecuzione registrata (738 s): TP 38, FN 1, FP 0, TN 46,
+  precision 1.000, recall 0.974, F1 0.987, false positive rate 0.000, severità
+  corretta 23/28, e 40/40 controlli funzionali PASS (ciclo di vita degli alert,
+  RBAC viewer, isolamento, telemetria, resolver, ingest Kraken e outbox).
+  L'unico FN è dichiarato: `/etc/shadow` (T1003.008) non ha una regola statica e
+  richiede audit di file access che questo set di eventi non raccoglie.
+- Soak 10 agenti × 120 s nella stessa esecuzione: 15.860 richieste accettate,
+  0 errori, 0 eventi persi, 132.07 rps, p50/p95/p99 74.1/98.0/178.5 ms.
+  Non sostituisce il soak di 7 giorni, che resta rinviato al ciclo successivo.
+- Rimossi quattro falsi positivi misurati su host puliti (`vssadmin list
+  shadows`, `schtasks /change`, `curl https`, `explorer → cmd`) e aggiunti 15
+  test di regressione in `aegis-brain/tests/test_detection_hardening.py`.
+- Le liste di processi, moduli e anomalie sono limitate a 500/256/200 elementi
+  e, quando il limite scatta, la risposta porta il marker `quality`. Prima un
+  payload da 600 processi veniva rifiutato con 422 e si perdeva la telemetria
+  dell'intero evento; ora l'evento passa e il troncamento è dichiarato.
+- Riaprire un alert azzera la soppressione del pattern, così la riapertura
+  manuale non lascia la detection silenziata per una settimana.
+- CI: i controlli sul contenuto dei pacchetti deb usavano `grep -q` in una
+  pipeline; il grep chiude lo stream, il produttore muore con SIGPIPE e lo step
+  falliva pur essendo il controllo corretto. Ora il grep legge il file e
+  l'exit status è quello del controllo.
+- Limite di enrollment documentato invece che corretto a ridosso del tag:
+  `/enroll` accetta 10 richieste al minuto per IP sorgente ed è un controllo
+  anti brute-force, non un parametro da alzare. Il runbook spiega come arruolare
+  una flotta in batch; il retry dell'agente che rispetta
+  `Retry-After`/`X-RateLimit-Reset` e la recovery del servizio Windows sono
+  pianificati per la 4.4.
 
 ### Aegis Agent 4.3.0 — parità funzionale NodeTrace e Guard
 

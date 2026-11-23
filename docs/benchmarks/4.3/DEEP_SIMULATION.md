@@ -1,8 +1,8 @@
 # Deep simulation — Aegis/Kraken 4.3
 
-Eseguita: `2026-11-23T17:31:25.281987+00:00` → `2026-11-23T17:44:16.055807+00:00`  
+Eseguita: `2026-11-23T17:36:24.297737+00:00` → `2026-11-23T17:48:41.780671+00:00`  
 Stack: `http://127.0.0.1:8000` (Windows, pacchetti MSI 4.3.0, self-signed)  
-Durata totale: **771s**
+Durata totale: **738s**
 
 > Simulazione di comportamento, non esecuzione di malware. Ogni caso è
 > inviato come evento reale al Brain con il flusso di enroll di un agente.
@@ -70,12 +70,12 @@ Durata totale: **771s**
 |---|---:|
 | Agenti | 10 |
 | Durata | 120.1s |
-| Richieste | 16301 |
-| Accettate | 16301 |
+| Richieste | 15860 |
+| Accettate | 15860 |
 | Duplicati | 0 |
 | Errori | 0 |
-| Throughput | 135.69 rps |
-| p50 / p95 / p99 | 70.6 / 101.4 / 124.9 ms |
+| Throughput | 132.07 rps |
+| p50 / p95 / p99 | 74.1 / 98.0 / 178.5 ms |
 | Eventi persi (server) | None |
 
 ## Controlli funzionali
@@ -93,16 +93,16 @@ Durata totale: **771s**
 | NUL nella command line non rompe la scrittura | PASS | 200 |
 | agente sconosciuto rifiutato | PASS | 401 |
 | alert presente tra i non risolti | PASS |  |
-| PATCH resolve 200 | PASS | {"id":585,"agent_id":"334e052f-b39a-4243-aa07-0472ed283292","agent_hostname":null,"timestamp":"2026-11-23T17:36:18.97130 |
+| PATCH resolve 200 | PASS | {"id":645,"agent_id":"be6c6d1c-ed3e-4004-95d9-30efd0305f5e","agent_hostname":null,"timestamp":"2026-11-23T17:41:22.47323 |
 | resolve riporta il muting attivo | PASS | triage_muted_seconds=604800 |
 | resolve imposta is_resolved | PASS | True |
 | risolto fuori dai non risolti | PASS |  |
 | risolto presente nei risolti | PASS |  |
 | dettaglio coerente con il resolve | PASS |  |
 | detection identica silenziata dopo il resolve | PASS | 1->1 |
-| riapertura alert 200 | PASS | {"id":585,"agent_id":"334e052f-b39a-4243-aa07-0472ed283292","agent_hostname":null,"timestamp":"2026-11-23T17:36:18.97130 |
+| riapertura alert 200 | PASS | {"id":645,"agent_id":"be6c6d1c-ed3e-4004-95d9-30efd0305f5e","agent_hostname":null,"timestamp":"2026-11-23T17:41:22.47323 |
 | dopo la riapertura la detection torna visibile | PASS | 1->2 |
-| resolve-all 200 | PASS | {"resolved":86,"triage_muted":86,"detail":"Resolved 86 alerts; similar detections muted ~7d for triaged patterns"} |
+| resolve-all 200 | PASS | {"resolved":59,"triage_muted":59,"detail":"Resolved 59 alerts; similar detections muted ~7d for triaged patterns"} |
 | resolve-all idempotente (seconda chiamata 0) | PASS | second=0 |
 | viewer non puo' fare resolve-all (403) | PASS | 403 |
 | viewer non puo' cancellare gli alert (403) | PASS | 403 |
@@ -113,12 +113,12 @@ Durata totale: **771s**
 | Kraken ingest telnet 201 | PASS | 201 |
 | Kraken ingest smb 201 | PASS | 201 |
 | Kraken ingest rdp 201 | PASS | 201 |
-| Kraken retry idempotente: nessuna seconda riga | PASS | status=201 rows=301->301 |
+| Kraken retry idempotente: nessuna seconda riga | PASS | status=201 rows=315->315 |
 | Kraken rifiuta chiave interna errata | PASS | 403 |
 | Aegis vede le sessioni deception Kraken | PASS | +6 |
 | Aegis crea l'incidente Kraken | PASS | +6 |
 | outbox Kraken consegnata | PASS | pending=0 |
-| alert Kraken risolvibile dalla dashboard Aegis | PASS | {"id":600,"agent_id":"02c99b74-b95e-4b2a-8ac2-b68180df0d16","agent_hostname":null,"timestamp":"2026-11-23T17:40:17.88742 |
+| alert Kraken risolvibile dalla dashboard Aegis | PASS | {"id":659,"agent_id":"02c99b74-b95e-4b2a-8ac2-b68180df0d16","agent_hostname":null,"timestamp":"2026-11-23T17:44:43.67710 |
 | nessuna password in chiaro negli incidenti Aegis | PASS | rows=0 |
 | soak senza errori HTTP | PASS | errors=0 |
 | soak senza eventi persi | PASS | lost=None |
