@@ -118,8 +118,13 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # macOS non e' un gate di release e in questo repository il runner non
+      # viene assegnato: il job resta in coda, viene cancellato dopo ~15
+      # minuti con zero step e nessun log, e fa fallire il run che poi salta
+      # Release Artifacts. La matrice predefinita e' quindi Linux + Windows;
+      # per riabilitare macOS basta una variabile: AEGIS_GO_OS='["ubuntu-latest","windows-latest","macos-latest"]'.
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ fromJSON(vars.AEGIS_GO_OS || '["ubuntu-latest","windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
