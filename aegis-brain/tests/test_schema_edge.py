@@ -45,14 +45,23 @@ def test_structured_anomaly_dict_accepted():
 
 
 def test_anomaly_list_bounded():
-    """Un agente compromesso non deve poter gonfiare il DB: max 200 voci."""
-    with pytest.raises(ValidationError):
-        EventSchema.model_validate({
-            "agent_id": "00000000-0000-0000-0000-000000000001",
-            "timestamp": "2026-01-01T00:00:00Z",
-            "event_type": "METRICS_REPORT",
-            "anomalies": [f"TAG: {i}" for i in range(201)],
-        })
+    """Un agente compromesso non deve poter gonfiare il DB: max 200 voci.
+
+    Il limite resta, ma non si applica piu' rifiutando l'evento: oltre soglia
+    la lista si tronca a 200 e la troncatura si dichiara in `quality`. Prima
+    il limite scattava in validazione e il report intero veniva respinto con
+    422, quindi un solo campo gonfiato azzerava la telemetria dell'host invece
+    di limitarla. Il DB resta limitato e la perdita e' visibile.
+    """
+    ev = EventSchema.model_validate({
+        "agent_id": "00000000-0000-0000-0000-000000000001",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "event_type": "METRICS_REPORT",
+        "anomalies": [f"TAG: {i}" for i in range(201)],
+    })
+    assert len(ev.anomalies) == 200
+    assert "truncated" in (ev.quality or "")
+    assert "anomalies" in (ev.quality or "")
 
 
 def test_long_command_line_truncated_not_rejected():

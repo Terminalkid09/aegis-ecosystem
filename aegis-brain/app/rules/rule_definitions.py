@@ -50,7 +50,13 @@ CREDENTIAL_TOOLS = {
     "gsecdump.exe", "lsadump.exe", "procdump.exe", "samdump2",
     "cachedump.exe", "creddump", "creddump7", "creddump8",
     "quarkspwdump.exe", "pwddump", "pwdump7.exe", "pwdump8.exe",
-    "dcdiag.exe", "ntdsutil.exe", "vssadmin.exe", "dsamain.exe",
+    "dcdiag.exe", "ntdsutil.exe", "dsamain.exe",
+    # `vssadmin.exe` NON e' un tool di credential dumping: e' lo strumento
+    # amministrativo delle shadow copy, e `vssadmin list shadows` e' una
+    # normale verifica di backup. La distruzione delle shadow copy resta
+    # coperta da S021 sugli argomenti (`delete shadows`), che e' l'azione
+    # malevola vera. Averlo qui produceva un CRITICAL su ogni controllo
+    # legittimo (falso positivo misurato nella simulazione 4.3).
     "secretsdump.py", "impacket-secretsdump", "lsassy",
     "spraykatz", "kerbrute", "kerberoast", "asreproast",
     "ruby_smb", "crackmapexec", "netripper", "katz.exe",
@@ -305,9 +311,15 @@ SUSPICIOUS_PARENT_CHILD = [
      "HIGH", "User application spawning a system process: '{parent}' -> '{child}'.",
      "TA0004", "Privilege Escalation", "Process Injection", "T1055"),
 
+    # `cmd.exe` e `powershell` sono stati tolti da questa coppia: la
+    # simulazione 4.3 ha misurato che `explorer.exe -> cmd.exe` e' il flusso
+    # normale di Win+R, delle shortcut e degli script di login su un host
+    # pulito (falso positivo). Restano i LOLBin che explorer non lancia per
+    # uso ordinario; la command line sospetta resta coperta da S007/S009/S012
+    # qualunque sia il processo padre.
     (("explorer.exe", "explorer"),
-     ("powershell", "cmd.exe", "wscript.exe", "mshta.exe",
-      "regsvr32.exe", "rundll32.exe", "certutil.exe"),
+     ("wscript.exe", "mshta.exe", "regsvr32.exe", "rundll32.exe",
+      "certutil.exe"),
      "MEDIUM", "Explorer spawning LOLBin: '{parent}' -> '{child}'.",
      "TA0005", "Defense Evasion", "Signed Binary Proxy Execution", "T1218"),
 
@@ -396,6 +408,15 @@ LOLBIN_SUSPICIOUS_ARGS = (
     "frombase64", "frombase64string", "invoke-expression", "iex(",
     "-encodedcommand", "-enc ", "-e ", "-ec ", "downloadstring",
     "webclient", "/transfer", "bitsadmin",
+)
+
+# Client di rete: l'URL e' il loro uso normale. Si allerta solo per
+# trasferimento su file o piping verso una shell.
+_NETWORK_CLIENT_LOLBINS = frozenset({"curl.exe", "curl", "wget.exe", "wget"})
+_NETWORK_CLIENT_ABUSE_MARKERS = (
+    "| bash", "| sh", "|bash", "|sh", "-outfile", "--output", "-o ",
+    "-o/", "downloadstring", "invoke-expression", "frombase64", "-enc ",
+    "-encodedcommand", "chmod +x",
 )
 
 # — Standard system locations (slash-normalized): un LOLBin o un nome
@@ -491,11 +512,34 @@ def rule_suspicious_execution_path(event: EventSchema) -> RuleResult:
     return RuleResult(triggered=False)
 
 
+# Un interprete su path di sistema che esegue un comando banale non e' un
+# indicatore: su Linux non esiste una firma Authenticode da usare come
+# contesto, quindi `bash -c ls` finiva in un alert MEDIUM per ogni comando di
+# ogni host (5 falsi positivi su 10 casi benigni Linux nella simulazione 4.3).
+# Sui path di sistema l'interprete allerta solo con un contesto di esecuzione
+# sospetto; fuori dai path di sistema resta un indicatore pieno.
+_STANDARD_INTERPRETER_PATHS = (
+    "/usr/bin/", "/bin/", "/sbin/", "/usr/sbin/", "/usr/local/bin/",
+)
+_INTERPRETER_SUSPICIOUS_CONTEXT = (
+    "-enc", "-encodedcommand", "frombase64", "iex", "invoke-expression",
+    "downloadstring", "downloadfile", "webclient", "-windowstyle hidden",
+    "-w hidden", "-nop", "/dev/tcp", "| bash", "| sh", "|bash", "|sh",
+    "base64", "chmod +x", "curl ", "wget ", "mkfifo", "socat", "nc ",
+    "eval ", "exec ", "reverse", "bind shell",
+)
+
+
 def rule_script_interpreter_abuse(event: EventSchema) -> RuleResult:
     if not event.process_name:
         return RuleResult(triggered=False)
     name = event.process_name.lower().strip()
     if name in SCRIPT_INTERPRETERS:
+        path = _norm_path(event.process_path)
+        cmd = (event.command_line or "").lower()
+        if path.startswith(_STANDARD_INTERPRETER_PATHS) \
+                and not any(m in cmd for m in _INTERPRETER_SUSPICIOUS_CONTEXT):
+            return RuleResult(triggered=False)
         return RuleResult(
             triggered=True, severity="MEDIUM",
             description=f"Script interpreter '{event.process_name}' detected.",
@@ -704,8 +748,14 @@ def rule_lolbin_usage(event: EventSchema) -> RuleResult:
         )
     # Audit: LOLBin in path standard MA con argomenti di download/esecuzione:
     # il caso classico (certutil -urlcache -f http://...) non deve passare.
+    # Per i client di rete (`curl`, `wget`) un URL e' l'uso normale: contano
+    # solo il salvataggio su file e il piping verso una shell, altrimenti ogni
+    # `curl https://...` diventava un alert HIGH (falso positivo misurato).
     cmd = (event.command_line or "").lower()
-    if any(a in cmd for a in LOLBIN_SUSPICIOUS_ARGS):
+    markers = LOLBIN_SUSPICIOUS_ARGS
+    if name in _NETWORK_CLIENT_LOLBINS:
+        markers = _NETWORK_CLIENT_ABUSE_MARKERS
+    if any(a in cmd for a in markers):
         return RuleResult(
             triggered=True, severity="HIGH",
             description=f"LOLBin '{event.process_name}' with suspicious arguments: '{event.command_line}'.",
@@ -899,9 +949,18 @@ def rule_scheduled_task_creation(event: EventSchema) -> RuleResult:
     della sessione.
     """
     cmd = (event.command_line or "").lower()
-    if not cmd or not any(m in cmd for m in _TASK_WRITE_MARKERS):
+    if not cmd:
+        return RuleResult(triggered=False)
+    creates = "/create" in cmd or "-create" in cmd
+    changes = "/change" in cmd
+    if not (creates or changes):
         return RuleResult(triggered=False)
     script_action = any(a in cmd for a in _TASK_SCRIPT_ACTIONS)
+    # `/change` da solo e' amministrazione normale (disabilitare la deframmentazione
+    # pianificata): per contare deve cambiare l'azione (`/tr`) o lanciare uno
+    # script. `/create` resta persistenza a tutti gli effetti.
+    if changes and not creates and not script_action and "/tr" not in cmd:
+        return RuleResult(triggered=False)
     return RuleResult(
         triggered=True,
         severity="CRITICAL" if script_action else "HIGH",

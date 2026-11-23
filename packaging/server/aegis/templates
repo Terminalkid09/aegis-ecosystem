@@ -1,0 +1,23 @@
+Template: aegis/domain
+Type: string
+Default: aegis.local
+Description: Public hostname for the Aegis dashboard:
+ Enter the DNS name users will open in a browser, for example
+ soc.example.com. The default aegis.local uses Caddy's internal CA and is
+ suitable for a lab. A public hostname requires DNS pointing at this host and
+ ports 80/443 reachable for ACME.
+
+Template: aegis/acme_email
+Type: string
+Default: internal
+Description: ACME account email for the public certificate:
+ Use a real operator address when aegis/domain is a public hostname. Keep
+ "internal" only for the lab/internal-CA default.
+
+Template: aegis/ui_port
+Type: string
+Default: 3000
+Description: Local dashboard port:
+ The dashboard is bound to 127.0.0.1 on this TCP port. If it is occupied,
+ the package automatically selects the first free port in 3000-3099 and
+ records it in /etc/aegis/server.env.

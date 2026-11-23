@@ -1,4 +1,5 @@
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package
     Name="Aegis Agent"
     Manufacturer="Aegis"
@@ -24,7 +25,15 @@
             Description="Aegis endpoint and sensor agent"
             Type="ownProcess"
             Start="auto"
-            ErrorControl="normal" />
+            ErrorControl="normal">
+            <!-- Same recovery contract as the one-liner: restart three times, 5 s apart. -->
+            <util:ServiceConfig
+              FirstFailureActionType="restart"
+              SecondFailureActionType="restart"
+              ThirdFailureActionType="restart"
+              ResetPeriodInDays="1"
+              RestartServiceDelayInSeconds="5" />
+          </ServiceInstall>
           <ServiceControl
             Id="AgentServiceControl"
             Name="AegisAgent"

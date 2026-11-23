@@ -278,7 +278,7 @@ def main() -> int:
         "files": files,
         "agent_files": agent_files,
         "image_sboms": image_sboms,
-        "signature": "not produced; 4.3.0 is unsigned by decision (RELEASE_SIGNING.md)",
+        "signature": "cosign keyless signature over SHA256SUMS.txt is produced by the tag workflow (RELEASE_SIGNING.md)",
     }
     (out / "RELEASE_MANIFEST.json").write_bytes(
         (json.dumps(manifest, indent=2) + "\n").encode("utf-8")

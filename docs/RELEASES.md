@@ -32,8 +32,8 @@ tags.
 | `v3.0.0` | 2026-07-09 | `058dea5` | `058dea5` | yes | none |
 | `v4.0.0` | 2026-09-21 | `38e245f` | `de52206` | yes | `aegis-guard.jar`, `sbom.spdx.json`, `SHA256SUMS.txt` |
 | `v4.1.0` | 2026-11-16 | `17c499f` | `17c499f` | yes | 24 assets: Brain/Link/Frontend/Guard/NodeTrace, compose, SBOM, source, seven images, manifests/checksums |
-| `v4.2.1` | 2026-11-18 | `1de7443` | `1de7443` | yes | 4.2 maintenance release; NodeTrace spec tracked |
-| `v4.3.0` | not cut | — | — | no | unified-only 24-file bundle prepared; hosted tag CI still required |
+| `v4.2.1` | 2026-11-18 | `1de7443` | `1de7443` | yes | 32 assets; checksummed, not cosign-signed |
+| `v4.3.0` | not cut | — | — | no | unified-only 24-file bundle prepared; tag workflow now includes cosign signing; hosted tag CI still required |
 
 The first four are lightweight tags; `v4.1.0` is annotated. `v4.0.0` and
 `v4.1.0` are the only ones whose code version matches the tag: `aegis-brain`
@@ -237,8 +237,15 @@ command restart, `queued — not executed` UI visibility, a 24-artifact unified-
 bundle with checksums, a clean install from the extracted bundle with API smoke **21/21**,
 and a 4.2.1 server upgrade preserving **68 agents / 321 alerts** with smoke
 **21/21**. The annotated tag, hosted tag workflow, downloaded-asset verification
-and publication remain the external release step. The release is checksummed,
-not cosign-signed; see `docs/RELEASE_SIGNING.md`.
+and publication remain the external release step. The tag workflow now signs
+`SHA256SUMS.txt` with cosign keyless OIDC and verifies it before publishing;
+this is not yet executed for 4.3.0. `v4.2.1` remains checksummed only. See
+`docs/RELEASE_SIGNING.md`.
+
+**License scope:** the repository root is **AGPL-3.0-only** (not Apache).
+`services/kraken` is a separately licensed **MIT** component; its license file
+ships with the source and the release must keep both notices. The MIT grant is
+compatible with the AGPL bundle and does not relicense the rest of Aegis.
 
 ## Local verification update — 2026-11-20
 

@@ -1,15 +1,17 @@
-# Aegis — Live Validation Roadmap (post-4.3)
+# Aegis — 4.3 Live Validation Roadmap
 
 Status: decision record, 2026-11-19, updated 2026-11-21. This document is the
 English source of truth for the validation work kept **inside the 4.3.0 release
 cycle**. The older Italian `docs/archive/ROADMAP.md` remains the long-term
-product roadmap. AP-126/AP-127 start only after the 4.3.0 tag; they are not part
-of the release gate, but they remain release blockers for a production claim.
+product roadmap. AP-126/AP-127 are part of the 4.3 production gate. This
+repository delivers the isolated harness and the labelled-corpus gate; running
+an authorized real sample and measuring a real corpus require operator-provided
+lab and corpus inputs, not fabricated results.
 
 ## 4.3 enterprise/Kraken addendum (2026-11-21)
 
 The user expanded the 4.3 scope: signed endpoint packages, realistic Kraken
-engines, configurable Docker limits and a roadmap for Lab/self-improvement.
+engines, configurable Docker limits and a roadmap for the Lab.
 This addendum is the working checklist; none of it changes the `NOT RELEASED`
 status until the branch PRs are green and the two branches are merged in `dev`.
 
@@ -22,7 +24,7 @@ status until the branch PRs are green and the two branches are merged in `dev`.
 | FTP | `pyftpdlib 2.2.0` | Real login, PASV, LIST/RETR/STOR/DELE/MKD, decoy filesystem, upload SHA-256. | Passive advertise host must be set correctly by the operator. |
 | Telnet | asyncio + sandbox | Real login and interactive shell; realistic fallback when the broker is down. | Telnet negotiation is deliberately minimal. |
 | SMB | `impacket 0.13.1` | SMB2 share, auth, list/read/write, NetNTLMv2 capture with `outputToJohnFormat`. | SMB signing/relay are not implemented by design; legacy raw engine remains available with `KRAKEN_SMB_ENGINE=raw`. |
-| RDP | `xrdp` + XFCE | Real RDP endpoint with three weak decoy accounts. | xrdp authentication logs are currently host/container logs, not Aegis ingest; wire a signed log shipper before claiming full telemetry. |
+| RDP | `xrdp` + XFCE | Real RDP endpoint with three weak decoy accounts; PAM/xrdp authentication logs are forwarded to the signed Kraken ingest path by `rdp/log_shipper.py`. | Shipped in this branch; the unit parser is tested in CI. |
 
 Exposure is still explicit: the base compose keeps the listeners internal; the
 overlay maps standard public ports. SMB/RDP use unprivileged container ports
@@ -30,12 +32,14 @@ overlay maps standard public ports. SMB/RDP use unprivileged container ports
 
 ### Enterprise packaging — `feat/4.3-packaging`
 
-- **Delivered:** reproducible MSI and `.deb` build paths, test signing
-  (self-signed Authenticode and ephemeral GPG), artifact verification and
-  docs. CI builds them as artifacts; they are not attached to a release.
-- **Blocked for production:** real Authenticode certificate, GPG/cosign
-  release key, MDM/Intune/GPO validation, clean-host install/uninstall test,
-  and code-signing custody. A test signature is not a production signature.
+- **Delivered in 4.3:** reproducible MSI, `.deb`, RPM and OpenWrt `ipk` build
+  paths; provider-agnostic Authenticode signing via PFX or certificate
+  thumbprint; production GPG mode; cosign keyless signing for `SHA256SUMS`;
+  clean-host install/uninstall checks in CI; and test signing for CI only.
+- **Operator inputs still required:** the real Authenticode certificate/key,
+  the real GPG/cosign key and an MDM/Intune/GPO tenant for a tenant-specific
+  validation. The code paths are implemented; a test signature is never
+  presented as a production signature.
 - The MSI is a deployment mechanism, not an enrollment secret store: the token
   is provisioned by MDM/GPO or the documented manual fallback.
 
@@ -47,7 +51,7 @@ rendered compose model; `scripts/load_limits.sh` wraps `pilot_soak.py` and
 captures `docker stats` before/after. `mem_limit`/`cpus` are Compose v2 fields,
 not Swarm `deploy.resources`; `pids_limit` is Linux-only.
 
-### Lab and self-improvement — future work, not implemented here
+### Lab — 4.3 scope with explicit remaining work
 
 **Advanced Kraken lab:** simulated topologies and subnets, multi-host decoys,
 scenario/assertion engine, per-sensor port profiles, source-IP preservation on
@@ -55,21 +59,20 @@ Linux, controlled file drops and a restore/snapshot lifecycle. These are
 required before calling Kraken a lab product; the current branch provides real
 protocol engines, not a range orchestrator.
 
-**Self-improvement:** signed model/rule updates, offline evaluation, shadow and
-canary rollout, automatic rollback, drift/FP monitoring and human approval.
-Auto-modification of detection logic and autonomous response remain explicitly
-out of scope. No self-improvement component is implemented in 4.3.
-
-**AP-126 / AP-127:** still post-tag and still blockers for production GA. Real
-malware detonation needs an isolated VM/container with snapshot/restore, an
-authorized sample and a kill switch; production FP/FN needs a labelled real
-corpus and per-host/day measurement. The 4.3 baseline is synthetic.
+**AP-126 / AP-127:** part of the 4.3 production gate. The repository now
+contains a bounded sandbox harness (read-only, no network, kill switch) and a
+labelled-corpus gate with recall/FPR and per-host/day metrics. Real malware
+detonation still needs an authorized sample plus snapshot/restore lab; a
+production FP/FN rate still needs a real labelled corpus. The 4.3 fixture run
+proves the harness, not production quality.
 
 ## Decision
 
-- **4.3.0** ships as a product-complete release for controlled pilots after
-  the six gates pass: static analysis, optional external detonation
-  integration, local/Garage object storage and the at-least-once command path.
+- **4.3.0** is a production-capable release after the six gates and the
+  production packaging gates pass: static analysis, controlled detonation
+  integration, local/Garage object storage, the at-least-once command path and
+  installable signed-package paths. The external certificate, MDM tenant and
+  authorized lab/corpus remain operator inputs, not missing code.
 - The release is cut **directly as `v4.3.0`**. There is no `4.3.0-rc1` tag and
   no separate RC publication.
 - The six gates (50k Link load, crash/restart, release bundle, server upgrade,
@@ -81,9 +84,9 @@ corpus and per-host/day measurement. The 4.3 baseline is synthetic.
 - **4.3.0 does not claim certified real-malware detonation.** The integration
   is exercised with a controlled HTTP detonator; no malware is executed on the
   host or by the web process.
-- Real detonation, controlled malware samples and adversarial quality work are
-  a **post-4.3 live-validation track**. They must not be presented as already
-  delivered.
+- Real detonation and adversarial quality evidence are part of the **4.3
+  production gate**, but require the authorized external lab and corpus. The
+  shipped harness must not be presented as a completed malware certification.
 - **AWS is optional.** A customer may run local storage, Garage/Ceph on their
   own server, or AWS S3. No cloud dependency is required for 4.3.
 - CI runs on `dev`, `main`, `feat/**` and pull requests, plus the release tag;
@@ -111,17 +114,20 @@ Required evidence:
 
 Out of scope for the 4.3.0 claim:
 
-- real malware execution (AP-126, after the tag);
-- certified sandbox isolation;
+- real malware execution without the authorized external lab (AP-126 harness
+  is shipped; live malware is not);
+- certified sandbox isolation beyond the tested bounded policy;
 - AWS certification;
-- production FP/FN rates (AP-127, after the tag);
+- production FP/FN rates without the real labelled corpus (AP-127 gate is
+  shipped);
 - agent rollback to the previous Java/Python runtimes;
 - firewall and DNS policy features (4.5 Network Visibility).
 
 ## Phase 2 — 4.3.x live validation (after 4.3.0)
 
-**Goal:** test the paths that only a real lab can validate. This phase starts
-after the 4.3.0 tag; it is not a substitute for the six release gates above.
+**Goal:** test the paths that only a real lab can validate. This is part of the
+4.3 production evidence cycle when the authorized lab/corpus is available; it
+is not a substitute for the six release gates above.
 
 1. **Real detonation worker** (AP-126)
    - isolated Windows/Linux VM or container, no Internet, snapshot/restore;
@@ -183,9 +189,43 @@ Not allowed:
 - “production-ready detection quality”;
 - “agent rollback tested” (it is outside 4.3.0).
 
+## Phase 5 — Windows server pre-login availability (post-4.3, not scheduled)
+
+**Outcome:** the Windows server is available before any user logs in, matching
+the Linux systemd unit instead of depending on Docker Desktop's per-user
+session.
+
+**Why this cannot be a flag:** Linux containers need the Linux kernel. On Linux
+`dockerd` is a native process and systemd owns it as `docker.service`; on Windows
+the engine can only run inside a VM, and Docker Desktop owns that WSL2 VM as a
+per-user desktop application. The Windows packages are already native (MSI,
+`ak.ps1`, wizard, env generation, ACL, registry, `PATH`); only the engine's
+lifecycle is not.
+
+**Options to evaluate:**
+
+1. a service wrapper (Task Scheduler at startup or a real service) that starts
+   the WSL distribution and `dockerd` as SYSTEM, then lets
+   `restart: unless-stopped` bring the containers back — closest to
+   `docker.service`, but unsupported by Docker and sensitive to Docker Desktop
+   updates;
+2. a Hyper-V Linux VM with Docker Engine, managed by a Windows service, with
+   explicit port forwarding and backup/restore of the VM disk;
+3. native Windows services for Brain, Link, frontend/Caddy and Kraken, with the
+   same data directory, ACL, certificate and backup contracts as the Linux
+   packages (largest change; needs Windows images or a native port).
+
+**Complexity:** high. It changes the service account, secret ACLs, certificate
+renewal, upgrade/rollback, Docker socket permissions and the database restore
+boundary. It is not a wizard or MSI cosmetic change. The current Docker Desktop
+path remains supported at login. Option 1 also has to be checked against the
+Docker Desktop licence terms for server use. This item is a roadmap decision, not a 4.3
+delivery and not a claim that the current package starts before login.
+
 ## References
 
 - `docs/RELEASE_GATE_4.3.md`
+- `docs/RELEASE_POLICY.md`
 - `docs/benchmarks/4.3/detection-quality.md`
 - `docs/archive/ARCHITECTURE_AEGIS_KRAKEN.md`
 - AP-126, AP-127 in YouTrack

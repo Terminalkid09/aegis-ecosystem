@@ -1,10 +1,16 @@
 # Aegis 4.3 — Release Gate
 
-Status: 2026-11-21. **No `v4.3.0` tag has been cut and nothing is published.**
-The locally executable gates are green and the branch CI is green at
-`d867ef8` (run 44916543187). The hosted tag run, including the tag-only
-`release` job, is still required before calling the release published. There
-is no `4.3.0-rc1`: the release is cut directly as `v4.3.0`.
+Status: 2026-11-22. **No `v4.3.0` tag has been cut and nothing is published.**
+The 4.3 production-path work is on `release/4.3.0` (PR #18):
+provider-agnostic Authenticode signing, production GPG mode, cosign keyless
+release signing, RPM and ipk packages, xrdp log forwarding and AP-126/AP-127
+harnesses. PR #18 is `MERGEABLE/CLEAN`; its branch CI and packaging runs are
+green. The production validation harnesses are documented in
+[PRODUCTION_VALIDATION.md](PRODUCTION_VALIDATION.md); they are not release
+evidence until executed with the operator's certificate, tenant, lab, corpus
+and a future scheduled soak. The hosted tag run, including the tag-only `release` job, is still
+required before calling the release published. There is no `4.3.0-rc1`: the
+release is cut directly as `v4.3.0`.
 
 ## 2026-11-20 local verification update
 
@@ -29,7 +35,13 @@ hosted tag workflow:
   empty-file handling;
 - clean install core + Kraken: images rebuilt, admin bootstrap, API smoke
   **21/21**, Kraken and sensors healthy; signed ingest delivered one event to
-  the Brain (`sent=1`).
+  the Brain (`sent=1`);
+- Windows Docker Desktop: the same Compose stack was **healthy** (Brain, Link,
+  frontend, Caddy, Kraken, sensors, broker), with HTTP 200 from
+  Brain/frontend/Kraken and Caddy. The Windows server MSI now packages that
+  payload and was built plus administratively extracted. Aegis, Kraken and
+  suite now pass a clean-host install/CLI/PATH/uninstall test on Windows; a
+  pre-login service remains a host gate.
 
 The post-audit hardening was re-verified live through Caddy: password reset
 invalidates every pre-reset JWT and trusted device (DB `token_version`
@@ -56,10 +68,45 @@ skips; the new job is not a substitute for the hosted tag gate.
 
 Still open: **Gate 5** (hosted tag workflow), macOS CI execution (the
 `macos-latest` build/test job is configured, but no live Mac hardware or
-endpoint telemetry is supported), bare-metal Linux, and Windows Server live
-validation. **Do not publish/tag/push
-as a release on the strength of this local run alone.**
+endpoint telemetry is supported), bare-metal Linux, the server-package first
+start/reboot on a real Linux Docker host, the Windows server MSI pre-login
+service, Windows Server live validation, the production
+certificate/key and MDM
+tenant, the AP-126 isolated lab with an authorized sample, the AP-127 real
+corpus, and true multi-host failover. **Do not publish/tag/push as a
+release on the strength of this local run alone.**
 
+## 2026-11-22 packaging and update verification
+
+Executed locally in disposable containers (`debian:bookworm-slim` with systemd,
+`fedora:40`, Docker Desktop 29.5.3). The running development stack was not
+touched, and no release was published.
+
+- **deb install** (`apt install ./aegis_4.3.0_amd64.deb`): `postinst` enables
+  `aegis.service`, `/opt/aegis/server` payload present, `/etc/aegis/server.env`
+  is `0600 root:root`, `ak 4.3.0`;
+- **deb upgrade** 4.3.0 -> 4.3.1 via `ak update --version ... --from <dir>`:
+  SHA-256 verified, CLI and package both 4.3.1;
+- **downgrade guard**: 4.3.1 -> 4.3.0 without `--allow-downgrade` exits 1; with
+  the flag it installs 4.3.0;
+- **tampered checksum** and **missing sidecar** both exit 1 without touching the
+  installed version;
+- **suite** 4.3.0 -> 4.3.1 updates `aegis-suite`, `aegis` and `kraken` together;
+- **RPM**: `dnf install` and `rpm -e` install and remove `aegis-agent` cleanly;
+- **defect found and fixed**: `ak update` re-ran debconf and printed prompt text
+  plus Perl warnings. The updater now runs non-interactively with conffile
+  `--force-confdef`/`--force-confold`; re-tested 4.3.1 -> 4.3.2, zero prompt lines;
+- **ICE61**: `wix msi validate` reports only `WIX1076/ICE61`; with `-sice ICE61`
+  validation is clean. CI suppresses that single ICE by name;
+- **`ak start --wait`** and the `ak doctor` resource report are covered by
+  `scripts/tests/ak_smoke.sh` (PASS in WSL Ubuntu).
+
+Still open after this run: a real `ak update` against GitHub assets (no published
+release contains packages yet; the tag job is wired but has never executed), the
+first start/reboot on a real Linux Docker host, and the Windows pre-login
+service.
+
+## Decision
 ## Decision
 
 **4.3.0 is a product-complete controlled-pilot release, not a certified
@@ -114,13 +161,22 @@ prove a multi-host cluster, TLS throughput or 50,000 independent agent
 processes. The clean-install test proves the Compose/API path, not the native
 Windows/Linux agent service packaging.
 
+## Soak decision
+
+The 4.3.0 controlled pilot ships **without a new seven-day soak**. The v4.0.0
+soak passed, the 4.3 delta is small, and the risk is accepted rather than
+hidden: the current 4.3 sample only proves the harness starts. The soak is
+deferred to the next Aegis feature cycle, after firewall/DNS policy and the
+sensor/telemetry/process work; the sequence is Aegis soak, Aegis release,
+Kraken soak, Kraken release. It is not a 4.3 gate and not a customer step.
+
 ## Six gates
 
 | # | Gate | Status | Evidence / what remains |
 |---|---|---|---|
 | 1 | **AP-122** Link atomic check+push and 50k load | **PASS** | 50k live run above; raw evidence retained |
 | 2 | **AP-123** crash/restart and duplicate visibility | **PASS** | process restart/`attempt=2` and idempotent ack pass; OTA UI says `queued — not executed` and explains the ack/replay boundary |
-| 3 | Release bundle from a clean download | **PASS (local)** | 24-file `v4.3.0` unified-only bundle; manifest/checksums, copied-bundle smoke and `sha256sum -c` (24/24) pass, and `--require-agent` rejects a bundle without the four archives or the kernel helpers and rejects legacy/raw artifacts. GitHub asset download, cosign/provenance verification remain tag-time work; the release is unsigned by decision (`docs/RELEASE_SIGNING.md`) |
+| 3 | Release bundle from a clean download | **PASS (local)** | 24-file `v4.3.0` unified-only bundle; manifest/checksums, copied-bundle smoke and `sha256sum -c` (24/24) pass, and `--require-agent` rejects a bundle without the four archives or the kernel helpers and rejects legacy/raw artifacts. GitHub asset download and cosign/provenance verification remain tag-time work; the tag workflow signs `SHA256SUMS.txt` with cosign keyless OIDC and verifies it before publishing (`docs/RELEASE_SIGNING.md`) |
 | 4 | Upgrade from 4.2.1 | **PASS (server-only)** | 4.2.1 DB restored, 68 agents/321 alerts preserved, Brain 4.3.0 at Alembic head, smoke 21/21. Agent rollback is out of scope by decision |
 | 5 | Hosted CI at the tag | **NOT RUN** | CI is tag/manual only. The `v4.3.0` tag workflow must be green before publishing; a local green run is not a substitute |
 | 6 | **Clean install from the release bundle** | **PASS** | source archive extracted from `v4.3.0`, empty volumes, build + bootstrap + enrollment + event + alert + frontend/Link + smoke 21/21 |
@@ -147,40 +203,51 @@ one-liner could fetch its agent. The endpoint now returns the bounded
 artifact bytes directly; a 14-byte probe and the 3.4 MB `unified-latest.zip`
 both came back byte-identical, and a regression test covers it.
 
-**Gate 5 is the only remaining release blocker.** Do not publish the tag or
-call 4.3.0 released until that hosted run is green and its artifacts are
-verified. The branch CI at `d867ef8` (run 44916543187) is green for every
-non-release job: lint, contract, Go on Linux/Windows/macOS, Windows installers,
-OS compatibility, build/test, YARA, supply chain, NodeTrace Windows, Kraken and
-Compose E2E. `Release Artifacts` was skipped because it is tag-only. A green
-branch run does **not** prove the publishing job; the tag is still required.
+**Gate 5 is the only remaining gate in this document**, but it is not the only
+production input: the real Authenticode certificate, GPG key, MDM tenant and
+authorized AP-126/AP-127 lab/corpus are operator-supplied evidence (see
+“Production gaps in 4.3”). Do not publish the tag or call 4.3.0 released until
+the hosted run is green and its artifacts are verified. The branch CI at
+`a6b0343` (run 44936999687) is green for every non-release job: lint, contract,
+Go on Linux/Windows/macOS, Windows installers, OS compatibility, build/test,
+YARA, supply chain, NodeTrace Windows, Kraken and Compose E2E. `Release
+Artifacts` was skipped because it is tag-only. A green branch run does **not**
+prove the publishing job; the tag is still required.
 
-## Production gap after 4.3.0
+## Production gaps in 4.3
 
-This is the difference between a controlled-pilot release and production GA:
+The 4.3 branch now contains the executable production paths; these are the
+remaining operator inputs and evidence, not missing packaging code:
 
-- signed MSI/deb/rpm packages and native service drop-in, without `irm|iex` or
-  `curl|bash` as the production path;
-- 7-day soak with memory/leak checks, restart and duplicate-action visibility;
-- real endpoint traffic and a real malware corpus (AP-126);
-- measured detection quality on real benign/malicious data (AP-127);
+- **Delivered:** signed MSI/deb/rpm/ipk paths, native service drop-in,
+  provider-agnostic Authenticode signing, production GPG mode, cosign keyless
+  release signing and clean-host install/uninstall CI;
+- **External input for production GA:** the real Authenticode certificate/key
+  and protected GPG key must be supplied by the operator. The 4.3 controlled
+  pilot accepts explicitly labelled self-signed packages; production GA still
+  requires `mode=production`, a `Valid` Authenticode signature with timestamp
+  and the operator GPG key;
+- **External input:** MDM/Intune/GPO tenant validation requires the customer's
+  tenant; the clean Windows runner and MSI properties are ready;
+- **Deferred by decision:** the seven-day soak (`scripts/soak_7d.py`) is an
+  internal endurance harness. 4.3.0 ships without a new run; the v4.0.0 soak
+  passed and the 4.3 delta is small. It is not shipped in any MSI/deb/server
+  package, not a 4.3 gate and not a customer prerequisite. It is scheduled for
+  the next Aegis feature cycle, followed by the Kraken soak, as documented in
+  [PRODUCTION_VALIDATION.md](PRODUCTION_VALIDATION.md);
+- **AP-126:** the bounded sandbox harness is shipped; executing live malware
+  requires an authorized sample and an isolated, snapshot/restore-capable lab;
+- **AP-127:** the labelled-corpus gate with recall/FPR and per-host/day metrics
+  is shipped; a production quality claim requires the real corpus;
 - external security review/pen test and a backup/restore drill;
 - multi-host Redis/Postgres failure tests and a documented support model.
 
-Real detonation and AWS are **not** blockers for 4.3.0:
+AP-126/AP-127 are **inside the 4.3 production gate**. The repository does not
+fabricate real-malware or real-corpus results: it ships the safe harness and
+the gate, and the operator supplies the authorized lab and corpus.
 
-- **AP-126 real detonation is post-4.3 by decision**, not deferred work hidden
-  inside the release. Executing live malware requires an isolated VM/container
-  with snapshot/restore, an authorized sample and a kill switch that this
-  workstation does not provide. The 4.3 claim is the **controlled HTTP
-  detonation integration**, not malware execution. The release gate says so and
-  must not be changed to imply otherwise;
-- **AP-127 production FP/FN is post-4.3 by decision.** The 4.3 evidence is a
-  frozen synthetic baseline; a production rate requires real benign/malicious
-  traffic and per-host/day measurement. The baseline is runnable and honest,
-  but it is not a production quality claim;
-- AWS/MinIO: optional by design; Garage and local storage are supported for
-  the pilot. AWS is not certified.
+AWS/MinIO remains optional by design; Garage and local storage are supported
+for the pilot. AWS is not certified.
 
 ## Allowed claims
 
@@ -196,11 +263,14 @@ Real detonation and AWS are **not** blockers for 4.3.0:
 
 ## Not allowed
 
-- “4.3.0 released” or “production GA” while gate 5 is not green;
+- “4.3.0 released” while gate 5 is not green; “production GA” while the
+  production certificate/key and real lab/corpus evidence are missing. The
+  controlled pilot may use explicitly labelled self-signed packages; that is not
+  a production-GA claim;
 - “real malware detonation certified”;
 - “AWS tested” or “MinIO tested”;
 - “exactly-once”;
-- “production-ready detection quality”;
+- “production-ready detection quality” without the AP-127 real corpus;
 - “agent rollback tested” (it is outside 4.3.0);
 - “the unified service was installed on a target host” (artifact download and
   agent run were tested; service registration is still outside 4.3.0);
@@ -208,10 +278,11 @@ Real detonation and AWS are **not** blockers for 4.3.0:
 
 ## Release sequence
 
-1. Commit the release state on `feat/4.3-agent-go`.
-2. Create the annotated `v4.3.0` tag and push it only as the release action.
+1. Merge PR #18 into `dev`, then open and merge the release PR into `main`.
+2. Create the annotated `v4.3.0` tag from `main` and push it only as the release action.
 3. Run the tag workflow; require gate 5 green and verify the downloaded assets
-   and provenance attestation.
+   and the cosign/provenance evidence.
 4. Publish `v4.3.0`; do not create `4.3.0-rc1`.
-5. Start AP-126/AP-127 live validation only after the 4.3.0 tag; no new
+5. Attach the authorized AP-126/AP-127 lab and corpus evidence and the real
+   certificate/key/MDM evidence as part of the 4.3 production gate; no new
    firewall/DNS feature is part of 4.3.

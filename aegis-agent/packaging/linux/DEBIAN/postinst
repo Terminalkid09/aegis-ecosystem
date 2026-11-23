@@ -4,10 +4,15 @@ set -e
 install -d -m 0700 /var/lib/aegis-agent
 install -d -m 0750 /etc/aegis-agent
 
-if command -v systemctl >/dev/null 2>&1; then
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
     # Enable, do not start: the enrollment token must be provisioned first.
-    systemctl enable aegis-agent.service || true
+    # Failing to enable would leave a host that looks installed but never comes
+    # back after a reboot, so this is a package installation failure. The
+    # /run/systemd/system guard keeps image/chroot builds from pretending to be
+    # a running booted host.
+    systemctl enable aegis-agent.service
+    systemctl is-enabled --quiet aegis-agent.service
 fi
 
 exit 0

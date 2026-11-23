@@ -241,14 +241,35 @@ if ($RemoteDashboard) {
     if (Get-Service $Service -ErrorAction SilentlyContinue) {
         Stop-Service $Service -Force -ErrorAction SilentlyContinue
         sc.exe delete $Service | Out-Null
-        Start-Sleep -Milliseconds 500
+        # A deleted service can stay "marked for deletion" while its handles
+        # close. Creating the replacement too early fails after the package is
+        # already on disk, leaving the endpoint unsupervised.
+        $deadline = (Get-Date).AddSeconds(15)
+        while ((Get-Service $Service -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+        }
+        if (Get-Service $Service -ErrorAction SilentlyContinue) {
+            throw "Service $Service is still marked for deletion; reboot or close Service Manager and retry."
+        }
     }
     New-Service -Name $Service -BinaryPathName "`"$binary`"" `
         -DisplayName $Service -Description "Aegis unified agent" `
         -StartupType Automatic | Out-Null
     sc.exe failure $Service reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not configure service recovery for $Service (exit $LASTEXITCODE)."
+    }
+    $failure = (sc.exe qfailure $Service 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0 -or $failure -notmatch 'RESTART|RIAVVIA') {
+        throw "Service recovery for $Service was not persisted."
+    }
     Start-Service $Service
-    Write-Host "[aegis] $Service service installed and started in mode=$AgentMode."
+    $svc = Get-Service $Service
+    $svc.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(20))
+    if ([string]$svc.StartType -ne 'Automatic') {
+        throw "$Service start type is $($svc.StartType), expected Automatic."
+    }
+    Write-Host "[aegis] $Service service installed, AUTOMATIC and started in mode=$AgentMode."
     Write-Host "[aegis] The target must keep outbound TLS access to $Base to download, enroll and heartbeat."
 } else {
     Write-Host "[aegis] remote dashboard NOT selected: files extracted, no service registered."
@@ -306,19 +327,23 @@ EOF
 Description=Aegis unified agent
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 ExecStart=$DIR/aegis-agent
 EnvironmentFile=$DIR/aegis.env
 Restart=always
-RestartSec=5
+RestartSec=5s
+LimitNOFILE=65536
 User=root
 
 [Install]
 WantedBy=multi-user.target
 EOF
+    systemctl daemon-reload
     systemctl enable --now aegis-unified.service
+    systemctl is-enabled --quiet aegis-unified.service
     systemctl is-active --quiet aegis-unified.service
     echo "[aegis] aegis-unified service installed and started (mode=$AGENT_MODE)."
     echo "[aegis] The target must keep outbound TLS access to $BASE to download, enroll and heartbeat."

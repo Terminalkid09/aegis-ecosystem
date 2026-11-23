@@ -14,6 +14,13 @@
 </p>
 
 <p align="center">
+  <a href="https://gitdiagram.com/terminalkid09/aegis-ecosystem?utm_source=readme&utm_medium=badge">
+    <img src="https://gitdiagram.com/diagram-badge.svg" alt="AI-generated architecture overview (non-authoritative)" />
+  </a>
+</p>
+<p align="center"><sub>GitDiagram overview generated from <code>main</code>; it is AI-generated and non-authoritative. Versioned diagrams in this repository are canonical.</sub></p>
+
+<p align="center">
   <a href="#overview">Overview</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#platform-support">Platforms</a> •
@@ -56,13 +63,22 @@ a confidence signal instead of a flat boolean. See [YARA feeds](docs/YARA_FEEDS.
 
 Requirements: **Docker Desktop running** and **Python 3.15+**. Endpoint agents are installed separately from the dashboard.
 
+The agent MSI and agent deb install only the endpoint. A customer server install
+uses `aegis`, `kraken`, or `aegis-suite` on Linux/Windows: the Windows matrix is
+`aegis-server`, `kraken-server` and `aegis-suite`, all self-contained and using
+Docker Desktop; see [Packaging](docs/PACKAGING.md). The server packages expose
+`ak` for `start`, `stop`, `status`, `logs`, `doctor`, `configure` and `update`;
+the Windows MSIs put `ak` on the machine `PATH`. Try `ak --help` after install.
+The full reference is [the `ak` CLI](docs/AK_CLI.md). The `setup.py` path below
+remains the developer/source-tree workflow.
+
 ```bash
 git clone https://github.com/Terminalkid09/aegis-ecosystem.git
 cd aegis-ecosystem
 python scripts/setup.py
 ```
 
-`setup.py` generates a `.env` with random secrets, starts the stack, waits for readiness, bootstraps the first admin and runs the API smoke test. The admin password is printed **once** and is not written back to `.env`.
+`setup.py` generates a `.env` with random secrets, starts the stack, waits for readiness, initializes the CA/manifest key (PKI), bootstraps the first admin and runs the API smoke test. The admin password is printed **once** and is not written back to `.env`.
 
 Update without touching the database volume:
 
@@ -86,7 +102,7 @@ a real ACME email, and keep `ALLOWED_ORIGINS`/`PUBLIC_BASE_URL` on the same host
 Caddy obtains and renews a Let's Encrypt certificate automatically. No domain or
 certificate is hardcoded in the repository.
 
-The default dashboard is `http://localhost:3000`; the Brain API is `http://localhost:8000`. Never expose the lab stack directly to the Internet.
+The default dashboard is `http://localhost:3000`; set `AEGIS_UI_PORT` to change it, and the server package falls back to the first free port in `3000-3099` if it is occupied. The Brain API is `http://localhost:8000`. Never expose the lab stack directly to the Internet.
 
 Caddy is the production TLS/reverse-proxy edge when it runs with a real FQDN,
 ACME and the mTLS overlay; it is not a complete HA or monitoring solution. Run
@@ -126,13 +142,14 @@ Latest local verification: **2026-11-21**.
 | Kraken pytest | **154 passed** |
 | Frontend production build | **PASS** |
 | Frontend lint | **0 errors, 24 warnings** |
-| Playwright pages/session/smoke/Kraken through Caddy (post-4.3) | **13 passed**; the `users` spec assumes a single-admin database and was not used for this local run |
+| Playwright pages/session/smoke/Kraken through Caddy | **13 passed**; the `users` spec assumes a single-admin database and was not used for this local run |
 | Playwright OIDC against Keycloak 26.0.7 | **2 passed** |
 | ETW live elevated | **PASS**, 95 events; non-admin **exit 2** |
 | WSL2 Ubuntu / Kali eBPF | **PASS**; benchmark **300/300**, zero lost events |
 | macOS Darwin build (amd64/arm64) | **PASS locally**; `macos-latest` job added to CI; no live hardware |
 | File secrets + real Vault KV v2 | **PASS**, including precedence and fail-closed cases |
 | Clean install from Git clone, core + Kraken | **PASS**; API smoke **21/21**; Kraken healthy |
+| Persistence contracts | `scripts/persistence_check.py` **PASS** (static + container policies); the live Windows service was not installed because this shell is not elevated; a real reboot remains a gate |
 | Unified capability modes | `full`, `sensor`, `endpoint` via token/installer/`--mode`; one `agent_type=unified` record in every mode | **PASS locally** |
 | Docker hardening | Compose valid, CPU/RAM/PID limits, `no-new-privileges`, non-root broker, sensors internal by default | **PASS locally** |
 | Branch/PR CI | CI now runs on `dev`, `main`, `feat/**`, pull requests and tags; release job remains tag-only | **PASS — run 44916543187 (non-release jobs); tag job not run** |
@@ -148,8 +165,13 @@ Not verified locally: hosted CI/tag workflow, bare-metal Linux, Windows Server l
 | [Secrets](docs/SECRETS.md) | File, Docker/Kubernetes and Vault configuration. |
 | [OIDC](docs/OIDC.md) | SSO configuration, role mapping and break-glass. |
 | [Operations](docs/OPERATIONS.md) | Install, upgrade, backup/restore and PKI. |
+| [Packaging](docs/PACKAGING.md) | Endpoint vs server packages, contents and customer install. |
+| [Release policy](docs/RELEASE_POLICY.md) | Supported lines, artifact retention, update and downgrade rules. |
+| [`ak` CLI](docs/AK_CLI.md) | Server commands, privileges, updates, port/URL configuration and exit codes. |
 | [Pilot runbook](docs/PILOT_RUNBOOK.md) | Pilot deployment and acceptance. |
 | [Release gate](docs/RELEASE_GATE_4.3.md) | What is green, what remains, and allowed claims. |
+| [Production validation](docs/PRODUCTION_VALIDATION.md) | Internal test harnesses (soak, DR, HA, AP-126/127), with external inputs and limits. |
+| [Persistence](docs/PERSISTENCE.md) | What restarts after a reboot, what does not, and the Docker daemon prerequisite. |
 | [Threat model](docs/THREAT_MODEL.md) | Assets, trust boundaries and mitigations. |
 | [Benchmarks](docs/BENCHMARK.md) | Load methodology and measured numbers. |
 | [YARA feeds](docs/YARA_FEEDS.md) | Signed rule bundles, key rotation and fail-closed import. |
@@ -178,6 +200,6 @@ The repository is a monorepo: `aegis-brain` (FastAPI), `aegis-agent` (Go), `aegi
 
 ## License
 
-Aegis Ecosystem is licensed under **AGPL-3.0-only**. See [LICENSE](LICENSE) and [NOTICE](NOTICE). The name and logo are governed by [TRADEMARK.md](TRADEMARK.md). Security reports: [SECURITY.md](SECURITY.md).
+Aegis Ecosystem is licensed under **AGPL-3.0-only** (the root is not Apache). See [LICENSE](LICENSE) and [NOTICE](NOTICE). **Kraken** is a separately licensed **MIT** component: see [services/kraken/LICENSE](services/kraken/LICENSE) and its [README](services/kraken/README.md#license). The MIT component is distributed inside the AGPL bundle and keeps its own notice; it does not relicense the rest of the repository. The name and logo are governed by [TRADEMARK.md](TRADEMARK.md). Security reports: [SECURITY.md](SECURITY.md).
 
 <p align="center"><strong>Authorized use only.</strong> Aegis is a defensive platform for systems you own or have explicit written permission to monitor.</p>

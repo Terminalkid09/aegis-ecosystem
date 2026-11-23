@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,79 +24,126 @@ import (
 
 var buildVersion = config.DefaultVersion
 
+var (
+	flagProfile string
+	flagMode    string
+	flagHome    string
+	flagConfig  string
+	flagOnce    bool
+	flagCheck   bool
+	flagVersion bool
+)
+
 func main() {
-	var (
-		profile     string
-		mode        string
-		home        string
-		configPath  string
-		once        bool
-		check       bool
-		showVersion bool
-	)
-	flag.StringVar(&profile, "profile", "", "profilo: sensor, endpoint, unified o router")
-	flag.StringVar(&mode, "mode", "", "modalità unified: full, sensor o endpoint (un solo agente)")
-	flag.StringVar(&home, "home", "", "directory stato agente")
-	flag.StringVar(&configPath, "config", "", "path config.json")
-	flag.BoolVar(&once, "once", false, "invia un ciclo e termina")
-	flag.BoolVar(&check, "check", false, "verifica configurazione e identità senza rete")
-	flag.BoolVar(&showVersion, "version", false, "stampa la versione")
+	flag.StringVar(&flagProfile, "profile", "", "profilo: sensor, endpoint, unified o router")
+	flag.StringVar(&flagMode, "mode", "", "modalità unified: full, sensor o endpoint (un solo agente)")
+	flag.StringVar(&flagHome, "home", "", "directory stato agente")
+	flag.StringVar(&flagConfig, "config", "", "path config.json")
+	flag.BoolVar(&flagOnce, "once", false, "invia un ciclo e termina")
+	flag.BoolVar(&flagCheck, "check", false, "verifica configurazione e identità senza rete")
+	flag.BoolVar(&flagVersion, "version", false, "stampa la versione")
 	flag.Parse()
 
+	// The MSI and the Deployment Manager one-liner register AegisAgent as a
+	// Windows service. A process started by the SCM must call
+	// StartServiceCtrlDispatcher within 30 seconds or the SCM fails the start
+	// with error 1053, so the dispatcher runs before any network work.
+	handled, err := runAsService(func(ctx context.Context) error {
+		return runAgent(ctx, true)
+	})
+	if handled {
+		if err != nil {
+			fatal("servizio", err)
+		}
+		return
+	}
+
+	if err := runAgent(context.Background(), false); err != nil {
+		fatal("agente", err)
+	}
+}
+
+func runAgent(ctx context.Context, serviceMode bool) (err error) {
 	cfg, err := config.Load(config.Options{
-		Profile:    profile,
-		Mode:       mode,
-		AgentHome:  home,
-		ConfigFile: configPath,
+		Profile:    flagProfile,
+		Mode:       flagMode,
+		AgentHome:  flagHome,
+		ConfigFile: flagConfig,
 		Version:    buildVersion,
 	})
 	if err != nil {
-		fatal("configurazione", err)
+		return fmt.Errorf("configurazione: %w", err)
 	}
-	if showVersion {
+	if flagVersion {
 		fmt.Println(cfg.Version)
-		return
+		return nil
 	}
-	if check {
+	if flagCheck {
 		fmt.Printf("profile=%s mode=%s sensor=%t endpoint=%t version=%s home=%s server=%s token=%s\n",
 			cfg.Profile, cfg.Mode, cfg.SensorEnabled(), cfg.EndpointEnabled(),
 			cfg.Version, cfg.AgentHome, cfg.ServerURL, cfg.TokenFile)
-		return
+		return nil
 	}
 	if err := cfg.ValidateNetwork(); err != nil {
-		fatal("endpoint", err)
+		return fmt.Errorf("endpoint: %w", err)
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	// A service has no console: an early failure (TLS, PID lock, enrollment)
+	// must still leave a trace in the state directory, otherwise the SCM only
+	// reports the opaque "terminated with error %%1".
+	if serviceMode {
+		defer func() {
+			if err != nil {
+				appendServiceError(cfg.IdentityDir, err)
+			}
+		}()
+	}
+
+	// A service has no console: keep stderr for interactive runs and mirror it
+	// into the state directory so the operator can read what happened.
+	out := io.Writer(os.Stderr)
+	if serviceMode {
+		if file, err := os.OpenFile(filepath.Join(cfg.IdentityDir, "agent.log"),
+			os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+			defer file.Close()
+			out = io.MultiWriter(os.Stderr, file)
+		}
+	}
+	logger := slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
 	httpClient, certHeader, err := buildHTTPClient(cfg)
 	if err != nil {
-		fatal("TLS", err)
+		return fmt.Errorf("TLS: %w", err)
 	}
 	client := transport.New(httpClient)
 	client.ClientCert = certHeader
 
 	lock, err := agent.AcquirePID(filepath.Join(cfg.AgentHome, "agent.pid"))
 	if err != nil {
-		fatal("lock agente", err)
+		return fmt.Errorf("lock agente: %w", err)
 	}
 	defer lock.Release()
 
 	a := agent.New(cfg, identity.NewStore(cfg.TokenFile), client, telemetry.NewCollector(), logger)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	if !serviceMode {
+		var stop context.CancelFunc
+		ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+	}
 
 	if err := a.EnsureIdentity(ctx); err != nil {
-		fatal("identità", err)
+		return fmt.Errorf("identità: %w", err)
 	}
-	if once {
+	if flagOnce {
 		if err := a.RunOnce(ctx); err != nil {
-			fatal("ciclo singolo", err)
+			return fmt.Errorf("ciclo singolo: %w", err)
 		}
-		return
+		return nil
 	}
-	if err := a.Run(ctx); err != nil {
-		fatal("agente", err)
+	if err := a.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		return fmt.Errorf("agente: %w", err)
 	}
+	return nil
 }
 
 func buildHTTPClient(cfg config.Config) (*http.Client, string, error) {
@@ -151,6 +200,16 @@ func certificateFingerprint(path string) (string, error) {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func appendServiceError(dir string, err error) {
+	path := filepath.Join(dir, "agent.log")
+	file, ferr := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if ferr != nil {
+		return
+	}
+	defer file.Close()
+	fmt.Fprintf(file, "errore servizio: %v\n", err)
 }
 
 func fatal(what string, err error) {

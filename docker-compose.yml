@@ -182,6 +182,9 @@ services:
         condition: service_healthy
       aegis-redis:
         condition: service_healthy
+    networks:
+      - default
+      - aegis_shared
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8000/ || exit 1"]
       interval: 10s
@@ -230,7 +233,7 @@ services:
     security_opt:
       - no-new-privileges:true
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${AEGIS_UI_PORT:-3000}:3000"
     environment:
       - VITE_API_URL=${VITE_API_URL:-/api/v1}
     depends_on:
@@ -262,6 +265,9 @@ services:
         condition: service_healthy
       aegis-frontend:
         condition: service_started
+    networks:
+      - default
+      - aegis_shared
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1"]
       interval: 10s
@@ -456,6 +462,7 @@ services:
     networks:
       - default
       - kraken_internal
+      - aegis_shared
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 15s
@@ -477,6 +484,15 @@ services:
     mem_limit: ${AEGIS_KRAKEN_RDP_MEM_LIMIT:-1g}
     cpus: "${AEGIS_KRAKEN_RDP_CPUS:-1.0}"
     pids_limit: ${AEGIS_KRAKEN_RDP_PIDS:-300}
+    environment:
+      INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set for the kraken profile}
+      KRAKEN_RDP_INGEST_ENABLED: ${KRAKEN_RDP_INGEST_ENABLED:-true}
+      KRAKEN_RDP_INGEST_URL: ${KRAKEN_RDP_INGEST_URL:-http://aegis-kraken:8000}
+      KRAKEN_RDP_SENSOR_PORT: ${KRAKEN_RDP_SENSOR_PORT:-3389}
+      KRAKEN_RDP_LOG_PATHS: ${KRAKEN_RDP_LOG_PATHS:-/var/log/auth.log,/var/log/xrdp.log,/var/log/xrdp-sesman.log}
+    depends_on:
+      aegis-kraken:
+        condition: service_healthy
     security_opt:
       - no-new-privileges:true
     expose:
@@ -576,6 +592,11 @@ networks:
   # The app also joins the default network so Caddy can route /kraken/* to it.
   kraken_internal:
     internal: true
+  # Stable cross-stack network used by the aegis-suite package. A standalone
+  # Aegis or Kraken install gets the network too, but only the suite wires the
+  # shared SSO/ingest secrets that make the two stacks talk to each other.
+  aegis_shared:
+    name: aegis_shared
 
 volumes:
   link_spool:

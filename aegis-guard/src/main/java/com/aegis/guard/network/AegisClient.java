@@ -72,8 +72,8 @@ public class AegisClient {
     /**
      * Installa l'identità device: ricostruisce il client HTTP con contesto
      * TLS mutuo (cert device + CA server pinnata). Senza CA server resta il
-     * TLS di default, ma l'header X-Client-Cert viaggia comunque (verifica
-     * app-layer). Mai trust-all.
+     * TLS di default, ma l'header X-Client-Cert-Hash viaggia comunque
+     * (verifica app-layer). Mai trust-all.
      */
     public synchronized void setIdentity(java.security.PrivateKey key,
             java.security.cert.X509Certificate[] chain,
@@ -105,27 +105,27 @@ public class AegisClient {
                 this.httpClient = next;
                 log.info("mTLS attivo: certificato device + CA server pinnata");
             } catch (Exception e) {
-                log.warn("mTLS non attivabile ({}): nessuna identit� device", e.getMessage());
+                log.warn("mTLS non attivabile ({}): nessuna identit� device", e.getMessage());
             }
         }
     }
 
-    /** Certificato device in base64(DER) single-line per l'header, o null. */
-    public String deviceCertB64() {
+    /** SHA-256 hex del certificato device (fingerprint legato all'agent), o null. */
+    public String deviceCertHash() {
         try {
             java.security.cert.X509Certificate[] chain = this.deviceChain;
             if (chain == null || chain.length == 0) return null;
-            return java.util.Base64.getEncoder().encodeToString(chain[0].getEncoded());
+            return com.aegis.guard.security.DeviceIdentity.fingerprintSha256(chain[0]);
         } catch (Exception e) {
             return null;
         }
     }
 
-    /** Aggiunge l'header di mutua autenticazione quando l'identità esiste. */
+    /** Aggiunge il fingerprint mTLS; il certificato completo non è accettato. */
     private void addIdentityHeader(org.apache.hc.core5.http.ClassicHttpRequest request) {
-        String b64 = deviceCertB64();
-        if (b64 != null) {
-            request.setHeader("X-Client-Cert", b64);
+        String hash = deviceCertHash();
+        if (hash != null) {
+            request.setHeader("X-Client-Cert-Hash", hash);
         }
     }
 

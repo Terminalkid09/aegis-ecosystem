@@ -462,7 +462,7 @@ func (c *Config) deriveURLs() {
 // server_url is already the API base (for example https://host/api/v1), so it
 // is not the NodeTrace heartbeat origin.
 func (c *Config) deriveGuardURLs() {
-	base := strings.TrimRight(strings.TrimSpace(c.ServerURL), "/")
+	base := apiBaseFromServerURL(c.ServerURL)
 	if base == "" {
 		base = guardBaseFromReportURL(c.ReportURL)
 	}
@@ -589,6 +589,25 @@ func (c Config) ValidateNetwork() error {
 		}
 	}
 	return nil
+}
+
+// apiBaseFromServerURL accepts both contracts: the Deployment Manager sets
+// AEGIS_BRAIN_URL to the API base (https://host/api/v1), while the MSI ships
+// BRAIN_URL as an origin (https://host). An origin would otherwise produce
+// /enroll/enroll, which the frontend answers with 405 instead of the Brain.
+func apiBaseFromServerURL(raw string) string {
+	base := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if base == "" {
+		return ""
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" {
+		return base
+	}
+	if strings.Trim(u.Path, "/") == "" {
+		return base + "/api/v1"
+	}
+	return base
 }
 
 func originURL(raw string) string {

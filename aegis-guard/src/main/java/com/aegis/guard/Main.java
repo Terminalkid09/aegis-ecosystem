@@ -387,8 +387,17 @@ public class Main {
         // Audit L8: prima un no-op usciva silenziosamente e il comando veniva
         // ack-ato "ok" al SOC (falso positivo di azione applicata).
         if (pid == 0) { throw new IllegalArgumentException("KILL_PROCESS: no PID provided"); }
-        Optional<ProcessHandle> ph = ProcessHandle.of(pid);
-        ph.ifPresent(ProcessHandle::destroyForcibly);
+        ProcessHandle handle = ProcessHandle.of(pid).orElseThrow(
+                () -> new IllegalArgumentException("KILL_PROCESS: process " + pid + " not found"));
+        if (!handle.isAlive()) {
+            throw new IllegalStateException("KILL_PROCESS: process " + pid + " is not running");
+        }
+        handle.destroyForcibly();
+        try {
+            handle.onExit().get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new IllegalStateException("KILL_PROCESS: process " + pid + " did not terminate", e);
+        }
         log.info("[MITIGATION] KILL_PROCESS: PID {} terminated", pid);
     }
 
@@ -401,16 +410,21 @@ public class Main {
         if (pid == 0) { throw new IllegalArgumentException("KILL_PROCESS_TREE: no PID provided"); }
 
         if (isWindows()) {
-            exec("taskkill", "/F", "/T", "/PID", String.valueOf(pid));
+            ExecResult killed = execResult("taskkill", "/F", "/T", "/PID", String.valueOf(pid));
+            if (killed.exitCode() != 0) {
+                throw new IllegalStateException("KILL_PROCESS_TREE failed: " + killed.output());
+            }
         } else {
             // Kill process group
-            Optional<ProcessHandle> ph = ProcessHandle.of(pid);
-            if (ph.isPresent()) {
-                ph.get().children().forEach(child -> {
-                    child.destroyForcibly();
-                    log.info("[MITIGATION] KILL_PROCESS_TREE: child PID {} terminated", child.pid());
-                });
-                ph.get().destroyForcibly();
+            ProcessHandle handle = ProcessHandle.of(pid).orElseThrow(
+                    () -> new IllegalArgumentException("KILL_PROCESS_TREE: process " + pid + " not found"));
+            handle.children().forEach(child -> {
+                child.destroyForcibly();
+                log.info("[MITIGATION] KILL_PROCESS_TREE: child PID {} terminated", child.pid());
+            });
+            handle.destroyForcibly();
+            if (handle.isAlive()) {
+                throw new IllegalStateException("KILL_PROCESS_TREE: process " + pid + " is still running");
             }
         }
         log.info("[MITIGATION] KILL_PROCESS_TREE: PID {} and children terminated", pid);
@@ -435,12 +449,16 @@ public class Main {
             throw new SecurityException("BLOCK_IP refused: target is the Aegis server (" + brainHost + ")");
         }
 
+        ExecResult applied;
         if (isWindows()) {
             String ruleName = "Aegis_Block_" + ip.replace('.', '_');
-            exec("netsh", "advfirewall", "firewall", "add", "rule",
+            applied = execResult("netsh", "advfirewall", "firewall", "add", "rule",
                  "name=" + ruleName, "dir=in", "action=block", "remoteip=" + ip);
         } else {
-            exec("iptables", "-A", "INPUT", "-s", ip, "-j", "DROP");
+            applied = execResult("iptables", "-A", "INPUT", "-s", ip, "-j", "DROP");
+        }
+        if (applied.exitCode() != 0) {
+            throw new IllegalStateException("BLOCK_IP failed: " + applied.output());
         }
 
         log.info("[MITIGATION] BLOCK_IP: {} blocked", ip);
@@ -465,7 +483,7 @@ public class Main {
     //  QUARANTINE_BINARY
     // ----------------------------------------------------------------
 
-    private static void handleQuarantineBinary(JsonObject cmd) {
+    private static void handleQuarantineBinary(JsonObject cmd) throws Exception {
         long pid = getPid(cmd);
         if (pid == 0) { throw new IllegalArgumentException("QUARANTINE_BINARY: no PID provided"); }
 
@@ -479,25 +497,27 @@ public class Main {
             throw new IllegalArgumentException("QUARANTINE_BINARY: binary not found at " + exePath);
         }
 
-        try {
-            String hash = sha256(src);
-            String ts = Instant.now().toString().replace(":", "-").substring(0, 19);
-            String fname = ts + "_" + hash.substring(0, 12) + "_" + src.getFileName();
-            Path dest = getQuarantineDir().resolve(fname);
-            Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
+        String hash = sha256(src);
+        String ts = Instant.now().toString().replace(":", "-").substring(0, 19);
+        String fname = ts + "_" + hash.substring(0, 12) + "_" + src.getFileName();
+        Path dest = getQuarantineDir().resolve(fname);
+        Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
 
-            // Restrict permissions
-            if (isWindows()) {
-                exec("icacls", exePath, "/deny", "Everyone:(R,W,X)");
-            } else {
-                src.toFile().setExecutable(false, false);
-                src.toFile().setReadable(false, false);
-                src.toFile().setWritable(false, false);
+        // Il comando può essere ack-ato ok solo se il binario è stato
+        // realmente neutralizzato: prima l'eccezione veniva solo loggata.
+        if (isWindows()) {
+            ExecResult restricted = execResult("icacls", exePath, "/deny", "Everyone:(R,W,X)");
+            if (restricted.exitCode() != 0) {
+                throw new IllegalStateException("QUARANTINE_BINARY: icacls failed: " + restricted.output());
             }
-            log.info("[MITIGATION] QUARANTINE_BINARY: {} -> {} (hash={})", exePath, dest, hash);
-        } catch (Exception e) {
-            log.warn("[MITIGATION] QUARANTINE_BINARY failed: {}", e.getMessage());
+        } else {
+            if (!src.toFile().setExecutable(false, false)
+                    || !src.toFile().setReadable(false, false)
+                    || !src.toFile().setWritable(false, false)) {
+                throw new IllegalStateException("QUARANTINE_BINARY: could not remove permissions from " + exePath);
+            }
         }
+        log.info("[MITIGATION] QUARANTINE_BINARY: {} -> {} (hash={})", exePath, dest, hash);
     }
 
     private static String getProcessPath(long pid) {
@@ -663,7 +683,7 @@ public class Main {
         return value != null && value.length() <= 253 && DOMAIN_RE.matcher(value.trim()).matches();
     }
 
-    private static void handleDnsSinkhole(JsonObject cmd) {
+    private static void handleDnsSinkhole(JsonObject cmd) throws IOException {
         String domain = cmd.has("domain") ? cmd.get("domain").getAsString() : null;
         if (domain == null) { throw new IllegalArgumentException("DNS_SINKHOLE: no domain provided"); }
         domain = domain.trim().toLowerCase();
@@ -675,19 +695,15 @@ public class Main {
             ? System.getenv("SystemRoot") + "\\System32\\drivers\\etc\\hosts"
             : "/etc/hosts";
 
-        try {
-            Path hp = Paths.get(hostsPath);
-            String content = Files.readString(hp);
-            if (content.contains(domain)) {
-                log.info("[MITIGATION] DNS_SINKHOLE: {} already in hosts", domain);
-                return;
-            }
-            String entry = "\n# Aegis block - " + Instant.now() + "\n0.0.0.0 " + domain + "\n";
-            Files.writeString(hp, entry, StandardOpenOption.APPEND);
-            log.info("[MITIGATION] DNS_SINKHOLE: {} -> 0.0.0.0 added to {}", domain, hostsPath);
-        } catch (Exception e) {
-            log.warn("[MITIGATION] DNS_SINKHOLE failed: {}", e.getMessage());
+        Path hp = Paths.get(hostsPath);
+        String content = Files.readString(hp);
+        if (content.contains(domain)) {
+            log.info("[MITIGATION] DNS_SINKHOLE: {} already in hosts", domain);
+            return;
         }
+        String entry = "\n# Aegis block - " + Instant.now() + "\n0.0.0.0 " + domain + "\n";
+        Files.writeString(hp, entry, StandardOpenOption.APPEND);
+        log.info("[MITIGATION] DNS_SINKHOLE: {} -> 0.0.0.0 added to {}", domain, hostsPath);
     }
 
     // ----------------------------------------------------------------
@@ -835,7 +851,7 @@ public class Main {
             serverCa = com.aegis.guard.security.DeviceTls.loadServerCa(
                     java.nio.file.Paths.get(Config.SERVER_CA_FILE));
             if (serverCa == null) {
-                log.warn("AEGIS_SERVER_CA illeggibile: solo header X-Client-Cert, niente TLS mutuo");
+                log.warn("AEGIS_SERVER_CA illeggibile: solo header X-Client-Cert-Hash, niente TLS mutuo");
             }
         }
         client.setIdentity(id.key(), id.chain(), serverCa);
@@ -931,7 +947,7 @@ public class Main {
     private static void handleCollectIoc(JsonObject cmd) {
         long pid = getPid(cmd);
         String processName = getProcessName(cmd);
-        if (pid == 0) { log.warn("[MITIGATION] COLLECT_IOC: no PID provided"); return; }
+        if (pid == 0) { throw new IllegalArgumentException("COLLECT_IOC: no PID provided"); }
 
         JsonObject ioc = new JsonObject();
         ioc.addProperty("pid", pid);

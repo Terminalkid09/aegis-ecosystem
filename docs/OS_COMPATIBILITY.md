@@ -97,3 +97,33 @@ single-use token, persist no password, and do not compile on the target
 
 Agent rollback is outside 4.3.0; the supported rollback boundary is the server
 plus a database restore.
+
+## 5. Docker Desktop memory on Windows
+
+The Windows server packages run the same Linux images through Docker Desktop,
+which lives in one WSL2 VM shared by every distribution (`Ubuntu`,
+`docker-desktop`, ...). The memory shown in Task Manager is that VM, not Aegis:
+
+- by default WSL2 may grow to about half of host RAM and keeps page cache after a
+  build, so it can look large while idle;
+- bound it in `%USERPROFILE%\.wslconfig`:
+
+```ini
+[wsl2]
+memory=12GB
+processors=8
+swap=2GB
+autoMemoryReclaim=gradual
+```
+
+- `wsl --shutdown` resets the VM when a build left it large;
+- the Aegis profile's `mem_limit` values sum to about 4 GiB (Postgres 1g, Redis
+  512m, Brain 1g, Link 1g, frontend 256m, Caddy 256m); Kraken adds about 4 GiB
+  and the optional `ollama` profile 2 GiB. A 12 GiB ceiling fits the suite with
+  room for an image build;
+- `ak doctor` prints host RAM, the engine limit and live usage per container, so
+  the operator can separate the VM ceiling from real demand.
+
+Docker Desktop is required because Linux containers need the Linux kernel; it is
+a per-user application, so containers start after that user signs in. See
+[PERSISTENCE.md](PERSISTENCE.md#windows-pc).

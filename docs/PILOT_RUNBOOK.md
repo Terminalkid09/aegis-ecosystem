@@ -48,6 +48,15 @@ enroll and heartbeat. The UI no longer offers SSH/WinRM or an offline-only
 checkbox: copy the one-liner to the target; there is no remote shell. The local
 endpoint dashboard is not a distributable artifact.
 
+**Throughput di enrollment.** `/enroll` accetta 10 richieste al minuto per IP
+sorgente (`@limiter.limit`, slowapi). È un limite anti brute-force sulla enroll
+key: non va alzato per comodità. Un pilot si arruola in batch sequenziali, da
+pochi host alla volta. L'agente Go ritenta da solo i 429 per circa 17 s, quindi
+un burst modesto rientra; se l'enroll fallisce comunque, su Windows il servizio
+`AegisAgent` esaurisce i tre restart previsti e resta fermo, e va avviato a mano
+con `Start-Service AegisAgent` (su Linux `Restart=always` lo recupera da solo).
+Il retry che rispetta `Retry-After`/`X-RateLimit-Reset` è pianificato per la 4.4.
+
 ## 2. Pilot (prod overlay + mTLS)
 
 ```bash

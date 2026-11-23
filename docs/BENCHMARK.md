@@ -153,6 +153,57 @@ The first `unified` start with a single-use token was also tested: token
 consumed, record `agent_type=unified`, recent telemetry present. The test does
 not install a Windows/Linux service and does not test rollback.
 
+## Deep simulation 4.3 (2026-11-23)
+
+`scripts/deep_simulation.py` drives the real flow (deploy token → `/enroll` →
+agent secret → `/telemetry/report`) against a live Compose stack installed from
+the Windows MSI packages. It replays **93 behavioural cases** (39 malicious,
+46 benign, 8 dual-use) with **one dedicated agent per case**, because alert
+suppression is per (agent, rule/severity, process): a shared agent would hide
+real detections. Every case is a constructed event, not malware execution.
+Full tables and per-case evidence: [`benchmarks/4.3/DEEP_SIMULATION.md`](benchmarks/4.3/DEEP_SIMULATION.md)
+(JSON next to it).
+
+| Metric | Value |
+|---|---:|
+| True positive | 38 |
+| False negative | 1 |
+| False positive | 0 |
+| True negative | 46 |
+| Precision | 1.000 |
+| Recall | 0.974 |
+| F1 | 0.987 |
+| Expected severity matched | 23/28 |
+
+The single false negative is `cat /etc/shadow` (T1003.008): there is no static
+rule for Linux credential-file reads. It is a known gap, not a tuning target
+for 4.3 (see `docs/RISK_MATRIX.md`). Severity mismatches are mostly cases that
+match two rules and inherit the stronger one (for example `mal-psh-encoded`:
+expected HIGH, got CRITICAL from S007); they are documented per case.
+
+The simulation found and the fixes were verified on the live stack:
+
+- **6 false positives on clean hosts**: `vssadmin list shadows` (S001),
+  `schtasks /change` without action (S017), `curl https://…` (S012),
+  Linux interpreters on standard paths (S009), and
+  `explorer.exe → cmd.exe` (S002, normal Win+R/shortcut flow);
+- **422 on large process lists**: 600 processes now clamp to 500 with a
+  `quality` marker instead of rejecting the whole event;
+- **reopened alert still muted**: reopening now clears the 1 h ingest
+  suppression key, so the alert is visible again immediately;
+- harness defects (hostname reuse → 409, Kraken session count measured before
+  the asynchronous outbox delivery) — test-side, not product-side.
+
+Other contract checks passed: duplicate `event_id` (200 `duplicate`), missing
+`event_type` (422), wrong agent secret (401), truncated command line (200),
+NUL bytes (200), resolve/triage idempotence, viewer role cannot resolve-all
+(403), Kraken ingest for ssh/http/ftp/telnet/smb/rdp, idempotent sensor retry,
+no plaintext password in Aegis incidents.
+
+Limits: one local stack, synthetic behaviour, no real fleet and no MTTD; the
+soak measures the HTTP+DB path of one host, not fleet capacity. Detection
+numbers above apply to this dataset only.
+
 ## Queue and resilience
 
 - Encrypted spool 50 MB, ordered replay, 2,000-record RAM bound
@@ -187,4 +238,5 @@ python scripts/generate_corpus_splits.py --dry-run
 python scripts/replay_report.py --all --json
 python scripts/audit_report.py --skip-slow
 python aegis-ebpf/bench.sh                   # eBPF worst-case overhead
+python scripts/deep_simulation.py --all --duration 120   # live stack, 93 cases + soak
 ```

@@ -1,0 +1,112 @@
+# Three isolated Kraken sensor nodes, simulated on one Docker host.
+#
+# This is a topology/lab harness, not a claim of true multi-host scheduling:
+# all containers share the Docker engine and the host kernel. It is useful for
+# testing distinct sensor ports, per-node health, protocol fan-out and lab
+# evidence without touching a production honeypot.
+#
+#   docker compose -f docker-compose.yml -f deploy/kraken-lab/docker-compose.lab.yml \
+#     --profile kraken --profile kraken-lab up -d --build
+#
+# The base project must provide KRAKEN_INTERNAL_API_KEY and the other Kraken
+# secrets in .env. Nodes are separate containers, not replicas of one service,
+# so each can be stopped independently.
+services:
+  kraken-lab-node-a:
+    build:
+      context: ./services/kraken
+      dockerfile: Dockerfile
+    image: aegis-kraken:local
+    profiles: ["kraken-lab"]
+    command: python honeypot/runner.py
+    restart: "no"
+    environment:
+      INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set}
+      SANDBOX_API_URL: http://aegis-kraken:8000/api/v1/containers
+      SENSOR_PROTOCOLS: ssh,http
+      SENSOR_HEALTH_PORT: "8000"
+      SSH_SENSOR_PORT: "2222"
+      HTTP_SENSOR_PORT: "8080"
+      LAB_NODE_ID: lab-a
+      LAB_SITE: site-a
+    ports:
+      - "127.0.0.1:${KRAKEN_LAB_A_SSH_PORT:-12222}:2222"
+      - "127.0.0.1:${KRAKEN_LAB_A_HTTP_PORT:-18080}:8080"
+    depends_on:
+      aegis-kraken:
+        condition: service_healthy
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    networks: [default, kraken_internal]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',8000),3); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  kraken-lab-node-b:
+    build:
+      context: ./services/kraken
+      dockerfile: Dockerfile
+    image: aegis-kraken:local
+    profiles: ["kraken-lab"]
+    command: python honeypot/runner.py
+    restart: "no"
+    environment:
+      INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set}
+      SANDBOX_API_URL: http://aegis-kraken:8000/api/v1/containers
+      SENSOR_PROTOCOLS: ssh,http
+      SENSOR_HEALTH_PORT: "8000"
+      SSH_SENSOR_PORT: "2223"
+      HTTP_SENSOR_PORT: "8081"
+      LAB_NODE_ID: lab-b
+      LAB_SITE: site-b
+    ports:
+      - "127.0.0.1:${KRAKEN_LAB_B_SSH_PORT:-12223}:2223"
+      - "127.0.0.1:${KRAKEN_LAB_B_HTTP_PORT:-18081}:8081"
+    depends_on:
+      aegis-kraken:
+        condition: service_healthy
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    networks: [default, kraken_internal]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',8000),3); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  kraken-lab-node-c:
+    build:
+      context: ./services/kraken
+      dockerfile: Dockerfile
+    image: aegis-kraken:local
+    profiles: ["kraken-lab"]
+    command: python honeypot/runner.py
+    restart: "no"
+    environment:
+      INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set}
+      SANDBOX_API_URL: http://aegis-kraken:8000/api/v1/containers
+      SENSOR_PROTOCOLS: ssh,http
+      SENSOR_HEALTH_PORT: "8000"
+      SSH_SENSOR_PORT: "2224"
+      HTTP_SENSOR_PORT: "8082"
+      LAB_NODE_ID: lab-c
+      LAB_SITE: site-c
+    ports:
+      - "127.0.0.1:${KRAKEN_LAB_C_SSH_PORT:-12224}:2224"
+      - "127.0.0.1:${KRAKEN_LAB_C_HTTP_PORT:-18082}:8082"
+    depends_on:
+      aegis-kraken:
+        condition: service_healthy
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    networks: [default, kraken_internal]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',8000),3); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s

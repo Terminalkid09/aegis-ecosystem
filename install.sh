@@ -61,6 +61,8 @@ if [[ "$MODE" == "pilot" ]]; then
   echo "  docker compose exec aegis-brain python -m app.services.pki --dir /app/pki"
   echo "[INFO] Verifica mTLS: :8443 richiede cert device (vedi docs/OPERATIONS.md §2b)"
 fi
-echo "[OK] Deploy $MODE completato. Dashboard: http://localhost:3000  API: http://localhost:8000  Caddy: https://aegis.local"
+UI_PORT="$(sed -n 's/^AEGIS_UI_PORT=//p' .env | head -n 1)"
+UI_PORT="${UI_PORT:-3000}"
+echo "[OK] Deploy $MODE completato. Dashboard: http://localhost:$UI_PORT  API: http://localhost:8000  Caddy: https://aegis.local"
 echo "[INFO] Primo admin (se non esiste): docker compose exec aegis-brain python -m app.admin bootstrap admin@aegis.local '<password-forte>'"
 echo "[INFO] Verifica admin esistenti: docker compose exec aegis-brain python -m app.admin list"
