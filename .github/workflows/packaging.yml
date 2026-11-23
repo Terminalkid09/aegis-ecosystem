@@ -415,7 +415,7 @@ jobs:
     name: Attach packaged artifacts to the release
     # The tag workflow in ci.yml creates the release; this job only adds the
     # installable packages, so ak update has something to download.
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && vars.PRODUCTION_SIGNING == 'true' }}
     needs:
       - packaging_windows_server
       - packaging_server
@@ -522,9 +522,11 @@ jobs:
 
   production_windows:
     name: Production Windows signature
-    # A tag build must be production-signed, otherwise release_assets has nothing
-    # publishable to attach (the CI default is a test certificate).
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.production_signing) || startsWith(github.ref, 'refs/tags/v') }}
+    # A production tag must be signed, otherwise release_assets has nothing
+    # publishable to attach (the CI default is a test certificate). A pilot tag
+    # skips these jobs instead of failing on missing signing secrets: the
+    # variable is the explicit switch, not the tag name.
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.production_signing) || (startsWith(github.ref, 'refs/tags/v') && vars.PRODUCTION_SIGNING == 'true') }}
     timeout-minutes: 25
     runs-on: windows-latest
     environment: production-signing
@@ -568,7 +570,7 @@ jobs:
     name: Production Windows server MSIs
     # A tag build must ship the three server MSIs; release_assets refuses the
     # test-signed CI copies, so this job is what makes ak update work on Windows.
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.production_signing) || startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.production_signing) || (startsWith(github.ref, 'refs/tags/v') && vars.PRODUCTION_SIGNING == 'true') }}
     timeout-minutes: 30
     runs-on: windows-latest
     environment: production-signing
@@ -616,7 +618,7 @@ jobs:
     name: Production Linux signature
     # A tag build must be production-signed, otherwise release_assets has nothing
     # publishable to attach (the CI default is a test certificate).
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.production_signing) || startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.production_signing) || (startsWith(github.ref, 'refs/tags/v') && vars.PRODUCTION_SIGNING == 'true') }}
     timeout-minutes: 20
     runs-on: ubuntu-latest
     environment: production-signing

@@ -183,10 +183,55 @@ def _agent_assets(agent_dir: Path, out: Path, version: str,
     return created
 
 
+def _append_archives(out: Path, patterns: list[str]) -> int:
+    """Add archives created after the bundle to the manifest and the checksums.
+
+    The image archive comes from `docker save`, which runs after the manifest
+    exists. Adding it to SHA256SUMS.txt alone leaves a checksum entry no
+    manifest describes, and `release-smoke.py` correctly refuses that bundle.
+    Rewriting both files keeps the bundle one closed list.
+    """
+    manifest_path = out / "RELEASE_MANIFEST.json"
+    checksums_path = out / "SHA256SUMS.txt"
+    if not manifest_path.is_file() or not checksums_path.is_file():
+        raise SystemExit(f"[X] no bundle in {out}; build the bundle before appending")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    files = {item["name"]: item for item in manifest.get("files", [])}
+    appended: list[str] = []
+    for pattern in patterns:
+        for path in sorted(out.glob(pattern)):
+            if not path.is_file():
+                continue
+            if path.name in {"SHA256SUMS.txt", "RELEASE_MANIFEST.json"}:
+                continue
+            name = path.relative_to(out).as_posix()
+            entry = {"name": name, "bytes": path.stat().st_size,
+                     "sha256": _sha256(path)}
+            if files.get(name, {}).get("sha256") != entry["sha256"]:
+                appended.append(name)
+            files[name] = entry
+    if not appended:
+        raise SystemExit("[X] --append-archive matched no new archive")
+    ordered = [files[name] for name in sorted(files)]
+    manifest["files"] = ordered
+    manifest_path.write_bytes(
+        (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
+    )
+    checksums_path.write_bytes(
+        ("\n".join(f"{item['sha256']}  {item['name']}" for item in ordered)
+         + "\n").encode("utf-8")
+    )
+    print(f"Appended {len(appended)} archive(s) to {out}: {', '.join(appended)}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--version", required=True, help="release label, e.g. v4.1.0-rc1")
+    parser.add_argument("--version", help="release label, e.g. v4.1.0-rc1")
     parser.add_argument("--out", default="release")
+    parser.add_argument("--append-archive", nargs="+", metavar="PATTERN",
+                        help="glob(s) for archives created after the bundle; they are "
+                             "added to RELEASE_MANIFEST.json and SHA256SUMS.txt")
     parser.add_argument("--force", action="store_true", help="replace an existing bundle")
     parser.add_argument("--sbom-dir", help="directory with per-image CycloneDX SBOMs")
     parser.add_argument("--agent-dir",
@@ -194,6 +239,10 @@ def main() -> int:
     parser.add_argument("--require-agent", action="store_true",
                         help="fail if the unified agent or kernel helpers are absent")
     args = parser.parse_args()
+    if args.append_archive:
+        return _append_archives((ROOT / args.out).resolve(), args.append_archive)
+    if not args.version:
+        raise SystemExit("--version is required unless --append-archive is used")
     if not re.fullmatch(r"v?[0-9]+\.[0-9]+\.[0-9]+(?:-rc[0-9]+)?", args.version):
         raise SystemExit("version must be SemVer or vX.Y.Z-rcN")
     if args.require_agent and not args.agent_dir:
