@@ -85,10 +85,13 @@ jobs:
           }
           $service = Get-Service -Name AegisAgent -ErrorAction SilentlyContinue
           if (-not $service) { throw "AegisAgent service was not registered" }
-          $recovery = sc.exe qfailure AegisAgent
-          if ($recovery -notmatch 'RESTART') {
+          # sc.exe output is localized and -notmatch on an array only filters,
+          # so assert on the value Windows actually honours and log the text.
+          $recovery = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\AegisAgent" -Name FailureActions -ErrorAction SilentlyContinue
+          if (-not $recovery -or -not $recovery.FailureActions) {
             throw "AegisAgent recovery actions were not configured"
           }
+          (sc.exe qfailure AegisAgent) -join "`n" | Write-Host
           $uninstall = Start-Process msiexec.exe -ArgumentList @(
             "/x", $msi, "/qn", "/norestart"
           ) -Wait -PassThru
