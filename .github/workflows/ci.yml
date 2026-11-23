@@ -118,8 +118,13 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # macOS non e' un gate di release e in questo repository il runner non
+      # viene assegnato: il job resta in coda, viene cancellato dopo ~15
+      # minuti con zero step e nessun log, e fa fallire il run che poi salta
+      # Release Artifacts. La matrice predefinita e' quindi Linux + Windows;
+      # per riabilitare macOS basta una variabile: AEGIS_GO_OS='["ubuntu-latest","windows-latest","macos-latest"]'.
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ fromJSON(vars.AEGIS_GO_OS || '["ubuntu-latest","windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -239,6 +244,10 @@ jobs:
         run: |
           cd aegis-brain
           pip install -r requirements.txt
+      # Il job di release gira solo sui tag: senza questo test un bundle rotto
+      # (manifest e checksum che divergono) resta verde su ogni pull request.
+      - name: Release bundle contract (manifest + appended archive + smoke)
+        run: python scripts/release-bundle-selftest.py
       - name: Wait for integration services
         env:
           DATABASE_URL: "postgresql://postgres:password@127.0.0.1:5432/aegis_test"
@@ -700,7 +709,12 @@ jobs:
           else
             ls -lh release/aegis-images.tar.gz
           fi
-          sha256sum release/aegis-images.tar.gz* >> release/SHA256SUMS.txt
+          # L'archivio nasce dopo il manifest: va aggiunto a RELEASE_MANIFEST.json
+          # e a SHA256SUMS.txt insieme, altrimenti lo smoke test rifiuta un
+          # checksum che il manifest non descrive (era il rosso del tag 4.3.0).
+          python scripts/release-bundle.py \
+            --out release \
+            --append-archive "aegis-images.tar.gz*"
 
       - name: Smoke test downloaded bundle
         run: |
