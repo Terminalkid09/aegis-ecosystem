@@ -1,3 +1,7 @@
+# Optional lab observability profile only (docker-compose.observability.yml).
+# Tracked intentionally: small read-only scrape config, not a production
+# monitoring stack (single Prometheus, 14-day local retention, no Alertmanager,
+# no HA, no remote write). Prometheus and Grafana bind to 127.0.0.1.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s

@@ -1,0 +1,117 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package
+    Name="$(var.ProductName)"
+    Manufacturer="Aegis"
+    Version="$(var.Version)"
+    UpgradeCode="$(var.UpgradeCode)"
+    Scope="perMachine"
+    Compressed="yes">
+
+    <!-- Allow an explicit downgrade through the updater, but the operator must
+         restore a matching database backup. The CLI gates this behind a flag
+         and a confirmation. Because no Maximum version is declared, WiX emits
+         ICE61/WIX1076; scripts/build-server-msi.ps1 suppresses that single ICE
+         by name and keeps the rest of the validation enabled. -->
+    <MajorUpgrade AllowDowngrades="yes" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Public properties make unattended installs possible:
+         msiexec /i <package>.msi AEGIS_DOMAIN=soc.example.com ACME_EMAIL=ops@example.com AEGIS_UI_PORT=3005 -->
+    <Property Id="AEGIS_DOMAIN" Value="aegis.local" />
+    <Property Id="ACME_EMAIL" Value="internal" />
+    <Property Id="AEGIS_UI_PORT" Value="3000" />
+    <Property Id="HAS_AEGIS" Value="$(var.HasAegis)" />
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="$(var.InstallFolder)">
+
+        <!-- Values consumed by configure-server.ps1 on first start. They are
+             also readable by MDM and are removed with the product. -->
+        <Component Id="ServerSettings" Guid="$(var.SettingsGuid)">
+          <RegistryValue Root="HKLM" Key="Software\Aegis\$(var.RegistryName)" Name="Domain"
+                         Type="string" Value="[AEGIS_DOMAIN]" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="Software\Aegis\$(var.RegistryName)" Name="Email"
+                         Type="string" Value="[ACME_EMAIL]" />
+          <RegistryValue Root="HKLM" Key="Software\Aegis\$(var.RegistryName)" Name="UiPort"
+                         Type="string" Value="[AEGIS_UI_PORT]" />
+          <RegistryValue Root="HKLM" Key="Software\Aegis\$(var.RegistryName)" Name="Edition"
+                         Type="string" Value="$(var.Edition)" />
+          <RegistryValue Root="HKLM" Key="Software\Aegis\$(var.RegistryName)" Name="Installed"
+                         Type="integer" Value="1" />
+        </Component>
+
+        <!-- Add the package's bin directory to the machine PATH so `ak` works
+             in a new PowerShell after installation. -->
+        <Component Id="AkPath" Guid="$(var.AkPathGuid)">
+          <Environment Id="AkPathEnvironment" Name="PATH" Value="[INSTALLFOLDER]bin"
+                       Action="set" Part="last" System="yes" Permanent="no" />
+          <RegistryValue Root="HKLM" Key="Software\Aegis\$(var.RegistryName)" Name="PathRegistered"
+                         Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="$(var.FeatureTitle)" Level="1">
+      <ComponentRef Id="ServerSettings" />
+      <ComponentRef Id="AkPath" />
+      <ComponentGroupRef Id="Payload" />
+    </Feature>
+
+    <!-- The configuration dialog is inserted after the install-directory
+         choice. It is visible only for editions that include Aegis. A Kraken
+         standalone package has no public FQDN or ACME certificate. -->
+    <UI>
+      <Dialog Id="AegisConfigDlg" Width="370" Height="270"
+              Title="Aegis Server Configuration">
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="15"
+                 Transparent="yes" NoPrefix="yes"
+                 Text="{\WixUI_Font_Title}Aegis Server Configuration" />
+        <Control Id="Description" Type="Text" X="20" Y="24" Width="330" Height="30"
+                 Transparent="yes" NoPrefix="yes"
+                 Text="Enter the public DNS name that clients will use. For a real FQDN, use a real ACME email; aegis.local is the lab default." />
+        <Control Id="DomainLabel" Type="Text" X="20" Y="64" Width="90" Height="17"
+                 Text="Public FQDN:" />
+        <Control Id="DomainEdit" Type="Edit" X="115" Y="64" Width="235" Height="18"
+                 Property="AEGIS_DOMAIN" />
+        <Control Id="EmailLabel" Type="Text" X="20" Y="94" Width="90" Height="17"
+                 Text="ACME email:" />
+        <Control Id="EmailEdit" Type="Edit" X="115" Y="94" Width="235" Height="18"
+                 Property="ACME_EMAIL" />
+        <Control Id="PortLabel" Type="Text" X="20" Y="124" Width="90" Height="17"
+                 Text="Dashboard port:" />
+        <Control Id="PortEdit" Type="Edit" X="115" Y="124" Width="70" Height="18"
+                 Property="AEGIS_UI_PORT" />
+        <Control Id="PortHint" Type="Text" X="190" Y="124" Width="160" Height="17"
+                 Transparent="yes" NoPrefix="yes"
+                 Text="127.0.0.1; 3000-3099" />
+        <Control Id="Boundary" Type="Text" X="20" Y="156" Width="330" Height="55"
+                 Transparent="yes" NoPrefix="yes"
+                 Text="The MSI installs the server files and the global ak command. Docker Desktop is per-user: run ak start after login; this package does not create a pre-login service." />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
+                 Text="Back">
+          <Publish Event="NewDialog" Value="InstallDirDlg" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17"
+                 Text="Next" Default="yes">
+          <Publish Event="NewDialog" Value="VerifyReadyDlg" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17"
+                 Text="Cancel" Cancel="yes">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <!-- Order 99 runs after the stock WixUI transition to VerifyReadyDlg,
+           so the FQDN page cannot be skipped when the install path is valid.
+           HAS_AEGIS=0 keeps the stock path for Kraken-only. -->
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog"
+               Value="AegisConfigDlg" Order="99" Condition="HAS_AEGIS = 1" />
+    </UI>
+  </Package>
+</Wix>

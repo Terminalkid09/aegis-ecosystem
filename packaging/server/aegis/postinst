@@ -1,0 +1,64 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # The package is configured either interactively by apt/debconf or
+    # unattended with DEBIAN_FRONTEND=noninteractive. Environment variables
+    # remain an explicit override for immutable images and automation.
+    if [ -r /usr/share/debconf/confmodule ]; then
+        . /usr/share/debconf/confmodule
+        if db_get aegis/domain; then :; else RET=; fi
+        [ -n "${AEGIS_DOMAIN:-}" ] || AEGIS_DOMAIN="${RET:-}"
+        if db_get aegis/acme_email; then :; else RET=; fi
+        [ -n "${ACME_EMAIL:-}" ] || ACME_EMAIL="${RET:-}"
+        if db_get aegis/ui_port; then :; else RET=; fi
+        [ -n "${AEGIS_UI_PORT:-}" ] || AEGIS_UI_PORT="${RET:-}"
+        db_stop || true
+    fi
+    export AEGIS_DOMAIN ACME_EMAIL AEGIS_UI_PORT
+
+    install -d -m 0755 /opt/aegis/server /var/lib/aegis/server /etc/aegis
+    install -d -m 0750 /opt/aegis/server/secrets
+
+    # Aegis and Kraken both ship the same operator CLI under distinct paths;
+    # update-alternatives exposes one /usr/local/bin/ak without a file conflict.
+    if command -v update-alternatives >/dev/null 2>&1; then
+        update-alternatives --install /usr/local/bin/ak ak \
+            /usr/local/lib/aegis/ak-aegis 20 || true
+    fi
+
+    if [ ! -s /etc/aegis/server.env ]; then
+        /usr/local/lib/aegis/server-env.sh > /etc/aegis/server.env
+        chmod 0600 /etc/aegis/server.env
+        chown root:root /etc/aegis/server.env
+    fi
+    ln -sfn /etc/aegis/server.env /opt/aegis/server/.env
+
+    # aegis-suite may be configured before this package; the helper is
+    # idempotent and wires the shared network/SSO/ingest once both envs exist.
+    if [ -x /usr/local/lib/aegis/suite-wire.sh ]; then
+        /usr/local/lib/aegis/suite-wire.sh || true
+    fi
+
+    # A package upgrade must rebuild the changed images on the next start.
+    rm -f /var/lib/aegis/server/images.ok
+
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        systemctl daemon-reload || true
+        systemctl enable aegis.service
+        systemctl is-enabled --quiet aegis.service
+        if [ "${AEGIS_PACKAGE_SKIP_START:-0}" != "1" ]; then
+            if command -v docker >/dev/null 2>&1 \
+                && timeout 15 docker compose version >/dev/null 2>&1 \
+                && timeout 15 docker info >/dev/null 2>&1; then
+                systemctl start --no-block aegis.service || true
+            else
+                echo "aegis installed; install Docker Engine with the Compose v2 plugin and start the daemon before the first start." >&2
+            fi
+        fi
+    else
+        echo "aegis installed; systemd is not running here, so the unit was not enabled." >&2
+    fi
+fi
+
+exit 0

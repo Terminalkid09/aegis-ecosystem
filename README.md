@@ -1,158 +1,76 @@
 <h1 align="center">Aegis Ecosystem</h1>
 <p align="center">
-  <strong>Open-Source SOC-in-a-Box</strong><br/>
-  Endpoint detection &amp; response, multi-source SIEM ingestion, Sigma rules, SOAR playbooks and OSINT enrichment — in one local-first stack.
-</p>
-
-<p align="center">
-  <a href="#overview">Overview</a> •
-  <a href="#features">Features</a> •
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#architecture">Architecture</a> •
-  <a href="#agents--telemetry">Agents</a> •
-  <a href="#api-endpoints">API</a> •
-  <a href="#security-notes">Security</a> •
-  <a href="#development">Development</a>
+  <strong>Open-source SOC-in-a-box</strong><br/>
+  Endpoint detection, multi-source SIEM, deterministic detection, SOAR and deception — in one local-first stack.
 </p>
 
 <p align="center">
   <a href="https://github.com/Terminalkid09/aegis-ecosystem/actions/workflows/ci.yml"><img src="https://github.com/Terminalkid09/aegis-ecosystem/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/python-3.15-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.15" />
-  <img src="https://img.shields.io/badge/java-25-orange?style=flat-square&logo=openjdk&logoColor=white" alt="Java 25" />
-  <img src="https://img.shields.io/badge/spring%20boot-4-6DB33F?style=flat-square&logo=spring&logoColor=white" alt="Spring Boot" />
+  <img src="https://img.shields.io/badge/go-1.27-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.27" />
   <img src="https://img.shields.io/badge/react-19-61dafb?style=flat-square&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/postgres-16-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL 16" />
-  <img src="https://img.shields.io/badge/redis-7-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis 7" />
-  <img src="https://img.shields.io/badge/platform-windows%20%7C%20linux-brightgreen?style=flat-square" alt="Cross-platform" />
+  <img src="https://img.shields.io/badge/docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Compose" />
+</p>
+
+<p align="center">
+  <a href="https://gitdiagram.com/terminalkid09/aegis-ecosystem?utm_source=readme&utm_medium=badge">
+    <img src="https://gitdiagram.com/diagram-badge.svg" alt="AI-generated architecture overview (non-authoritative)" />
+  </a>
+</p>
+<p align="center"><sub>GitDiagram overview generated from <code>main</code>; it is AI-generated and non-authoritative. Versioned diagrams in this repository are canonical.</sub></p>
+
+<p align="center">
+  <a href="#overview">Overview</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#platform-support">Platforms</a> •
+  <a href="#security-identity--secrets">Security</a> •
+  <a href="#documentation">Docs</a> •
+  <a href="#verification">Verification</a>
 </p>
 
 ---
 
 ## Overview
 
-**Aegis** is an open-source, local-first XDR/SIEM platform for security labs, pilots and small teams. It combines endpoint agents, kernel-level telemetry (eBPF on Linux, ETW on Windows), multi-source log ingestion, deterministic detection with Sigma and custom rules, MITRE ATT&CK mapping, automated SOAR remediation and OSINT/AI enrichment into a single, cohesive product — deployed with **one command**.
+Aegis is a local-first XDR/SIEM platform for security labs, controlled pilots and small teams. A single stack combines endpoint telemetry, log ingestion, Sigma/correlation detection, incident triage, response playbooks, static analysis and a deception service.
 
-| Area | Capabilities |
-|------|-------------|
-| **Endpoint (XDR)** | Guard (Java) + NodeTrace (Python) agents: process lineage, persistence, masquerading, security-control tampering; 9 remediation actions (kill, quarantine, isolate, sinkhole…) |
-| **Kernel telemetry** | eBPF probes on Linux (`sched_process_exec`, TCP via ringbuf, verified 300/300 events on kernel 6.6); ETW kernel providers on Windows (user-mode consumer, no driver, no signing) |
-| **SIEM ingestion** | Syslog (RFC 3164/5424), Windows Event Log, Zeek, Suricata, nginx/Squid, pfSense/iptables — one pipeline, parser auto-detection, real UDP/TCP listener |
-| **Detection** | 21 static rules with MITRE mapping, custom AND/OR rules, **Sigma engine** (modifiers, mapping, fail-loud exclusions), threshold + sequence correlation over Redis windows |
-| **Noise control** | Risk policy before `db.add(alert)`: **trusted-signed suppression** (signed IDE/browser/updater binaries from user-writable paths become log-only, S004/S009/S010/S012/S014), severity **decoupled from confidence** (weak-confidence hits score as LOW in the cumulative engine), and **triage muting**: resolving an alert silences that exact pattern on that host for 7 days — re-opening clears it |
-| **SOAR** | 12 playbook action types with trigger conditions, execution history, composite `eradicate` chain |
-| **Static analysis** | Aegis Total: PE/ELF/Mach-O/Office/PDF/archives/APK/LNK… with YARA, entropy, imports, IOCs and disassembly — nothing is rejected, everything is analyzed |
-| **FIM** | Per-agent file integrity monitoring watchlist (Run keys, tasks, services, hosts, cron, systemd) via WatchService + SHA-256 baseline |
-| **OSINT + AI** | VirusTotal/Shodan/AbuseIPDB auto-enrichment; pluggable AI provider (Ollama local / Gemini / OpenAI) chosen from the dashboard, with data-exit control |
-| **Notifications** | Telegram alerts + heartbeat (works fully local), browser notifications, realtime alert WebSocket |
-| **Interop** | OCSF 1.4.0 export (Detection Finding / Process Activity, JSON/NDJSON), structured event search, audit trail, Prometheus + Grafana profile |
+The design goal is **honest operation**: deterministic detections, explicit degradation when a kernel source is unavailable, no silent fallback to a fake success, and no secret with a public default.
 
-> **Honest scope.** Detection is deterministic (signatures + heuristics + anomalies, no ML). Zeek/Suricata/Squid/pfSense sources are demonstrated with synthetic real-format samples (`scripts/siem_demo.py`), not production traffic. Single-node by design; HA overlay documents scale-readiness.
+> **Scope.** 4.3.0 is a controlled-pilot release, not production GA. Detection is deterministic (rules, Sigma, correlation and heuristics; no ML). Single-node Compose is the supported deployment; the HA overlay is documented separately.
 
----
+## Capabilities
 
-## Features
-
-### 🛡️ Endpoint Detection & Response
-
-| Module | Description |
-|--------|-------------|
-| **Static rules** | 21 deterministic rules: process lineage, masquerading, suspicious paths, persistence (Run keys, tasks), AV/Defender tampering, event-log clearing, recovery destruction. `GET /api/v1/rules/static` is the live source of truth |
-| **MITRE ATT&CK** | Every rule and alert carries tactic, technique and technique ID (T1059, T1134, T1036, T1562, T1070.001, T1490…); badges link to the ATT&CK pages |
-| **Custom rules** | AND/OR multi-condition rules, hostname/IP whitelists, auto-remediation actions, rule testing endpoint |
-| **Remediation** | 9 agent commands — `KILL_PROCESS`, `KILL_PROCESS_TREE`, `BLOCK_IP`, `BLOCK_IP_TEMPORAL`, `QUARANTINE_BINARY`, `REMOVE_PERSISTENCE`, `DNS_SINKHOLE`, `COLLECT_IOC`, `ISOLATE_HOST` — plus `VERIFY` |
-| **SOAR playbooks** | Trigger conditions on severity/event/process; automatic execution on matching alerts; 12 action types including composite `eradicate` (COLLECT_IOC → QUARANTINE → KILL_TREE → REMOVE_PERSISTENCE → VERIFY); full execution history |
-
-### 📡 SIEM
-
-| Module | Description |
-|--------|-------------|
-| **Log ingestion** | One pipeline for every source: `POST /api/v1/ingest/{source}` → parse → normalize → *same* detection → alert → SOAR chain used by agents. A log-raised alert triggers playbooks — one product, not two |
-| **Parsers** | Auto-detected from payload shape: syslog (RFC 3164/5424), JSON/NDJSON, Windows Event (4624/4625/4688/4697/4720/7045/1102…), Zeek (conn/dns/http/ssl), Suricata `eve.json`, nginx/Squid/Apache, pfSense/iptables. `GET /api/v1/ingest/catalog` drives the UI |
-| **Syslog listener** | Optional UDP **and** TCP listener (`SYSLOG_ENABLED`, default off, bound to `127.0.0.1` unless widened) — point rsyslog or a firewall straight at the brain; bounded queue, storms are counted and dropped, never accumulated |
-| **Sigma engine** | Industry-standard YAML rules: field mapping, modifier expansion (`contains`, `startswith`, `re`, `all`, `base64`, `cidr`…), compiled into executable rules. A rule with an unsupported feature is **excluded and reported**, never half-executed (`GET /api/v1/ingest/detection-coverage`); 14 bundled community-style rules |
-| **Correlation** | Threshold (`N events in T`: brute-force, port sweep, denied burst) and sequence (`A then B`: failed logins then success) over Redis-backed sliding windows; hits become normal alerts with MITRE mapping; windows and tracked entities are explicitly bounded |
-| **Event store & search** | Monthly-partitioned storage (retention = partition `DROP`, not mass `DELETE`); structured search on an **allowlist** of fields with escaped free text — no client-controlled SQL ever reaches the database |
-| **Source health** | `GET /api/v1/ingest/sources` exposes last event, unparsed count and last error per source — a silent source is visible, not invisible |
-
-### 🧪 Static Analysis — Aegis Total
-
-| Module | Description |
-|--------|-------------|
-| **Formats** | No extension is rejected: PE/.NET, ELF, Mach-O (incl. fat), Office OLE + OOXML (VBA macros, DDE, Excel 4.0, embedded MZ), PDF (JavaScript, OpenAction, Launch, XFA), ZIP/tar/gzip/bzip2/xz, APK/JAR/WASM, RTF, LNK, SQLite/pcap, plain scripts |
-| **Every upload analyzed** | Unknown binaries still get magic identification, entropy, strings, IOC/secret scanning — never a bare "binary, score 10" |
-| **YARA inside** | Uploaded samples are scanned with the active SOC signatures (yara-python); a match raises the score by fact — the report shows the matched rule and strings |
-| **Bounded by design** | Per-entry and total-uncompressed caps, nesting depth, member count, text-scan windows — an adversarial archive cannot stall the worker |
-| **Privacy** | Binaries are never stored: only sha256, findings and IOCs; reports are deletable (GDPR) |
-
-### 📁 File Integrity Monitoring
-
-| Module | Description |
-|--------|-------------|
-| **Watchlists** | Per-agent configuration from the dashboard: Run keys, Scheduled Tasks, services, hosts file, cron, systemd |
-| **Engine** | Guard uses `WatchService` + SHA-256 baselines; every change becomes an OCSF File Activity event with MITRE mapping (T1543/T1547) |
-| **Honest limits** | User-mode telemetry (not a minifilter driver); hashing capped at 8 MB/file; missing `yara64.exe` degrades with an explicit ack, never a silent "looks fine" |
-
-### 🌐 OSINT + AI Automation
-
-| Module | Description |
-|--------|-------------|
-| **Auto-enrichment** | IPs/domains in alert context are looked up via VirusTotal, Shodan, AbuseIPDB; results update the IP reputation database automatically |
-| **Keys from the dashboard** | Settings → Integrations: providers are discovered dynamically from the backend catalog, keys encrypted at rest (KEK), effective immediately. An env var **wins** over the DB so ops can pin a key per deployment. Fallback: env → DB → skipped with `api_key_not_configured` (never a hard failure) |
-| **AI providers** | `auto` \| `disabled` \| `ollama` \| `gemini` \| `openai` — chosen from the dashboard, no `.env` edit, no restart. `auto` uses what actually responds (Ollama probe → cloud keys → disabled); a dead endpoint never becomes an error stream |
-| **Data-exit control** | `AI_AUTOMATIC_ENRICH`, default **off**: with a cloud provider, alert context (anonymized: IPs/emails/tokens redacted) leaves the network only when you switch it on. Local Ollama is always on, because nothing leaves the machine |
-| **Deterministic core** | Detection does **not** depend on AI at any point: rules, Sigma, correlation, FIM and YARA are deterministic. AI only summarizes |
-
-### 🔔 Notifications
-
-| Channel | Description |
-|---------|-------------|
-| **Telegram** | Alerts at or above your chosen minimum severity (INFO → CRITICAL, default HIGH) pushed to a bot chat the moment they are created, plus a periodic "Aegis is alive" heartbeat — the dashboard does not need to be open. Resolutions and reopenings are pushed with the **same threshold** (choose CRITICAL and you get no HIGH noise, open or closed). Messages are laid out in labelled blocks (severity/host header, event, process, PID, MITRE, monospaced command line, footer with timestamp and alert id). Outbound HTTPS only: a fully local stack needs no open ports, no port forwarding, no cloud host. Setup: `@BotFather` → paste the whole token (`123456789:ABC...`) in **Settings → Integrations & API Keys** → **Detect chat ID** in **Settings → Telegram Notifications** lists the chats that messaged your bot → **Send test message** verifies for real (saving the chat ID invalidates the in-process cache, so the button uses it immediately — no "chat_id missing" after a save). Delivery is best-effort and fail-soft: detection and storage never depend on it |
-| **Browser** | *Desktop Notifications* and *Audio Alarms* toggles are functional — native OS notifications (Notification API) and audio alerts (WebAudio), driven by the realtime stream |
-| **Realtime stream** | `/api/v1/ws/alerts` pushes every newly created alert to connected dashboards (HttpOnly-cookie auth, no tokens in URLs); alert lists and counters update instantly |
-
-**Telegram as a remote control, not a second dashboard.** The bot answers three read-only commands, so "is it still watching?" does not need a browser:
-
-| Command | Answer |
+| Area | What is included |
 |---|---|
-| `/status` (alias `/agents`) | How many agents are online and, per device: hostname, agent (Guard/NodeTrace), OS and last contact (`online` / `offline 4m` / `never seen`) |
-| `/alerts` | Open alerts, filtered with your threshold (the same one the notifications use) |
-| `/help` (and `/start`) | The command list plus **your chat ID** — that is how the setup step discovers it |
+| **Endpoint** | One unified Go agent with explicit `full`, `sensor` and `endpoint` modes; process lineage, persistence, masquerading and security-control tampering detection; signed OTA updates. The mode selects capabilities, not a second agent. |
+| **Kernel telemetry** | eBPF on Linux (`sched_process_exec`, `do_exit`, TCP state) and ETW kernel providers on Windows; no kernel driver and no Windows driver signing. |
+| **SIEM** | Syslog, Windows Event Log, Zeek, Suricata, nginx/Squid, pfSense/iptables; normalised events and source-health visibility. |
+| **Detection** | Static rules, custom AND/OR rules, Sigma with fail-loud exclusions, threshold/sequence correlation and MITRE ATT&CK mapping. |
+| **SOAR** | Playbook triggers, 12 action types, bounded command queue with ack, visibility timeout and DLQ. |
+| **Analysis** | PE/ELF/Mach-O/Office/PDF/archive/APK analysis with YARA, entropy, imports and IOC extraction. |
+| **Deception** | Optional Kraken profile: deception sensors, campaigns, Lab, read-only Aegis view and delegated SSO. The base profile keeps sensors internal; the honeypot overlay is an explicit lab-only exposure. |
 
-`/status` and `/alerts` answer **only to the configured chat_id**: anything else gets silence (no data, and no confirmation of what exists). `/start` answers anyone, because that is the only way for a user to learn their own chat ID, and it exposes nothing about the system. Triage, evidence and playbooks stay in the dashboard.
-
-### 🗺️ Discovery Center
-
-| Module | Description |
-|--------|-------------|
-| **Network scan** | ARP + ICMP sweep + TCP connect scan — finds ALL devices on the subnet, not just those with open ports |
-| **MAC vendor lookup** | OUI database identifies device manufacturers (Samsung, Apple, Cisco…) |
-| **Agent status per IP** | `guard_status` / `nodetrace_status` show which agents are deployed and active on each host |
-| **Signed one-line enrollment** | `POST /api/v1/deploy/token` issues a short-lived token for Guard, NodeTrace, or both; the installer downloads artifacts, registers Windows services / systemd units, enables restart recovery and consumes one slot per agent. Credential-based WinRM/SSH deployment was **removed** (HTTP 410), not disabled |
-
-### 🔐 VaultX (Encrypted Notes)
-
-| Module | Description |
-|--------|-------------|
-| **AES-256-GCM notes** | Decrypted only for authorized roles, every read audited. Generic secret storage for runbooks, tokens, recovery codes. Aegis never requests or stores remote-deploy credentials: deployment uses signed enrollment |
-
-### ⚙️ Platform
-
-| Module | Description |
-|--------|-------------|
-| **Unified SOC (4.2)** | Five-source timeline, ATT&CK coverage, governed TTL suppressions, Kraken campaigns/fleet/topology/Lab UI, SMB/RDP deception sensors and asynchronous static file analysis |
-| **Realtime overview** | `/api/v1/ws/overview` pushes counters every 30s; agents push telemetry over HTTPS with an encrypted local spool and bounded retry |
-| **Audit log** | Every API action (login, resolve, rule change, deploy) recorded with user, IP and details; non-blocking by design; dashboard viewer |
-| **Bulk triage** | Resolve-all / delete-all with confirmation dialog, audit-logged |
-| **Rate limiting** | SlowAPI backed by Redis; client key from `X-Forwarded-For` only behind a trusted proxy — a spoofed header cannot reset the budget; per-account login throttle, per-user AI limits |
-| **Backups** | Compressed `pg_dump` every 6h via the `aegis-backup` profile service, 7-day retention |
-
----
+YARA is optional and fail-soft: the engine is present only when the platform has
+a `yara-python` wheel, and the API reports the missing engine instead of silently
+skipping it. Its value depends on the SOC's rules, not on the dependency alone.
+Signed feeds are opt-in and fail-closed: rules are imported only from a bundled
+Ed25519-signed manifest with a configured public key, and feed-managed rules
+cannot overwrite local rules. Aegis Total exposes match provenance, severity and
+a confidence signal instead of a flat boolean. See [YARA feeds](docs/YARA_FEEDS.md).
 
 ## Quick Start
 
-### One command (recommended)
+Requirements: **Docker Desktop running** and **Python 3.15+**. Endpoint agents are installed separately from the dashboard.
 
-Serve **Docker Desktop running** and **Python 3.15+**. Nothing else to start: the `.env` (random secrets), agent builds if missing, stack startup, admin bootstrap and smoke test are all guided by the same command.
+The agent MSI and agent deb install only the endpoint. A customer server install
+uses `aegis`, `kraken`, or `aegis-suite` on Linux/Windows: the Windows matrix is
+`aegis-server`, `kraken-server` and `aegis-suite`, all self-contained and using
+Docker Desktop; see [Packaging](docs/PACKAGING.md). The server packages expose
+`ak` for `start`, `stop`, `status`, `logs`, `doctor`, `configure` and `update`;
+the Windows MSIs put `ak` on the machine `PATH`. Try `ak --help` after install.
+The full reference is [the `ak` CLI](docs/AK_CLI.md). The `setup.py` path below
+remains the developer/source-tree workflow.
 
 ```bash
 git clone https://github.com/Terminalkid09/aegis-ecosystem.git
@@ -160,438 +78,128 @@ cd aegis-ecosystem
 python scripts/setup.py
 ```
 
-It prints the admin credentials, the dashboard URL and the update path.
+`setup.py` generates a `.env` with random secrets, starts the stack, waits for readiness, initializes the CA/manifest key (PKI), bootstraps the first admin and runs the API smoke test. The admin password is printed **once** and is not written back to `.env`.
 
-> **Run it from an *Administrator* terminal** (`Right-click → Run as administrator`) if you want the host agents installed as persistent Windows services with kernel telemetry. That single elevated session is what pays the privilege cost once: agents run as `LocalSystem` (always admin, no UAC prompt ever again, restart at boot). Not elevated, `setup.py` still brings the whole stack up and **prints the exact commands to run later** — it never leaves a silent gap. The same applies to `aegis.bat services`, which requests the elevation itself with one UAC prompt.
-
-To update later (data preserved — the database volume is never touched):
+Update without touching the database volume:
 
 ```bash
-python scripts/setup.py update          # rebuild + restart, DB preserved
-python scripts/setup.py update --rebuild-agents   # also recompile host agents
+python scripts/setup.py update
 ```
-
-**Requirements, honestly:**
-
-| Needed | When |
-|---|---|
-| Docker Desktop (running) + Python 3.15+ | always (`setup.py` preflight stops and says so if missing) |
-| JDK 25+ and Maven | only if agent artifacts don't exist and must be built (Windows: `build.bat` is invoked for you) |
-| `nssm.exe` | **downloaded by `setup.py`** with pinned SHA-256 — used to install agents as Windows services |
-| `yara64.exe` | **downloaded by `setup.py`** with pinned SHA-256 — used for on-endpoint YARA scans |
-
-Both binaries are not in the repo (`.exe` is gitignored): the setup downloads and hash-verifies them (on the archive and again on the extracted executable). Offline or on a hash mismatch the install **continues** and declares exactly what stays off, with the manual command. `--skip-binaries` skips the download.
-
-The `.bat` files are **not** a required step: `aegis.bat` is a convenience menu (start/stop/logs/build) for development. Local AI does not start by default: `set AEGIS_WITH_AI=1` before `setup.py` to enable Ollama.
-
-### Docker (manual)
-
-```bash
-git clone https://github.com/Terminalkid09/aegis-ecosystem.git
-cd aegis-ecosystem
-copy .env.example .env        # cp on Linux/macOS
-# edit .env: replace every placeholder secret
-docker compose up -d --build
-```
-
-| Service | URL |
-|---------|-----|
-| **Dashboard** | `http://localhost:3000` |
-| **Brain API** | `http://localhost:8000` |
-| **Link health** | `http://localhost:8080/actuator/health` |
-
-### Deployment profiles
 
 | Profile | Command | Notes |
 |---|---|---|
-| **Lab** (default) | `docker compose up -d --build` | internal TLS, localhost ports |
-| **Pilot** | `docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.mtls.yml up -d --build` | mTLS on :8443, requires real `.env` secrets + `BACKUP_PASSPHRASE` |
-| **Observability** | `docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile observability up -d --build` | Prometheus `:9090` + Grafana `:3001`, requires `GRAFANA_ADMIN_PASSWORD` |
+| **Lab** | `docker compose up -d --build` | Internal TLS, localhost ports, local login. |
+| **Pilot** | `docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.mtls.yml up -d --build` | mTLS, real secrets and `BACKUP_PASSPHRASE`. |
+| **Observability** | `docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile observability up -d --build` | Lab-only Prometheus and Grafana; not a production monitoring stack. |
+| **Kraken** | `docker compose --profile kraken up -d --build` | Deception stack with sensors internal by default. For an isolated honeypot lab, add `-f docker-compose.kraken-honeypot.yml` and set `KRAKEN_HONEYPOT_BIND_IP=0.0.0.0`; the signed Brain ingest path remains opt-in with `KRAKEN_INGEST_ENABLED=true`. |
 
-Equivalent installers: `./install.sh lab|pilot [--observability]` and `.\install.ps1 lab|pilot [-Observability]` (never combined with pilot).
+### Public domain and TLS
 
-### Quality gates
+Caddy reads `AEGIS_DOMAIN` and `ACME_EMAIL` from `.env`. The default
+`AEGIS_DOMAIN=aegis.local` uses Caddy's internal CA and is lab-only. For a real
+deployment set the public FQDN (DNS A/AAAA to the host, ports 80/443 reachable),
+a real ACME email, and keep `ALLOWED_ORIGINS`/`PUBLIC_BASE_URL` on the same host:
+Caddy obtains and renews a Let's Encrypt certificate automatically. No domain or
+certificate is hardcoded in the repository.
 
-```bash
-# Brain tests (853 passed, 3 YARA skips, DB-backed)
-python scripts/run_integration_tests.py --import-mode=importlib
+The default dashboard is `http://localhost:3000`; set `AEGIS_UI_PORT` to change it, and the server package falls back to the first free port in `3000-3099` if it is occupied. The Brain API is `http://localhost:8000`. Never expose the lab stack directly to the Internet.
 
-# Guard tests (140 JUnit)
-cd aegis-guard && mvn -B test
+Caddy is the production TLS/reverse-proxy edge when it runs with a real FQDN,
+ACME and the mTLS overlay; it is not a complete HA or monitoring solution. Run
+at least two replicas behind an external load balancer for availability, and
+monitor certificate renewal and upstream health separately.
 
-# Link tests (17 JUnit)
-cd aegis-link && mvn -B test
+## Platform Support
 
-# NodeTrace unit tests
-cd NodeTrace/agents/python && python -m unittest tests.test_ebpf tests.test_update tests.test_linux_probe
+| Platform | Kernel telemetry | Status |
+|---|---|---|
+| **Windows 11 22H2+** | ETW `Kernel-Process` 1/2 and `Kernel-Network` TcpIp event 12 | **Live validated elevated** on this host: 95 events (45 created, 47 exited, 3 connections). The helper has a `requireAdministrator` manifest and a runtime admin check; non-admin execution exits 2 without starting. |
+| **Windows Server 2022/2025** | Same ETW consumer | Code-compatible; live Server validation remains a lab task. |
+| **Linux** | eBPF CO-RE probes with ring buffer | **WSL2 Ubuntu and Kali validated**. Bare-metal Ubuntu/Debian/RHEL validation remains pending. Requires kernel >= 5.8, BTF and `CAP_BPF`/`CAP_PERFMON`. |
+| **macOS** | None in the unified 4.3 agent; legacy Guard polling is not in the bundle | **Not supported for endpoint telemetry.** No EndpointSecurity entitlement or System Extension. Darwin builds/tests are in CI; no live Mac hardware is available. |
 
-# Frontend: typecheck, build, browser e2e
-cd frontend && npx tsc -b && npm run build && npm run e2e
+The kernel source is not a driver. Linux eBPF and Windows ETW are user-mode-orchestrated kernel telemetry; a Windows kernel driver would add signing, WHQL and crash-support costs. See [Kernel and driver feasibility](docs/KERNEL_AND_DRIVERS.md) and [OS compatibility](docs/OS_COMPATIBILITY.md).
 
-# Live batteries: enroll → benign → attacks → resolve, and a hard evasion battery
-python scripts/live_battery.py
-python scripts/hard_battery.py
-```
+## Security: Identity & Secrets
 
-Verification layers include Brain pytest, Kraken pytest, Guard/Link JUnit, NodeTrace unit tests, Playwright e2e and live detection batteries. CI gates pytest, Guard/Link, NodeTrace, frontend lint/build, pip-audit, Trivy and SBOM. The 4.2 workflow adds an ephemeral Compose E2E job for Playwright and `api_smoke.py`; hosted execution still needs to be verified before tagging.
+- **Login:** HttpOnly cookie session, CSRF origin check, per-account throttling, remember-me with opaque rotated tokens.
+- **Users & Roles:** admin-only UI and API; server-side last-admin guard (409); local break-glass admin is preserved.
+- **OIDC / SSO:** Authorization Code + PKCE, signed state/nonce, JWKS verification, group-to-role mapping, auto-provisioning and email verification. The SPA probes `/auth/me` on load, so an HttpOnly session created by the IdP callback is visible immediately.
+- **Secrets:** `NAME_FILE`, `AEGIS_SECRETS_DIR`, or HashiCorp Vault KV v2; files win over plain env values and Vault only fills missing values. Missing, empty or unreadable secrets fail closed.
+- **No public defaults:** production startup rejects short secrets and known placeholder markers. Compose requires the core secrets instead of defaulting to a known password.
 
-The 4.2 load gate is **met locally on the default 2-worker stack**: **289.35 events/s through Caddy/TLS**, 1.500/1.500 `200`, p95 **159.9 ms**; **247.76 events/s direct**, 3.000/3.000 `200`, 3.008 DB rows, p95 194.4 ms. A 20-agent cold proof burst reaches **341.16 rps** (p95 52.3 ms), 100 warm events reach **301.16 rps** (p95 91.5 ms), and legacy agents drop from 79.4 ms to 38.7 ms after the proof backfill. Hosted CI/E2E remains the gate before tagging.
+Details: [Secrets](docs/SECRETS.md) · [OIDC](docs/OIDC.md) · [Threat model](docs/THREAT_MODEL.md) · [Operations](docs/OPERATIONS.md).
 
----
+## Verification
 
-## Architecture
+Latest local verification: **2026-11-21**.
 
-Aegis is built as a set of small services that speak one event model.
-
-### High-Level Architecture
-
-```
- Endpoints / Syslog sources
-   │                │
-   │ agents         │ raw logs (rsyslog, firewall, proxy…)
-   ▼                ▼
-┌──────────┐   ┌──────────┐
-│  Guard   │   │  NodeTrace│        ┌─────────────────────┐
-│  (Java)  │   │ (Python) │──────▶ │      Aegis-Link      │
-└────┬─────┘   └──────────┘        │   (Spring Boot)      │
-     │                             │ ingest gateway, mTLS │
-     │        enrollment, commands, PKI                 │
-     ▼                             └──────────┬──────────┘
-┌───────────────────────────────────┐           │
-│           Aegis-Brain (FastAPI)   │      Redis (queue/cache)
-│  telemetry → detection → alerts   │◀──────────┘
-│  Sigma · correlation · SOAR · FIM │           │
-│  YARA · Total · OSINT · AI        │           ▼
-│  search · OCSF export · audit     │      PostgreSQL
-└───────────────┬───────────────────┘   (partitioned event store)
-                │
-                ▼
-        ┌──────────────┐        ┌──────────────────────────┐
-        │   Dashboard   │        │ Optional: Prometheus +   │
-        │  (React 19)   │        │ Grafana · Ollama (AI) ·  │
-        │  ws realtime  │        │ Caddy (TLS, mTLS)        │
-        └──────────────┘        └──────────────────────────┘
-```
-
-**Topology.** Each agent knows a single endpoint (`AEGIS_BRAIN_URL` for enrollment, commands and PKI; `AEGIS_GATEWAY_URL` for high-rate telemetry via `aegis-link`, which queues into Redis for the brain to consume). Dashboards are just browsers reading the brain: adding an operator is a registration, adding a host is an enrollment — agents never need to know about dashboards, and dashboards never talk to agents.
-
-### Components
-
-| Component | Stack | Role |
-| --- | --- | --- |
-| `aegis-brain` | FastAPI, SQLAlchemy, PostgreSQL, Redis | API, auth, telemetry processing, rules, alerts, VaultX, AI/OSINT, SOAR playbooks, syslog ingestion, audit logging |
-| `aegis-link` | Spring Boot | Agent/syslog ingestion gateway; pushes events to Redis |
-| `aegis-guard` | Java 25 | Endpoint security agent and mitigation command consumer |
-| `NodeTrace` | Python | Host telemetry agent for CPU/RAM/process/users/network flows |
-| `frontend` | React 19, TypeScript, Vite | Dashboard for alerts, agents, rules, VaultX, OSINT, AI, playbooks, syslog viewer, audit log |
-
----
-
-## Agents & Telemetry
-
-Every source enters the **same** event model and the **same** detection engine. Two roads converge, and the first requires no resident agent on the observed system.
-
-| Layer | Where it runs | What it brings | Signing required |
-|---|---|---|---|
-| **eBPF** (`aegis-ebpf/`) | Linux, kernel | `sched_process_exec`, `do_exit`, TCP ESTABLISHED via ringbuf | no (kernel verifier) |
-| **ETW kernel providers** (`aegis_etw.c`) | Windows, user-mode consumer | `Kernel-Process` 1/2, `Kernel-Network` TcpIp | no (system providers) |
-| **Endpoint agents** | host | Guard (processes, persistence, services), NodeTrace (CPU/RAM/disk/network/users) | signed enrollment + mTLS |
-| **Log sources** | appliance, server | syslog RFC5424/3164, Windows Event, Zeek, Suricata, nginx/Squid, firewall | none: one config line toward the endpoint |
-
-On Linux, kernel telemetry is native (eBPF — 300/300 events verified without loss on kernel 6.6 with BTF). On Windows it runs through ETW: `aegis_etw.c` is a **user-mode** consumer of system providers (no driver, no signing), spawned by Guard itself and read from its stdout. It is **on by default** when the collector is present: `aegis.bat agents` (and the installer) compile or deploy `aegis-etw.exe`, point `AEGIS_ETW_PATH` at its absolute path and set `AEGIS_ETW_ALLOW_UNSIGNED=true` — the helper is built locally and carries no Authenticode signature, so Guard needs that explicit opt-in before executing it. The stream is **actually ingested**, not just probed: each kernel event enters the same enrichment pipeline as the poll (path, hash, Authenticode, command line) tagged `provenance=etw`, and the Toolhelp32 poll stays as the backstop (persistence, services, Defender, netstat) with a 15s dedup window so a process seen at kernel latency is not re-reported by the poll. If the collector is missing, Guard falls back to polling and **says so** (`quality=degraded:etw-…`): a missing capability, never a silent failure.
-
-ETW requires a trace session, i.e. **administrative rights**: without them the collector prints the reason and exits, and Guard reports exactly that (`quality=degraded:etw-stream-StartTrace:_5_(serve_admin)`). Windows does not let a process elevate itself silently — UAC consent is mandatory for anything the user launches — so the elevation is paid **once**: `aegis.bat services` registers both agents as services (one prompt, then they run as LocalSystem: always admin, no prompt ever again, and they restart at boot). `aegis.bat agents` (dev mode) asks for the same elevation on every start; skip it with `set AEGIS_NO_ELEVATE=1` and the agents run with `quality=degraded:etw-…` declared. Installing the services is the professional path; the dev launcher exists so a fresh clone runs in a minute. A proprietary kernel-mode driver is only needed for **inline prevention** — that requires EV signing and Microsoft attestation, and is out of scope together with ETW-TI.
-
-### Agents survive reboot
-
-Docker containers come back on their own (`restart: unless-stopped`), but host agents started by hand die with the session. Autostart is a property of the **installation**, not a manual step:
-
-- **Both agents are Windows services (NSSM)** — `AegisGuard` and `AegisNodeTrace` — installed by their installers (`aegis-guard\install\windows\install.ps1`, `NodeTrace\install\windows\install.ps1`; elevated shell, auto-start, restart-on-crash, log file). Uninstall with the matching `uninstall.ps1`. One command does it, requesting elevation itself: **`aegis.bat services`** (or menu option `[S]`). It reports failure explicitly: an install that did not happen never claims success, and the hand-started agents are left running so no endpoint is left uncovered.
-- **`python scripts/setup.py` registers them for you** when it runs elevated; if it is not elevated, it prints the exact commands instead of leaving a silent gap. Use `--no-autostart` to force dev-mode agents only (never two instances per endpoint: either services **or** dev processes).
-- **No-admin fallback**: `powershell -ExecutionPolicy Bypass -File scripts/install-agents-autostart.ps1` registers Scheduled Tasks "at log on" (user context; elevated Guard actions unavailable). Remove with `-Remove`.
-- **Token installer**: when remote dashboard connectivity is selected, the installer performs the service registration itself and verifies the service is running before returning success.
-
-### Remote enrollment: install an agent on another host
-
-Generate a short-lived token in **Deployment Manager** (`Aegis-Guard`, `NodeTrace` or **both**, one slot consumed per agent), then run the one-liner it shows **in an Administrator PowerShell on the target**:
-
-```powershell
-irm <brain>/api/v1/deploy/install.ps1?agent=both -Headers @{'X-Enroll-Token'='<token>'} | iex
-```
-
-```bash
-curl -fsSL -H 'X-Enroll-Token: <token>' '<brain>/api/v1/deploy/install.sh?agent=both' | sudo bash
-```
-
-The installer downloads the artifact for that agent, extracts it (Guard into `C:\Aegis\Guard`, NodeTrace into `C:\Aegis\NodeTrace`), sets the brain URL, the Ed25519 manifest public key and a `0600` enrollment-token file (the token is never written into the persistent environment), and **registers the service** (`New-Service` on Windows, systemd on Linux) — the same service model as a local install. It refuses to pretend: if remote-dashboard connectivity was not selected in the token, it says that no service was registered instead of reporting success.
-
-For a host that is already enrolled, issue the token with `target_hostname` set to that host's existing hostname. Re-enrollment without a host-bound token is rejected with `409` and audited; the static `AGENT_ENROLL_KEY` cannot replace an existing device secret.
-
-One preparative step is yours — **publish the artifacts the brain serves** (they are build outputs, never committed):
-
-```bash
-python scripts/pack-artifacts.py            # -> aegis-brain/artifacts/*-latest.{zip,tar.gz}
-python scripts/pack-artifacts.py --version v4.2.1
-```
-
-It packs exactly what a local install copies: `aegis-guard.jar`, a bundled `jre/` when `build.bat` produced one, `aegis-etw.exe` (kernel telemetry) and `bin/yara64.exe` for Guard; the full PyInstaller bundle for NodeTrace. Missing runtime = hard failure; missing optional piece = declared in the output (`python -m ...`-style honesty, no silent gaps). What the target needs: **Administrator** (service registration + ETW trace session), and a **Java 25+** runtime — either bundled in the artifact or installed there (`Get-JavaMajor` verifies the version, because a Java 8 on `PATH` installs a service that starts and dies with `UnsupportedClassVersionError`).
-
-### Development mode (agents)
-
-```bash
-# NodeTrace
-cd NodeTrace\agents\python
-set AEGIS_ENROLL_KEY=<key>
-set AEGIS_MANIFEST_PUBKEY=<base64 from /deploy/manifest>
-set NODETRACE_REGISTER_URL=http://localhost:8000/api/v1/register
-python agent.py
-```
-
-```bash
-# Guard
-cd aegis-guard
-set AEGIS_BRAIN_URL=http://localhost:8000/api/v1
-set AEGIS_GATEWAY_URL=http://localhost:8000/api/v1/telemetry/report
-set AEGIS_ENROLL_KEY=<key>
-set AEGIS_MANIFEST_PUBKEY=<base64 from /deploy/manifest>
-jre-new\bin\java.exe -jar target\aegis-guard.jar
-```
-
-Two details that fail with unreadable errors:
-
-- **A JVM 25+ is required**, and the `java` on the `PATH` is not automatically suitable: if it is an 8, the service installs, starts and dies with `UnsupportedClassVersionError`. The installer verifies the **version** and uses the resolved path, not the `java` string.
-- **`AEGIS_ENROLL_KEY` is only needed for the first enrollment** when no `secret.json`/`token.json` exists. The one-liner installer writes the single-use token to a `0600` file and sets `AEGIS_ENROLL_TOKEN_FILE`; the token is not persisted in the environment. Re-enrollment of an already registered host requires a token with `target_hostname` for that host. `AEGIS_MANIFEST_PUBKEY` is mandatory for OTA and is injected by the installer.
-
-### Standalone agent builds
-
-Pre-compiled agents ship without Python/JDK runtime dependencies:
-
-| Agent | Build Tool | Output | Runtime |
-|---|---|---|---|
-| NodeTrace | PyInstaller | `NodeTrace/agents/python/dist/nodetrace-agent/nodetrace-agent.exe` | 15 MB (bundled) |
-| Aegis-Guard | Maven + jlink | `aegis-guard/target/aegis-guard.jar` + `jre-new/` | 47 MB (minimal JRE) |
-
-Build all agents with a single command: `build.bat`. If `JAVA_HOME` still points at a JRE 8, `mvn test` fails with a confusing `class file version 65.0 ... only recognizes up to 52.0` (stale classes) even though compile reports success — point it at a JDK 25+ first.
-
----
-
-## Authentication Model
-
-- **Dashboard**: Bearer JWT after `POST /api/v1/auth/login` (self-service register is disabled by default: with `ALLOW_OPEN_REGISTRATION=false` only an admin can create accounts). Telemetry, rules, VaultX, OSINT, AI, OCSF export and Aegis Total all require JWT.
-- **Roles**: `ROLE_PERMISSIONS` in `app/core/deps.py` maps `viewer`/`user`/`auditor`/`responder`/`analyst`/`admin` to permissions. The role is read from the database on **every** request, so a change applies without re-login. Registration always creates a `user`: privilege is granted from a shell, never from an exposed API.
-
-  ```bash
-  docker exec aegis-brain python -m app.admin list
-  docker exec aegis-brain python -m app.admin set-role <email> admin
-  ```
-
-  Without at least one `admin`, host isolation, deploy approval, rule and alert deletion and site assignment all return 403 by design. `set-role` refuses to demote the last remaining admin unless `--force` is given.
-- **Agents**: enrollment key at registration, then per-agent Bearer token (NodeTrace) or gateway API key (Aegis-Link). NodeTrace validates that token once at startup with an authenticated call: if the brain rejects it (401) the agent re-enrolls, which is the brain's own recovery path — the same `device_id` is kept, and a **revoked** device is refused (403), so this is not a way back in. Its identity files (`token.json`, device key/certificate) are resolved against a **fixed absolute directory** (`NODETRACE_IDENTITY_DIR`, default: the agent's own folder), never the current working directory.
-- **Aegis-Link**: `X-Api-Key` for event ingestion — server-side only, never exposed to the React app.
-
-The global `AEGIS_API_KEY` is for Aegis-Link and automation scripts. It does **not** grant dashboard access.
-
-### Session & device trust
-
-| Capability | How it works |
+| Check | Result |
 |---|---|
-| **Silent renewal** | `POST /api/v1/auth/refresh` renews the session cookie; the dashboard renews every 25 min and on window focus — an active user never sees the login page again |
-| **Stay signed in** | Opt-in 30-day device trust: the `aegis_remember` cookie carries only an opaque token (the server keeps the SHA-256), **rotated on every use** — a stolen cookie replays exactly once. Silent re-login via `POST /api/v1/auth/remember` |
-| **Trusted devices** | Settings → Trusted Devices lists every device with last-used and expiry; revoke individually. Logging out ends the trust — the model is GitHub's, not "forever sessions" |
+| Brain pytest against disposable PostgreSQL + real Redis | **902 passed, 4 skipped** (the skips include YARA engine cases because `yara-python` is unavailable on Python 3.15/Windows; a dedicated CI job runs them on Python 3.12) |
+| Auth hardening, live through Caddy | **PASS**; password reset revokes old JWT and remember devices, SSO-only rejects local login/registration (**403**), OIDC callback without state fails closed, HSTS only on HTTPS, session cookie **HttpOnly/Secure/SameSite=strict** |
+| Command queue on real Redis | **8 passed**, including redelivery and restart recovery |
+| Kraken pytest | **154 passed** |
+| Frontend production build | **PASS** |
+| Frontend lint | **0 errors, 24 warnings** |
+| Playwright pages/session/smoke/Kraken through Caddy | **13 passed**; the `users` spec assumes a single-admin database and was not used for this local run |
+| Playwright OIDC against Keycloak 26.0.7 | **2 passed** |
+| ETW live elevated | **PASS**, 95 events; non-admin **exit 2** |
+| WSL2 Ubuntu / Kali eBPF | **PASS**; benchmark **300/300**, zero lost events |
+| macOS Darwin build (amd64/arm64) | **PASS locally**; `macos-latest` job added to CI; no live hardware |
+| File secrets + real Vault KV v2 | **PASS**, including precedence and fail-closed cases |
+| Clean install from Git clone, core + Kraken | **PASS**; API smoke **21/21**; Kraken healthy |
+| Persistence contracts | `scripts/persistence_check.py` **PASS** (static + container policies); the live Windows service was not installed because this shell is not elevated; a real reboot remains a gate |
+| Unified capability modes | `full`, `sensor`, `endpoint` via token/installer/`--mode`; one `agent_type=unified` record in every mode | **PASS locally** |
+| Docker hardening | Compose valid, CPU/RAM/PID limits, `no-new-privileges`, non-root broker, sensors internal by default | **PASS locally** |
+| Branch/PR CI | CI now runs on `dev`, `main`, `feat/**`, pull requests and tags; release job remains tag-only | **PASS — run 44916543187 (non-release jobs); tag job not run** |
 
----
+Not verified locally: hosted CI/tag workflow, bare-metal Linux, Windows Server live, and macOS live. These are release gates, not claims. See [Release gate 4.3](docs/RELEASE_GATE_4.3.md).
 
-## Database & Redis
+## Documentation
 
-`aegis-brain` runs `alembic upgrade head` on startup; revisions live under `aegis-brain/alembic/versions`. An optional development fallback, `DB_BOOTSTRAP_CREATE_ALL=true`, creates missing tables from SQLAlchemy metadata — leave it disabled in production and use Alembic revisions for schema changes.
-
-Redis is password-protected in Docker Compose and all services use the same `REDIS_PASSWORD`. If you run Redis outside Compose, make sure `REDIS_URL`, `REDIS_PASSWORD` and `SPRING_DATA_REDIS_PASSWORD` all point to the same authentication setup.
-
----
-
-## API Endpoints
-
-Full reference — all endpoints are under `/api/v1` unless noted.
-
-| Endpoint | Auth | Purpose |
-| --- | --- | --- |
-| `POST /auth/register` | none (or admin if registration closed) | Create dashboard user (validated, rate-limited) |
-| `POST /auth/login` | none | Get JWT (rate-limited + per-account throttle); `remember: true` issues a 30-day device-trust cookie |
-| `POST /auth/refresh` | session cookie | Silent session renewal (new JWT + cookie, same user) |
-| `POST /auth/remember` | `aegis_remember` HttpOnly cookie | Silent re-login from a trusted device; rotates the device token on every use |
-| `GET /auth/devices` | Bearer JWT | List trusted devices with last-used timestamps |
-| `DELETE /auth/devices/{id}` | Bearer JWT | Revoke a trusted device; its cookie dies at next use |
-| `POST /auth/logout` | Bearer JWT | Blacklist token, clear cookie, end device trust |
-| `GET /auth/me` | Bearer JWT | Current user profile (30/min) |
-| `GET /users` · `PATCH /users/{id}` | `manage` (admin) | List accounts; enable/disable or change role (disabled = immediate lockout; last-active-admin protected, 409) |
-| `GET /telemetry/stats` · `/agents` · `/alerts` | Bearer JWT | Dashboard counters, agent inventory, alert list (filtering, `?include_demo=true`) |
-| `GET /telemetry/alerts/{id}` | Bearer JWT | Alert detail with telemetry, threat reports, remediations |
-| `PATCH /telemetry/alerts/{id}/resolve` | `triage` / `respond` | Resolve single alert with optional kill-process |
-| `POST /telemetry/alerts/resolve-all` · `DELETE /telemetry/alerts` | Bearer JWT | Bulk resolve / delete (audit-logged) |
-| `GET /telemetry/threat-reports` · `/remediations` · `/recent` · `/activity` | Bearer JWT | AI threat reports, remediation history, recent telemetry, mixed timeline |
-| `POST /telemetry/report` · `/report/batch` | X-Agent-Id + Bearer | Agent telemetry report(s) (creates alerts) |
-| `POST /telemetry/heartbeat` · `GET /telemetry/commands` | X-Agent-Id + Bearer | Agent heartbeat; command queue (Redis) |
-| `GET /rules/` · `POST /rules/` | Bearer JWT (operator) | Custom detection rules CRUD (regex safety-checked) |
-| `GET /rules/static` · `POST /rules/test` | Bearer JWT | Static MITRE rules; test rules against sample events |
-| `POST /rules/replay/import` | Bearer JWT | Score an external JSONL corpus (benign/suspicious/malformed) with the real engine |
-| `GET /discovery/status` · `POST /discovery/scan` · `GET /discovery/hosts` | Bearer JWT | Network discovery (CIDR, ports, ARP + ICMP sweep) |
-| `POST /discovery/deploy` | — | Removed (HTTP 410): use `POST /deploy/token` |
-| `POST /deploy/token` | `deploy` | Issue a short-lived enrollment token for signed one-line install |
-| `POST /discovery/sync-agent-status` | Bearer JWT | Sync discovered-host agent states |
-| `GET /total/formats` · `POST /total/upload` | Bearer JWT | Aegis Total format catalog and sample analysis |
-| `GET /ocsf/alerts` | Bearer JWT | Alerts as OCSF 1.4.0 Detection Findings (JSON or NDJSON `?download=true`) |
-| `POST /ocsf/convert` · `GET /ocsf/schema` | Bearer JWT | Convert a single event to OCSF; mapping description for integrators |
-| `GET /osint/ip/{ip}` · `/osint/domain/{domain}` | Bearer JWT | Reputation lookups (VT, Shodan, AbuseIPDB) with cache |
-| `GET /ws/overview` · `GET /ws/alerts` | `aegis_token` cookie | WebSocket counters snapshot (30s); realtime alert push — no tokens in URLs |
-| `POST /ai/chat` · `GET /ai/threads` · `GET|PUT /ai/settings` · `GET /ai/status` | Bearer JWT | AI chat with prompt-injection detection; threads; provider/model selection; effective status |
-| `GET /soar/playbooks` · `POST` · `PUT /{id}` · `DELETE /{id}` | Bearer JWT | SOAR playbook CRUD |
-| `GET /soar/playbook-executions` | Bearer JWT | Playbook execution history |
-| `GET /syslog/events` | Bearer JWT | Query syslog events (severity, hostname, app filter) |
-| `POST /ingest/{source}` · `POST /ingest/test` | Bearer JWT / API key | Ingest raw logs (parsed + normalized + detected); parser dry-run — nothing stored |
-| `GET /ingest/catalog` · `/sources` · `/stats` · `/detection-coverage` | Bearer JWT | Parser catalog; source health (last event, unparsed, last error); ingestion stats (EPS, by source/severity); loaded vs executable Sigma/correlation rules + exclusions |
-| `POST /ingest/sources` | `operator` | Register a log source |
-| `POST /search/events` · `GET /search/events` · `/fields` · `/stats` | Bearer JWT | Structured search (allowlisted fields, escaped text); shareable-link variant; searchable fields; event statistics |
-| `GET /audit/logs` | Bearer JWT | Audit log entries |
-| `POST /enroll/enroll` · `POST /register` · `POST /update` | enrollment key / agent token | Agent enrollment; NodeTrace compatibility registration; telemetry upload |
-| `POST /vault/notes` · `GET` · `GET /{id}` · `DELETE /{id}` | Bearer JWT | Encrypted notes CRUD (AES-256-GCM) |
-| `GET /telegram/settings` · `PUT` · `POST /telegram/test` · `POST /telegram/detect` | Bearer JWT (`manage` for writes) | Telegram notification config, live test message, and chat-id discovery via getUpdates |
-
----
-
-## Configuration
-
-Key environment variables (full list in `.env.example`):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AEGIS_API_KEY` | placeholder | Gateway/automation API key (never grants dashboard access) |
-| `AGENT_ENROLL_KEY` | placeholder | Agent enrollment key |
-| `JWT_SECRET` | placeholder | Session signing secret (≥ 32 chars) |
-| `MASTER_KEY_B64` | placeholder | Base64 32-byte KEK for encrypted settings (integration keys, VaultX) |
-| `POSTGRES_PASSWORD` / `REDIS_PASSWORD` | placeholder | Service credentials (required by compose) |
-| `DEBUG` | `false` | SQL echo and dev validations — must stay `false` in production |
-| `ALLOW_OPEN_REGISTRATION` | `false` | Self-service registration (the brain refuses invalid production combos) |
-| `COOKIE_SECURE` | `true` | Secure flag on auth cookies — set `false` only for local HTTP |
-| `SYSLOG_ENABLED` | `false` | UDP/TCP syslog listener (binds `127.0.0.1` unless `SYSLOG_BIND` widened) |
-| `AI_PROVIDER` / `AI_MODEL` | `auto` / `""` | AI provider and model (dashboard wins unless explicitly pinned here) |
-| `AI_AUTOMATIC_ENRICH` | `false` | Automatic alert enrichment toward a **cloud** provider |
-| `AEGIS_WITH_AI` | unset | Set `1` to add the Ollama service to the stack |
-| `OLLAMA_URL` | in-stack | Point at a powerful LAN machine to keep AI local with big models |
-| `AEGIS_ETW_ENABLED` | `true` when the collector exists | Spawns the ETW kernel collector from Guard |
-| `AEGIS_ETW_PATH` | absolute path set by the launcher | Must be **absolute**: Guard refuses to execute a collector resolved from a writable workdir (hijack) |
-| `AEGIS_ETW_ALLOW_UNSIGNED` | `true` for locally built collectors | Allows an unsigned helper. Keep `false` if you sign `aegis-etw.exe` and want signature enforcement |
-| `AEGIS_NO_ELEVATE` | unset | `1` stops `aegis.bat agents` from requesting the UAC prompt for kernel telemetry (the agents then run without ETW and say so) |
-| `NODETRACE_IDENTITY_DIR` | agent directory | Where `token.json` and the device key/certificate live. Resolved as an **absolute** path on purpose: with a relative path the same device used a different identity per launch directory, and the brain answered 401 to every authenticated call |
-| `PLAYBOOK_SCRIPT_ENABLED` | `false` | Shell `script` SOAR actions (keep off unless explicitly approved) |
-| `RATE_LIMIT_STORAGE_URI` | memory | `redis://…` for multi-worker/HA rate limiting |
-
----
-
-## Security Notes
-
-This project is designed for local security labs and development. Before production use:
-
-- Replace every default secret in `.env`.
-- Set `DEBUG=false` and `ALLOW_OPEN_REGISTRATION=false` (the brain refuses to start otherwise); for production also `ENTERPRISE_STRICT=true` with `MTLS_MODE=required` (refused at startup if missing).
-- Keep playbook `script` actions disabled (`PLAYBOOK_SCRIPT_ENABLED=false`, default) unless explicitly approved: they execute shell on the server.
-- For production, use `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` to avoid exposing Postgres/Redis ports.
-- Replace Caddy `tls internal` with proper TLS certificates (Let's Encrypt).
-- Use incremental Alembic migrations for all schema changes (migrations are idempotent).
-- Keep `AEGIS_LOG_LEVEL=INFO` or stricter in production.
-- **Remember-me is done defensively**: opaque token + server-side SHA-256, rotated on every use, scoped to the auth paths, behind the same origin/CSRF gate as the session cookie, listed and revocable from the dashboard.
-
-Use this software only on systems where you have explicit permission.
-
----
-
-## Pilot & Production Readiness
-
-```bash
-# OS preflight (Windows) / sh scripts/os-preflight.sh (Linux)
-powershell -ExecutionPolicy Bypass -File scripts/os-preflight.ps1
-
-# Dev-tool preflight (python/node/java/docker/ports)
-python scripts/dev_preflight.py
-
-# Detection replay on 3 independent splits (training/validation/regression)
-python scripts/replay_report.py --all
-
-# Threshold calibration report (synthetic panel, not fleet baseline)
-python scripts/calibrate_thresholds.py
-
-# API smoke against the live stack
-python scripts/api_smoke.py [--base http://127.0.0.1:8000]
-
-# Pilot soak: N synthetic agents for T seconds (dev DB only)
-python scripts/pilot_soak.py --agents 10 --duration 300
-
-# Browser E2E pilot (manual until the 4.2 CI job; needs live stack)
-cd frontend && npm run e2e
-
-# Full audit: machine JSON + human report
-python scripts/audit_report.py
-```
-
-| Item | Path |
+| Document | Purpose |
 |---|---|
-| OS validation procedures + status | `docs/os-validation/` |
-| HA runbook + overlay | `docs/HA.md`, `docker-compose.ha.yml` |
-| Benchmark method + numbers | `docs/BENCHMARK.md` |
-| Operations (profiles, secrets, PKI) | `docs/OPERATIONS.md` |
-| Threat model | `docs/THREAT_MODEL.md` |
-
-Production profile: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` (requires `BACKUP_PASSPHRASE`; Postgres/Redis not published). The HA overlay adds resource limits and scale-readiness (`--scale aegis-brain=2`).
-
----
+| [OS compatibility](docs/OS_COMPATIBILITY.md) | Supported versions, sensors, fallbacks and live evidence. |
+| [Kernel and driver feasibility](docs/KERNEL_AND_DRIVERS.md) | Why eBPF/ETW are not universal, and the real cost of a signed driver. |
+| [Secrets](docs/SECRETS.md) | File, Docker/Kubernetes and Vault configuration. |
+| [OIDC](docs/OIDC.md) | SSO configuration, role mapping and break-glass. |
+| [Operations](docs/OPERATIONS.md) | Install, upgrade, backup/restore and PKI. |
+| [Packaging](docs/PACKAGING.md) | Endpoint vs server packages, contents and customer install. |
+| [Release policy](docs/RELEASE_POLICY.md) | Supported lines, artifact retention, update and downgrade rules. |
+| [`ak` CLI](docs/AK_CLI.md) | Server commands, privileges, updates, port/URL configuration and exit codes. |
+| [Pilot runbook](docs/PILOT_RUNBOOK.md) | Pilot deployment and acceptance. |
+| [Release gate](docs/RELEASE_GATE_4.3.md) | What is green, what remains, and allowed claims. |
+| [Production validation](docs/PRODUCTION_VALIDATION.md) | Internal test harnesses (soak, DR, HA, AP-126/127), with external inputs and limits. |
+| [Persistence](docs/PERSISTENCE.md) | What restarts after a reboot, what does not, and the Docker daemon prerequisite. |
+| [Threat model](docs/THREAT_MODEL.md) | Assets, trust boundaries and mitigations. |
+| [Benchmarks](docs/BENCHMARK.md) | Load methodology and measured numbers. |
+| [YARA feeds](docs/YARA_FEEDS.md) | Signed rule bundles, key rotation and fail-closed import. |
 
 ## Development
 
-### Project Structure
+```bash
+# Brain tests (disposable database and Redis required)
+# conftest derives AEGIS_TEST_REDIS_URL (DB 15, same auth) from REDIS_URL so
+# queue tests never flush the application's DB 0.
+cd aegis-brain
+python -m pytest tests/ -q
 
-```
-aegis-ecosystem/
-├── aegis-brain/             # FastAPI brain: API, detection, SIEM, SOAR, Total
-│   ├── app/api/v1/          # REST endpoints (auth, telemetry, ingest, search…)
-│   ├── app/services/        # telemetry, sigma, correlation, notifier, total
-│   ├── app/rules/           # static rules + Sigma engine
-│   ├── alembic/versions/    # DB migrations
-│   └── tests/               # 823 pytest (CI-verified; 3 YARA skips)
-├── aegis-link/              # Spring Boot ingestion gateway
-├── aegis-guard/             # Java endpoint agent (processes, FIM, remediation)
-│   └── install/windows/     # NSSM service installer/uninstaller
-├── NodeTrace/               # Python telemetry agent
-│   └── agents/python/       # PyInstaller standalone build
-├── aegis-ebpf/              # eBPF probes (Linux) + ETW collector (Windows)
-├── frontend/                # React 19 / TypeScript dashboard
-│   ├── src/components/      # pages, common widgets
-│   ├── src/hooks/           # realtime WS, session renewal, notifications
-│   └── e2e/                 # Playwright browser tests
-├── scripts/                 # setup.py, batteries, preflights, audit tools
-├── docs/                    # operations, HA, benchmarks, threat model
-├── docker-compose*.yml      # lab / prod / mTLS / observability / HA overlays
-└── .github/workflows/       # CI: lint, tests, secret scan, Trivy, SBOM
+# Frontend
+cd frontend && npm ci && npm run build && npm run lint
+
+# Playwright (live stack, admin credentials from env)
+E2E_NO_SERVER=1 E2E_BASE_URL=http://localhost:3000 \
+E2E_EMAIL=... E2E_PASSWORD=... npx playwright test
+
+# Go agent
+cd aegis-agent && go test -count=1 ./...
 ```
 
-### CI/CD
-
-GitHub Actions runs on every push: lint (flake8 + oxlint), secret scanning, event-contract checks, Windows installer checks, OS-compat matrix (ubuntu + windows), brain + guard + link tests, frontend lint/build, pip-audit, Trivy image scanning (strict on images we build, informational on upstream images), and SBOM generation. The 4.2 workflow includes an ephemeral Compose E2E job; its first hosted run is still pending. Release jobs run on tags.
-
----
+The repository is a monorepo: `aegis-brain` (FastAPI), `aegis-agent` (Go), `aegis-ebpf` (eBPF/ETW), `frontend` (React), `aegis-link` (Spring Boot) and `services/kraken` (deception). CI runs lint, secret scan, tests, Trivy, SBOM and the Compose E2E gate; the release is cut only after the hosted tag workflow is green.
 
 ## License
 
-Aegis Ecosystem is licensed under **AGPL-3.0-only**. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
-The name and logo are governed by [`TRADEMARK.md`](TRADEMARK.md) and are not licensed under the AGPL.
+Aegis Ecosystem is licensed under **AGPL-3.0-only** (the root is not Apache). See [LICENSE](LICENSE) and [NOTICE](NOTICE). **Kraken** is a separately licensed **MIT** component: see [services/kraken/LICENSE](services/kraken/LICENSE) and its [README](services/kraken/README.md#license). The MIT component is distributed inside the AGPL bundle and keeps its own notice; it does not relicense the rest of the repository. The name and logo are governed by [TRADEMARK.md](TRADEMARK.md). Security reports: [SECURITY.md](SECURITY.md).
 
-Security reports: [`SECURITY.md`](SECURITY.md). Contributions: [`CONTRIBUTING.md`](CONTRIBUTING.md), no CLA.
-
----
-
-<p align="center">
-  <strong>Authorized use only.</strong> Aegis is a defensive security platform intended for<br/>
-  systems you own or have explicit written permission to monitor.
-</p>
-
-<p align="center">
-  Built with ❤️ by <a href="https://github.com/Terminalkid09">Terminalkid09</a>
-</p>
+<p align="center"><strong>Authorized use only.</strong> Aegis is a defensive platform for systems you own or have explicit written permission to monitor.</p>

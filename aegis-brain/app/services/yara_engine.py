@@ -28,6 +28,11 @@ except Exception as _exc:  # pragma: no cover - dipende dall'ambiente
 
 MAX_SCAN_BYTES = 32 * 1024 * 1024  # tetto: sopra, skip dichiarato
 
+# Peso di un match in base alla severity della regola. Le regole manuali
+# storiche non avevano severity: il default resta "high" e il punteggio non
+# cambia per loro (40), mentre un feed può distinguere critical/high/medium/low.
+SEVERITY_SCORE = {"low": 10, "medium": 25, "high": 40, "critical": 60}
+
 
 def compile_rules(rules: List[Tuple[str, str]]) -> Tuple[List[Tuple[str, Any]], List[Dict[str, str]]]:
     """Compila ogni regola singolarmente.
@@ -49,8 +54,15 @@ def compile_rules(rules: List[Tuple[str, str]]) -> Tuple[List[Tuple[str, Any]], 
     return ok, errors
 
 
-def scan_bytes(data: bytes, compiled_rules: List[Tuple[str, Any]]) -> Dict[str, Any]:
-    """Scansiona il buffer con le regole compilate. Mai eccezioni."""
+def scan_bytes(data: bytes, compiled_rules: List[Tuple[str, Any]],
+               metadata: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Scansiona il buffer con le regole compilate. Mai eccezioni.
+
+    `metadata` è opzionale e indicizzato per il nome della regola nel DB:
+    aggiunge severity/tags/description/MITRE al match senza cambiare la
+    firma usata dai test e dagli agenti.
+    """
+    metadata = metadata or {}
     out: Dict[str, Any] = {"enabled": YARA_AVAILABLE and bool(compiled_rules),
                            "matches": [], "errors": [], "skipped": False}
     if not out["enabled"]:
@@ -63,6 +75,7 @@ def scan_bytes(data: bytes, compiled_rules: List[Tuple[str, Any]]) -> Dict[str, 
     errors: List[Dict[str, str]] = []
     for name, compiled in compiled_rules:
         try:
+            meta = metadata.get(name) or {}
             for m in compiled.match(data=data):
                 strings = []
                 try:
@@ -72,7 +85,16 @@ def scan_bytes(data: bytes, compiled_rules: List[Tuple[str, Any]]) -> Dict[str, 
                         strings.append(str(ident))
                 except Exception:
                     pass
-                matches.append({"rule": m.rule, "rule_name": name, "strings": strings[:10]})
+                matches.append({
+                    "rule": m.rule,
+                    "rule_name": name,
+                    "strings": strings[:10],
+                    "severity": meta.get("severity") or "high",
+                    "description": meta.get("description"),
+                    "mitre": meta.get("mitre"),
+                    "tags": meta.get("tags") or [],
+                    "source": meta.get("source") or "manual",
+                })
         except Exception as exc:
             errors.append({"rule": name, "error": str(exc)[:200]})
     out["matches"] = matches
@@ -83,16 +105,28 @@ def scan_bytes(data: bytes, compiled_rules: List[Tuple[str, Any]]) -> Dict[str, 
 def score_impact(scan_result: Dict[str, Any], current_score: int) -> Tuple[int, List[Dict[str, Any]]]:
     """I match YARA alzano lo score (un match = fatto, non indizio).
 
-    Un finding per match, severity high: le firme del SOC sono curate,
-    non euristiche. La callback deve restare pura sul resto dello score.
+    Un finding per match. Il peso segue la severity della regola; il default
+    `high` preserva il comportamento delle regole manuali pre-feed.
     """
     findings: List[Dict[str, Any]] = []
     score = current_score
     for m in scan_result.get("matches", []):
-        score += 40
-        findings.append({
+        severity = str(m.get("severity") or "high").lower()
+        weight = SEVERITY_SCORE.get(severity, SEVERITY_SCORE["high"])
+        score += weight
+        finding = {
             "type": "yara_signature_match",
-            "severity": "high",
+            "severity": severity,
+            "score": weight,
             "detail": f"YARA rule '{m['rule']}' (source: {m['rule_name']}) matched the sample",
-        })
+            "rule_name": m["rule"],
+            "source": m.get("source") or "manual",
+        }
+        if m.get("description"):
+            finding["description"] = m["description"]
+        if m.get("mitre"):
+            finding["mitre"] = m["mitre"]
+        if m.get("tags"):
+            finding["tags"] = m["tags"]
+        findings.append(finding)
     return min(score, 100), findings

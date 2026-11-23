@@ -1,0 +1,20 @@
+# Never bake runtime configuration, secrets or data into the image.
+# docker-compose supplies the runtime environment; the image must not read a
+# developer's .env (which contains compose-only keys and real secrets).
+.env
+.env.*
+!.env.example
+secrets/
+data/
+*.log
+
+# Local build/test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.git/
+.gitignore

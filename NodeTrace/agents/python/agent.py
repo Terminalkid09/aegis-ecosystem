@@ -91,7 +91,7 @@ class PidLock:
 # ---------- Agent Class ----------
 
 class Agent:
-    AGENT_VERSION = os.getenv("NODETRACE_VERSION", "4.2.1")
+    AGENT_VERSION = os.getenv("NODETRACE_VERSION", "4.3.0")
     CAPABILITIES = {"telemetry": True, "network_scan": True, "update": True}
 
     def __init__(self):
@@ -149,10 +149,16 @@ class Agent:
             self.CAPABILITIES = {**self.CAPABILITIES, "ebpf_process_events": True}
 
     def _agent_headers(self, token, device_id):
-        """Header auth + X-Client-Cert quando l'identità esiste."""
+        """Header auth + fingerprint mTLS, mai il certificato completo.
+
+        Il Brain rifiuta ``X-Client-Cert`` quando
+        ``MTLS_REJECT_LEGACY_HEADER`` è attivo: il certificato completo non è
+        prova di possesso della chiave. Il fingerprint è legato all'agent
+        all'emissione e viene verificato dal proxy/Brain.
+        """
         headers = {"Authorization": f"Bearer {token}", "X-Agent-Id": device_id}
-        if self._identity_b64:
-            headers["X-Client-Cert"] = self._identity_b64
+        if self._identity_hash:
+            headers["X-Client-Cert-Hash"] = self._identity_hash
         return headers
 
     def _enroll_token(self):
@@ -304,13 +310,14 @@ class Agent:
         # Telemetry ack vive sotto /telemetry (auth X-Agent-Id + Bearer).
         return self.config["heartbeat_url"].replace("/heartbeat", "/telemetry/commands/ack")
 
-    def _ack_command(self, token, device_id, command, status, details=None):
+    def _ack_command(self, token, device_id, command, status, details=None, delivery_id=None):
         # Best-effort: l'ack non deve mai rompere il loop agente.
         try:
             headers = self._agent_headers(token, device_id)
-            post(self._ack_url(), json_data={
-                "command": command, "status": status, "details": details,
-            }, headers=headers, timeout=10)
+            payload = {"command": command, "status": status, "details": details}
+            if delivery_id:
+                payload["delivery_id"] = delivery_id
+            post(self._ack_url(), json_data=payload, headers=headers, timeout=10)
         except Exception as e:
             Logger.warn(f"Command ack failed for {command}: {e}")
 
@@ -384,7 +391,8 @@ class Agent:
             self.send_telemetry(self._token, self._device_id)
             self._last_telemetry_time = time.time()
             if token and device_id:
-                self._ack_command(token, device_id, cmd_type, "ok")
+                self._ack_command(token, device_id, cmd_type, "ok",
+                                  delivery_id=command.get("delivery_id"))
 
         elif cmd_type == "NETWORK_SCAN":
             cidr = command.get("cidr", "192.168.1.0/24")
@@ -397,7 +405,8 @@ class Agent:
                 daemon=True
             ).start()
             if token and device_id:
-                self._ack_command(token, device_id, cmd_type, "ok", f"scan started: {cidr}")
+                self._ack_command(token, device_id, cmd_type, "ok", f"scan started: {cidr}",
+                                  delivery_id=command.get("delivery_id"))
 
         elif cmd_type == "UPDATE_AGENT":
             if token and device_id:
@@ -414,6 +423,7 @@ class Agent:
         import urllib.request
         import ssl
         cmd_name = "UPDATE_AGENT"
+        delivery_id = command.get("delivery_id")
         url = command.get("url", "")
         sha = command.get("sha256", "")
         manifest = command.get("manifest", "") or ""
@@ -421,35 +431,35 @@ class Agent:
         version = command.get("version", "latest")
         if not url or not sha:
             Logger.error("UPDATE_AGENT missing url/sha256 — refusing (fail-closed).")
-            self._ack_command(token, device_id, cmd_name, "failed", "missing url/sha256")
+            self._ack_command(token, device_id, cmd_name, "failed", "missing url/sha256", delivery_id=delivery_id)
             return
         # Audit SSRF: l'URL non e' coperto dalla firma — senza allowlist un
         # brain compromesso/MITM dirottava il download (con Bearer+cert!)
         # verso host arbitrari. Solo artefatti del brain pinnato.
         if not self._update_url_allowed(url):
             Logger.error("UPDATE_AGENT url fuori allowlist — refusing.")
-            self._ack_command(token, device_id, cmd_name, "failed", "url not allowed")
+            self._ack_command(token, device_id, cmd_name, "failed", "url not allowed", delivery_id=delivery_id)
             return
         # Ed25519 obbligatorio (AEGIS-SEC-002): niente HMAC OTA.
         pubkey = os.getenv("AEGIS_MANIFEST_PUBKEY", "").strip()
         if not pubkey:
             Logger.error("UPDATE_AGENT: AEGIS_MANIFEST_PUBKEY missing — refusing.")
-            self._ack_command(token, device_id, cmd_name, "failed", "no manifest pubkey")
+            self._ack_command(token, device_id, cmd_name, "failed", "no manifest pubkey", delivery_id=delivery_id)
             return
         if not manifest or not manifest_sig:
             Logger.error("UPDATE_AGENT: missing Ed25519 manifest — refusing.")
-            self._ack_command(token, device_id, cmd_name, "failed", "missing Ed25519 manifest")
+            self._ack_command(token, device_id, cmd_name, "failed", "missing Ed25519 manifest", delivery_id=delivery_id)
             return
         from services.updater import verify_manifest_ed25519, manifest_covers
         fname = url.rsplit("/", 1)[-1] if "/" in url else url
         verified = verify_manifest_ed25519(manifest, manifest_sig, pubkey)
         if verified is None:
             Logger.error("UPDATE_AGENT: manifest pubkey set ma cryptography assente — refusing.")
-            self._ack_command(token, device_id, cmd_name, "failed", "manifest needs cryptography lib")
+            self._ack_command(token, device_id, cmd_name, "failed", "manifest needs cryptography lib", delivery_id=delivery_id)
             return
         if not verified or not manifest_covers(manifest, fname, sha):
             Logger.error("UPDATE_AGENT: manifest Ed25519 invalido o artefatto non coperto — refusing.")
-            self._ack_command(token, device_id, cmd_name, "failed", "bad manifest")
+            self._ack_command(token, device_id, cmd_name, "failed", "bad manifest", delivery_id=delivery_id)
             return
         Logger.info(f"UPDATE_AGENT: manifest Ed25519 verificato per {fname}.")
         try:
@@ -483,10 +493,10 @@ class Agent:
                 except OSError:
                     pass
             Logger.info(f"UPDATE_AGENT v{version} staged at {staged} — restart agent to apply.")
-            self._ack_command(token, device_id, cmd_name, "ok", f"staged v{version}")
+            self._ack_command(token, device_id, cmd_name, "ok", f"staged v{version}", delivery_id=delivery_id)
         except Exception as e:
             Logger.error(f"UPDATE_AGENT failed: {e}")
-            self._ack_command(token, device_id, cmd_name, "failed", str(e)[:500])
+            self._ack_command(token, device_id, cmd_name, "failed", str(e)[:500], delivery_id=delivery_id)
 
     def _brain_origin(self) -> str:
         """Origine (scheme://host:port) del brain da heartbeat_url."""

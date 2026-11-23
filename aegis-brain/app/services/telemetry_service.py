@@ -701,13 +701,23 @@ async def process_telemetry(
 
 
 async def send_command_to_agent(agent_id: Any, command: Dict[str, Any]):
-    """Accoda un comando FIFO; a coda piena restituisce `queued=False`.
+    """Accoda un comando FIFO e fallisce esplicitamente a coda piena.
 
-    Non si usa piu' `LTRIM 0 99`: a coda piena buttava via il comando appena
-    inserito (il piu' recente) e il chiamante credeva fosse stato consegnato.
+    Restituire `queued=False` era insufficiente: diversi call-site
+    consideravano l'assenza di eccezione come successo e rispondevano
+    "accodato". `CommandQueueFull` obbliga ogni chiamante a scegliere tra 503
+    ed esito `failed`, senza trasformare un rifiuto in un falso successo.
+
+    La consegna e' at-least-once: il claim atomico sposta il comando in una
+    processing list e l'agente invia un ack con `delivery_id`. Un crash tra
+    esecuzione e ack puo' produrre un duplicato; non e' exactly-once.
     """
-    from app.services.command_queue import enqueue_command
+    from app.services.command_queue import CommandQueueFull, enqueue_command
+
     result = await enqueue_command(redis_client, str(agent_id), command)
     if not result.get("queued"):
         logger.warning("Command queue full for %s: %s", agent_id, command.get("command"))
+        raise CommandQueueFull(
+            agent_id, command, result.get("depth", 0), result.get("limit", 0)
+        )
     return result

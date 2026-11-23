@@ -1,0 +1,15 @@
+Package: aegis-suite
+Version: __VERSION__
+Section: metapackages
+Priority: optional
+Architecture: all
+Maintainer: Aegis <ops@aegis.local>
+Installed-Size: __SIZE__
+Depends: aegis (= __VERSION__), kraken (= __VERSION__)
+Suggests: aegis-agent
+Description: Aegis and Kraken complete server suite (metapackage)
+ Installs both independent server stacks through their normal packages. Aegis
+ and Kraken keep separate databases, Redis instances, secrets and systemd
+ units. The endpoint agent is deliberately not a dependency: it belongs on
+ Windows/Linux endpoints and needs its own short-lived enrollment token.
+Homepage: https://github.com/Terminalkid09/aegis-ecosystem

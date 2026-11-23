@@ -2,6 +2,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator, model_validator
 from typing import Optional
 import base64
+import json
+
+from app.core.secrets import apply_secret_sources
+
+# File/Vault sources must populate os.environ before pydantic-settings reads
+# it. This is deliberately before Settings() and never logs a value.
+apply_secret_sources()
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -52,7 +59,7 @@ class Settings(BaseSettings):
     # Versione della piattaforma: una sola fonte per OpenAPI, endpoint root e
     # dashboard (prima era scritta a mano in due punti e la UI mostrava una
     # versione diversa da quella vera). Si alza qui, in un posto solo.
-    APP_VERSION: str = "4.2.1"
+    APP_VERSION: str = "4.3.0"
     OLLAMA_URL: Optional[str] = None
     OLLAMA_DEFAULT_MODEL: str = "aegis-default"
     # Audit: allowlist modelli caricabili via API (niente pull arbitrari).
@@ -93,6 +100,30 @@ class Settings(BaseSettings):
     # False = POST /auth/register richiede JWT admin (niente self-service).
     ALLOW_OPEN_REGISTRATION: bool = True
 
+    # ── OIDC umano (WP-PLAT-01) ────────────────────────────────────────────
+    # Provider-neutral: Entra ID, Okta, Keycloak, Authentik. Local login remains
+    # available by default as the documented break-glass path.
+    OIDC_ENABLED: bool = False
+    OIDC_ISSUER: str = ""
+    OIDC_DISCOVERY_URL: str = ""
+    OIDC_CLIENT_ID: str = ""
+    OIDC_CLIENT_SECRET: str = ""
+    # Empty = PUBLIC_BASE_URL + /api/v1/auth/oidc/callback.
+    OIDC_REDIRECT_URI: str = ""
+    OIDC_SCOPES: str = "openid email profile"
+    OIDC_BUTTON_LABEL: str = "Sign in with SSO"
+    OIDC_GROUPS_CLAIM: str = "groups"
+    # JSON object, e.g. {"aegis-admins":"admin","aegis-analysts":"analyst"}.
+    OIDC_GROUP_ROLE_MAP: str = "{}"
+    OIDC_DEFAULT_ROLE: str = "viewer"
+    OIDC_AUTO_CREATE_USERS: bool = True
+    OIDC_LINK_BY_EMAIL: bool = True
+    OIDC_SYNC_ROLE: bool = True
+    OIDC_REQUIRE_VERIFIED_EMAIL: bool = True
+    OIDC_ALLOW_LOCAL_LOGIN: bool = True
+    OIDC_HTTP_TIMEOUT_S: int = 10
+    OIDC_CLOCK_SKEW_S: int = 60
+
     # Automazione SOAR idempotente (audit L1): un playbook esegue le sue azioni
     # una sola volta per (playbook, alert) entro questa finestra. Evita che un
     # alert non risolto ri-attivi contenimento (kill/isolate) ogni minuto.
@@ -101,6 +132,10 @@ class Settings(BaseSettings):
     # silenziosamente scartato dal LTRIM. 100 comandi coprono un burst di
     # contenimento mentre l'agente e' momentaneamente offline.
     COMMAND_QUEUE_MAX: int = 100
+    # At-least-once delivery: un comando non ackato torna in coda dopo questo
+    # lease; oltre COMMAND_MAX_DELIVERIES finisce in DLQ invece di loopare.
+    COMMAND_VISIBILITY_TIMEOUT_S: int = 60
+    COMMAND_MAX_DELIVERIES: int = 5
 
     # Rate limiting (audit S1). Lo storage in memoria vale solo per il singolo
     # processo uvicorn: in pilot/HA va puntato a Redis (es. redis://...).
@@ -154,6 +189,20 @@ class Settings(BaseSettings):
     TOTAL_MAX_ZIP_MB: int = 200
     TOTAL_MAX_FILES_PER_ZIP: int = 2000
     TOTAL_RETENTION_DAYS: int = 7
+
+    # ── YARA feed firmati (aggiornamento firme) ─────────────────────────────
+    # Disabilitato di default: un feed esterno è una supply chain. Quando è
+    # abilitato, il Brain richiede una chiave Ed25519 e verifica la firma sul
+    # corpo grezzo PRIMA di interpretare il JSON. Nessun import unsigned.
+    YARA_FEED_ENABLED: bool = False
+    YARA_FEED_URLS: str = ""
+    YARA_FEED_PUBLIC_KEY_B64: str = ""
+    YARA_FEED_KEY_ID: str = ""
+    YARA_FEED_INTERVAL_S: int = 3600
+    YARA_FEED_TIMEOUT_S: int = 20
+    YARA_FEED_MAX_BYTES: int = 8 * 1024 * 1024
+    # Solo per test/localhost espliciti; in produzione HTTPS obbligatorio.
+    YARA_FEED_ALLOW_HTTP: bool = False
 
     # Data retention in giorni (configurabile — decisioni M0 Fase 1).
     # Enforcement (purge job) in Fase 8/9; qui solo perimetro configurabile.
@@ -282,6 +331,45 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "AEGIS_PROFILE=prod requires RATE_LIMIT_STORAGE_URI (shared Redis)"
                 )
+        if self.YARA_FEED_ENABLED:
+            urls = [u.strip() for u in (self.YARA_FEED_URLS or "").split(",") if u.strip()]
+            if not urls:
+                raise ValueError("YARA_FEED_ENABLED=true requires YARA_FEED_URLS")
+            if not (self.YARA_FEED_PUBLIC_KEY_B64 or "").strip():
+                raise ValueError("YARA_FEED_ENABLED=true requires YARA_FEED_PUBLIC_KEY_B64")
+            try:
+                if len(base64.b64decode(self.YARA_FEED_PUBLIC_KEY_B64, validate=True)) != 32:
+                    raise ValueError
+            except Exception as exc:
+                raise ValueError("YARA_FEED_PUBLIC_KEY_B64 must decode to exactly 32 bytes") from exc
+            if self.YARA_FEED_INTERVAL_S < 60:
+                raise ValueError("YARA_FEED_INTERVAL_S must be at least 60 seconds")
+            if self.YARA_FEED_TIMEOUT_S <= 0:
+                raise ValueError("YARA_FEED_TIMEOUT_S must be positive")
+            if not 1024 <= self.YARA_FEED_MAX_BYTES <= 64 * 1024 * 1024:
+                raise ValueError("YARA_FEED_MAX_BYTES must be between 1 KB and 64 MB")
+        if self.OIDC_ENABLED:
+            if not (self.OIDC_ISSUER or "").strip():
+                raise ValueError("OIDC_ENABLED=true requires OIDC_ISSUER")
+            if not (self.OIDC_CLIENT_ID or "").strip():
+                raise ValueError("OIDC_ENABLED=true requires OIDC_CLIENT_ID")
+            if "openid" not in (self.OIDC_SCOPES or "").split():
+                raise ValueError("OIDC_SCOPES must include openid")
+            if self.OIDC_HTTP_TIMEOUT_S <= 0:
+                raise ValueError("OIDC_HTTP_TIMEOUT_S must be positive")
+            if self.OIDC_CLOCK_SKEW_S < 0:
+                raise ValueError("OIDC_CLOCK_SKEW_S must not be negative")
+            allowed_roles = {"viewer", "user", "auditor", "responder", "analyst", "admin"}
+            if (self.OIDC_DEFAULT_ROLE or "").lower() not in allowed_roles:
+                raise ValueError("OIDC_DEFAULT_ROLE is not a known role")
+            try:
+                role_map = json.loads(self.OIDC_GROUP_ROLE_MAP or "{}")
+            except json.JSONDecodeError as exc:
+                raise ValueError("OIDC_GROUP_ROLE_MAP must be valid JSON") from exc
+            if not isinstance(role_map, dict):
+                raise ValueError("OIDC_GROUP_ROLE_MAP must be a JSON object")
+            if any(str(role).lower() not in allowed_roles for role in role_map.values()):
+                raise ValueError("OIDC_GROUP_ROLE_MAP contains an unknown role")
         return self
 
 settings = Settings()

@@ -21,5 +21,5 @@ identity of the project are **not** licensed under AGPL-3.0.
 Forks must use a different name and logo. This is a project policy; it is not
 a claim that the name is a registered trademark. The preliminary name search
 and the limits of this policy are documented in
-[`docs/TRADEMARK_RESEARCH.md`](docs/TRADEMARK_RESEARCH.md). For permission, open
+[`docs/archive/TRADEMARK_RESEARCH.md`](docs/archive/TRADEMARK_RESEARCH.md). For permission, open
 an issue in the repository.

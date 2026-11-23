@@ -1,0 +1,47 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    install -d -m 0755 /opt/aegis/kraken /var/lib/aegis/kraken /etc/aegis
+
+    # See aegis/postinst: the two packages never own the same path. Aegis has
+    # priority 20, Kraken 10, so an installed Aegis copy handles both stacks.
+    if command -v update-alternatives >/dev/null 2>&1; then
+        update-alternatives --install /usr/local/bin/ak ak \
+            /usr/local/lib/aegis/ak-kraken 10 || true
+    fi
+
+    if [ ! -s /etc/aegis/kraken.env ]; then
+        /usr/local/lib/aegis/kraken-env.sh > /etc/aegis/kraken.env
+        chmod 0600 /etc/aegis/kraken.env
+        chown root:root /etc/aegis/kraken.env
+    fi
+    ln -sfn /etc/aegis/kraken.env /opt/aegis/kraken/.env
+
+    # aegis-suite may be configured before this package; the helper is
+    # idempotent and wires the shared network/SSO/ingest once both envs exist.
+    if [ -x /usr/local/lib/aegis/suite-wire.sh ]; then
+        /usr/local/lib/aegis/suite-wire.sh || true
+    fi
+
+    rm -f /var/lib/aegis/kraken/images.ok
+
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        systemctl daemon-reload || true
+        systemctl enable kraken.service
+        systemctl is-enabled --quiet kraken.service
+        if [ "${AEGIS_PACKAGE_SKIP_START:-0}" != "1" ]; then
+            if command -v docker >/dev/null 2>&1 \
+                && timeout 15 docker compose version >/dev/null 2>&1 \
+                && timeout 15 docker info >/dev/null 2>&1; then
+                systemctl start --no-block kraken.service || true
+            else
+                echo "kraken installed; install Docker Engine with the Compose v2 plugin and start the daemon before the first start." >&2
+            fi
+        fi
+    else
+        echo "kraken installed; systemd is not running here, so the unit was not enabled." >&2
+    fi
+fi
+
+exit 0

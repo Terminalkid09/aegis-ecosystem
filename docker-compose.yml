@@ -3,6 +3,11 @@ services:
     image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     container_name: aegis-postgres
     restart: unless-stopped
+    mem_limit: ${AEGIS_POSTGRES_MEM_LIMIT:-1g}
+    cpus: "${AEGIS_POSTGRES_CPUS:-1.0}"
+    pids_limit: ${AEGIS_POSTGRES_PIDS:-200}
+    security_opt:
+      - no-new-privileges:true
     environment:
       POSTGRES_DB:       ${POSTGRES_DB:-aegis}
       POSTGRES_USER:     ${POSTGRES_USER:-postgres}
@@ -21,6 +26,11 @@ services:
     image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     container_name: aegis-redis
     restart: unless-stopped
+    mem_limit: ${AEGIS_REDIS_MEM_LIMIT:-512m}
+    cpus: "${AEGIS_REDIS_CPUS:-0.50}"
+    pids_limit: ${AEGIS_REDIS_PIDS:-200}
+    security_opt:
+      - no-new-privileges:true
     command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
@@ -39,6 +49,11 @@ services:
     container_name: aegis-ollama
     profiles: ["ollama"]
     restart: unless-stopped
+    mem_limit: ${AEGIS_OLLAMA_MEM_LIMIT:-2g}
+    cpus: "${AEGIS_OLLAMA_CPUS:-2.0}"
+    pids_limit: ${AEGIS_OLLAMA_PIDS:-200}
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "${OLLAMA_PORT_EXTERNAL:-11434}:11434"
     environment:
@@ -51,6 +66,11 @@ services:
     build: ./aegis-brain
     container_name: aegis-brain
     restart: unless-stopped
+    mem_limit: ${AEGIS_BRAIN_MEM_LIMIT:-1g}
+    cpus: "${AEGIS_BRAIN_CPUS:-1.0}"
+    pids_limit: ${AEGIS_BRAIN_PIDS:-300}
+    security_opt:
+      - no-new-privileges:true
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "${BRAIN_WORKERS:-2}"]
     ports:
       - "127.0.0.1:${BRAIN_PORT_EXTERNAL:-8000}:8000"
@@ -83,7 +103,29 @@ services:
       AGENT_ENROLL_KEY: ${AGENT_ENROLL_KEY:?AGENT_ENROLL_KEY must be set}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       MASTER_KEY_B64: ${MASTER_KEY_B64:?MASTER_KEY_B64 must be set}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://aegis.local,http://localhost:3000}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://${AEGIS_DOMAIN:-aegis.local},http://localhost:3000}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://${AEGIS_DOMAIN:-aegis.local}}
+      # Human OIDC/SSO. Local login stays available as the break-glass path.
+      # These were documented in .env.example but were not passed to the
+      # container, so OIDC appeared enabled in .env and stayed off at runtime.
+      OIDC_ENABLED: ${OIDC_ENABLED:-false}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid email profile}
+      OIDC_BUTTON_LABEL: "${OIDC_BUTTON_LABEL:-Sign in with SSO}"
+      OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-groups}
+      OIDC_GROUP_ROLE_MAP: "${OIDC_GROUP_ROLE_MAP:-}"
+      OIDC_DEFAULT_ROLE: ${OIDC_DEFAULT_ROLE:-viewer}
+      OIDC_AUTO_CREATE_USERS: ${OIDC_AUTO_CREATE_USERS:-true}
+      OIDC_LINK_BY_EMAIL: ${OIDC_LINK_BY_EMAIL:-true}
+      OIDC_SYNC_ROLE: ${OIDC_SYNC_ROLE:-true}
+      OIDC_REQUIRE_VERIFIED_EMAIL: ${OIDC_REQUIRE_VERIFIED_EMAIL:-true}
+      OIDC_ALLOW_LOCAL_LOGIN: ${OIDC_ALLOW_LOCAL_LOGIN:-true}
+      OIDC_HTTP_TIMEOUT_S: ${OIDC_HTTP_TIMEOUT_S:-10}
+      OIDC_CLOCK_SKEW_S: ${OIDC_CLOCK_SKEW_S:-60}
       # AI pluggabile: auto = ollama se OLLAMA_URL e' raggiungibile, altrimenti
       # gemini/openai se la chiave esiste, altrimenti disabled (nessun costo).
       # Per usare un server Ollama potente in rete: OLLAMA_URL=http://host:11434/api/generate
@@ -116,15 +158,33 @@ services:
       KRAKEN_SSO_ENABLED: ${KRAKEN_SSO_ENABLED:-false}
       KRAKEN_SSO_SECRET: ${KRAKEN_SSO_SECRET:-}
       KRAKEN_SSO_TTL_SECONDS: ${KRAKEN_SSO_TTL_SECONDS:-60}
+      # Secret file opzionali: ogni file qui dentro diventa una variabile
+      # (es. /run/secrets/DATABASE_URL). I file vincono sulle variabili gia'
+      # presenti; Vault resta opt-in via AEGIS_VAULT_* nel .env.
+      AEGIS_SECRETS_DIR: /run/secrets
+      # Signed YARA feeds (off by default). The public key is not a secret;
+      # the feed private key must never be mounted in this container.
+      YARA_FEED_ENABLED: ${YARA_FEED_ENABLED:-false}
+      YARA_FEED_URLS: ${YARA_FEED_URLS:-}
+      YARA_FEED_PUBLIC_KEY_B64: ${YARA_FEED_PUBLIC_KEY_B64:-}
+      YARA_FEED_KEY_ID: ${YARA_FEED_KEY_ID:-}
+      YARA_FEED_INTERVAL_S: ${YARA_FEED_INTERVAL_S:-3600}
+      YARA_FEED_TIMEOUT_S: ${YARA_FEED_TIMEOUT_S:-20}
+      YARA_FEED_MAX_BYTES: ${YARA_FEED_MAX_BYTES:-8388608}
+      YARA_FEED_ALLOW_HTTP: ${YARA_FEED_ALLOW_HTTP:-false}
     volumes:
       # Post-audit: PKI e artefatti persistenti (mai effimeri nel container).
       - pki_data:/app/pki
       - artifact_data:/app/artifacts
+      - ./secrets:/run/secrets:ro
     depends_on:
       aegis-postgres:
         condition: service_healthy
       aegis-redis:
         condition: service_healthy
+    networks:
+      - default
+      - aegis_shared
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8000/ || exit 1"]
       interval: 10s
@@ -135,6 +195,11 @@ services:
     build: ./aegis-link
     container_name: aegis-link
     restart: unless-stopped
+    mem_limit: ${AEGIS_LINK_MEM_LIMIT:-1g}
+    cpus: "${AEGIS_LINK_CPUS:-1.0}"
+    pids_limit: ${AEGIS_LINK_PIDS:-300}
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "127.0.0.1:${LINK_PORT_EXTERNAL:-8080}:8080"
       - "127.0.0.1:1514:1514/udp"
@@ -143,6 +208,9 @@ services:
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       AEGIS_API_KEY: ${AEGIS_API_KEY:?AEGIS_API_KEY must be set}
+      AEGIS_LINK_SPOOL_DIR: /var/lib/aegis-link/spool
+    volumes:
+      - link_spool:/var/lib/aegis-link/spool
     depends_on:
       aegis-redis:
         condition: service_healthy
@@ -159,10 +227,13 @@ services:
         VITE_API_URL: ${VITE_API_URL:-/api/v1}
     container_name: aegis-frontend
     restart: unless-stopped
+    mem_limit: ${AEGIS_FRONTEND_MEM_LIMIT:-256m}
+    cpus: "${AEGIS_FRONTEND_CPUS:-0.50}"
+    pids_limit: ${AEGIS_FRONTEND_PIDS:-100}
+    security_opt:
+      - no-new-privileges:true
     ports:
-      - "127.0.0.1:3000:3000"
-    volumes:
-      - ./frontend/src:/app/src
+      - "127.0.0.1:${AEGIS_UI_PORT:-3000}:3000"
     environment:
       - VITE_API_URL=${VITE_API_URL:-/api/v1}
     depends_on:
@@ -173,6 +244,15 @@ services:
     image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     container_name: aegis-caddy
     restart: unless-stopped
+    mem_limit: ${AEGIS_CADDY_MEM_LIMIT:-256m}
+    cpus: "${AEGIS_CADDY_CPUS:-0.50}"
+    pids_limit: ${AEGIS_CADDY_PIDS:-100}
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      # Public FQDN and ACME account. Default = lab (internal CA).
+      AEGIS_DOMAIN: ${AEGIS_DOMAIN:-aegis.local}
+      ACME_EMAIL: ${ACME_EMAIL:-internal}
     ports:
       - "80:80"
       - "443:443"
@@ -185,6 +265,9 @@ services:
         condition: service_healthy
       aegis-frontend:
         condition: service_started
+    networks:
+      - default
+      - aegis_shared
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1"]
       interval: 10s
@@ -200,6 +283,11 @@ services:
     container_name: aegis-kraken-db
     restart: unless-stopped
     profiles: ["kraken"]
+    mem_limit: ${AEGIS_KRAKEN_DB_MEM_LIMIT:-512m}
+    cpus: "${AEGIS_KRAKEN_DB_CPUS:-0.50}"
+    pids_limit: ${AEGIS_KRAKEN_DB_PIDS:-200}
+    security_opt:
+      - no-new-privileges:true
     environment:
       POSTGRES_DB: krakendb
       POSTGRES_USER: kraken
@@ -219,6 +307,11 @@ services:
     container_name: aegis-kraken-redis
     restart: unless-stopped
     profiles: ["kraken"]
+    mem_limit: ${AEGIS_KRAKEN_REDIS_MEM_LIMIT:-256m}
+    cpus: "${AEGIS_KRAKEN_REDIS_CPUS:-0.25}"
+    pids_limit: ${AEGIS_KRAKEN_REDIS_PIDS:-100}
+    security_opt:
+      - no-new-privileges:true
     command: ["sh", "-c", "redis-server --requirepass \"$${KRAKEN_REDIS_PASSWORD}\""]
     environment:
       KRAKEN_REDIS_PASSWORD: ${KRAKEN_REDIS_PASSWORD:?KRAKEN_REDIS_PASSWORD must be set for the kraken profile}
@@ -259,6 +352,15 @@ services:
     container_name: aegis-kraken-broker
     restart: unless-stopped
     profiles: ["kraken"]
+    mem_limit: ${AEGIS_KRAKEN_BROKER_MEM_LIMIT:-512m}
+    cpus: "${AEGIS_KRAKEN_BROKER_CPUS:-0.50}"
+    pids_limit: ${AEGIS_KRAKEN_BROKER_PIDS:-200}
+    group_add:
+      - "${DOCKER_GID:-0}"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set for the kraken profile}
       SANDBOX_IMAGE: kraken_sandbox
@@ -290,6 +392,13 @@ services:
     container_name: aegis-kraken
     restart: unless-stopped
     profiles: ["kraken"]
+    mem_limit: ${AEGIS_KRAKEN_MEM_LIMIT:-1g}
+    cpus: "${AEGIS_KRAKEN_CPUS:-1.0}"
+    pids_limit: ${AEGIS_KRAKEN_PIDS:-300}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     expose:
       - "8000"
     ports:
@@ -312,9 +421,22 @@ services:
       FILE_ANALYSIS_MAX_BYTES: ${KRAKEN_FILE_ANALYSIS_MAX_BYTES:-67108864}
       FILE_ANALYSIS_TIMEOUT_S: ${KRAKEN_FILE_ANALYSIS_TIMEOUT_S:-30}
       FILE_ANALYSIS_STORAGE_DIR: /app/data/samples
+      FILE_ANALYSIS_POLL_INTERVAL_S: ${KRAKEN_FILE_ANALYSIS_POLL_INTERVAL_S:-1}
+      OBJECT_STORE_BACKEND: ${KRAKEN_OBJECT_STORE_BACKEND:-local}
+      OBJECT_STORE_S3_BUCKET: ${KRAKEN_OBJECT_STORE_S3_BUCKET:-}
+      OBJECT_STORE_S3_PREFIX: ${KRAKEN_OBJECT_STORE_S3_PREFIX:-kraken-samples}
+      OBJECT_STORE_S3_ENDPOINT: ${KRAKEN_OBJECT_STORE_S3_ENDPOINT:-}
+      OBJECT_STORE_S3_ACCESS_KEY: ${KRAKEN_OBJECT_STORE_S3_ACCESS_KEY:-}
+      OBJECT_STORE_S3_SECRET_KEY: ${KRAKEN_OBJECT_STORE_S3_SECRET_KEY:-}
+      OBJECT_STORE_S3_REGION: ${KRAKEN_OBJECT_STORE_S3_REGION:-}
+      OBJECT_STORE_S3_USE_SSL: ${KRAKEN_OBJECT_STORE_S3_USE_SSL:-true}
+      DETONATION_ENABLED: ${KRAKEN_DETONATION_ENABLED:-false}
+      DETONATION_URL: ${KRAKEN_DETONATION_URL:-}
+      DETONATION_TOKEN: ${KRAKEN_DETONATION_TOKEN:-}
+      DETONATION_TIMEOUT_S: ${KRAKEN_DETONATION_TIMEOUT_S:-120}
       MALWARE_RETENTION_DAYS: ${MALWARE_RETENTION_DAYS:-30}
       MALWARE_MAX_TOTAL_BYTES: ${MALWARE_MAX_TOTAL_BYTES:-5368709120}
-      CORS_ORIGINS: ${ALLOWED_ORIGINS:-https://aegis.local,http://localhost:3000}
+      CORS_ORIGINS: ${ALLOWED_ORIGINS:-https://${AEGIS_DOMAIN:-aegis.local},http://localhost:3000}
       AEGIS_INGEST_ENABLED: ${KRAKEN_INGEST_ENABLED:-false}
       AEGIS_INGEST_URL: http://aegis-brain:8000
       AEGIS_INGEST_KEY: ${KRAKEN_INGEST_KEY:-}
@@ -340,11 +462,49 @@ services:
     networks:
       - default
       - kraken_internal
+      - aegis_shared
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 15s
       timeout: 10s
       retries: 5
+      start_period: 20s
+
+  # Real RDP endpoint (xrdp + XFCE). The Python listener remains available as
+  # a fallback, but the published 3389 maps here so an RDP client sees a real
+  # session, not just an X.224 banner.
+  aegis-kraken-rdp:
+    build:
+      context: ./services/kraken
+      dockerfile: rdp/Dockerfile
+    image: aegis-kraken-rdp:local
+    container_name: aegis-kraken-rdp
+    restart: unless-stopped
+    profiles: ["kraken"]
+    mem_limit: ${AEGIS_KRAKEN_RDP_MEM_LIMIT:-1g}
+    cpus: "${AEGIS_KRAKEN_RDP_CPUS:-1.0}"
+    pids_limit: ${AEGIS_KRAKEN_RDP_PIDS:-300}
+    environment:
+      INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set for the kraken profile}
+      KRAKEN_RDP_INGEST_ENABLED: ${KRAKEN_RDP_INGEST_ENABLED:-true}
+      KRAKEN_RDP_INGEST_URL: ${KRAKEN_RDP_INGEST_URL:-http://aegis-kraken:8000}
+      KRAKEN_RDP_SENSOR_PORT: ${KRAKEN_RDP_SENSOR_PORT:-3389}
+      KRAKEN_RDP_LOG_PATHS: ${KRAKEN_RDP_LOG_PATHS:-/var/log/auth.log,/var/log/xrdp.log,/var/log/xrdp-sesman.log}
+    depends_on:
+      aegis-kraken:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "3389"
+    networks:
+      - default
+      - kraken_internal
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/3389'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
       start_period: 20s
 
   aegis-kraken-sensors:
@@ -356,26 +516,41 @@ services:
     restart: unless-stopped
     profiles: ["kraken"]
     command: python honeypot/runner.py
+    # Override per pilot/lab; defaults are intentionally small but measured.
+    mem_limit: ${AEGIS_KRAKEN_SENSORS_MEM_LIMIT:-512m}
+    cpus: "${AEGIS_KRAKEN_SENSORS_CPUS:-0.50}"
+    pids_limit: ${AEGIS_KRAKEN_SENSORS_PIDS:-200}
     environment:
       INTERNAL_API_KEY: ${KRAKEN_INTERNAL_API_KEY:?KRAKEN_INTERNAL_API_KEY must be set for the kraken profile}
+      SANDBOX_API_URL: http://aegis-kraken:8000/api/v1/containers
       SSH_SENSOR_PORT: 2222
       HTTP_SENSOR_PORT: 8080
       FTP_SENSOR_PORT: 2121
       TELNET_SENSOR_PORT: 2323
-      SMB_SENSOR_PORT: 445
-      RDP_SENSOR_PORT: 3389
+      # Keep privileged-looking protocols on unprivileged container ports:
+      # the sensors process runs as `kraken`, and the overlay maps the public
+      # 445/3389 to these ports. SMB protocol semantics do not depend on port.
+      SMB_SENSOR_PORT: 4445
+      RDP_SENSOR_PORT: 33890
+      SMB_SENSOR_ENGINE: ${KRAKEN_SMB_ENGINE:-impacket}
+      SMB_SHARE_NAME: ${KRAKEN_SMB_SHARE:-Finance$}
+      SMB_SERVER_NAME: ${KRAKEN_SMB_SERVER_NAME:-FILESERVER01}
+      SENSOR_PROTOCOLS: ${KRAKEN_SENSOR_PROTOCOLS:-ssh,http,ftp,telnet,smb,rdp}
+      FTP_PASV_MIN_PORT: ${KRAKEN_FTP_PASV_MIN:-30000}
+      FTP_PASV_MAX_PORT: ${KRAKEN_FTP_PASV_MAX:-30009}
+      FTP_PASV_ADVERTISE_HOST: ${KRAKEN_FTP_PASV_ADVERTISE_HOST:-}
       SENSOR_CONFIG_SIGNING_KEY: ${KRAKEN_SENSOR_CONFIG_SIGNING_KEY:-}
-    ports:
-      - "${KRAKEN_SSH_PORT:-12222}:2222"
-      - "${KRAKEN_HTTP_PORT:-18080}:8080"
-      - "${KRAKEN_FTP_PORT:-12121}:2121"
-      - "${KRAKEN_TELNET_PORT:-12323}:2323"
-      - "${KRAKEN_SMB_PORT:-11445}:445"
-      - "${KRAKEN_RDP_PORT:-13389}:3389"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       aegis-kraken:
         condition: service_healthy
+    # Published honeypot ports need a non-internal network. The internal
+    # network alone keeps PortBindings configured but never activates them.
     networks:
+      - default
       - kraken_internal
 
   aegis-backup:
@@ -383,6 +558,9 @@ services:
     container_name: aegis-backup
     profiles: ["backup"]
     restart: unless-stopped
+    mem_limit: ${AEGIS_BACKUP_MEM_LIMIT:-256m}
+    cpus: "${AEGIS_BACKUP_CPUS:-0.25}"
+    pids_limit: ${AEGIS_BACKUP_PIDS:-100}
     entrypoint: |
       sh -c "
         apk add --no-cache curl gnupg;
@@ -414,8 +592,14 @@ networks:
   # The app also joins the default network so Caddy can route /kraken/* to it.
   kraken_internal:
     internal: true
+  # Stable cross-stack network used by the aegis-suite package. A standalone
+  # Aegis or Kraken install gets the network too, but only the suite wires the
+  # shared SSO/ingest secrets that make the two stacks talk to each other.
+  aegis_shared:
+    name: aegis_shared
 
 volumes:
+  link_spool:
   postgres_data:
   redis_data:
   ollama_data:

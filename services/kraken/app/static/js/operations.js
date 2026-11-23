@@ -1,5 +1,6 @@
 const OPS_TOKEN = localStorage.getItem('kraken_token');
 let topologies = [];
+const analysisReports = new Map();
 
 function opsHeaders(extra = {}) {
   return { Authorization: `Bearer ${OPS_TOKEN}`, 'Content-Type': 'application/json', ...extra };
@@ -102,24 +103,50 @@ async function loadLabRuns() {
     </tr>`).join('') : '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No Lab runs yet.</td></tr>';
 }
 
+function analysisSummary(report) {
+  const iocs = report.iocs || {};
+  const detonation = report.detonation || {};
+  const behaviour = detonation.status === 'completed'
+    ? `${(report.process_tree || []).length} proc · ${(report.dns_history || []).length} DNS`
+    : `detonation: ${detonation.status || 'not run'}`;
+  return `${(iocs.ips || []).length} IP · ${(iocs.domains || []).length} domain · ` +
+    `${(report.zip_entries || []).length} ZIP · ${behaviour}`;
+}
+
+function openAnalysisReport(jobId) {
+  const report = analysisReports.get(jobId);
+  if (!report) return;
+  const dialog = document.getElementById('analysis-report-dialog');
+  document.getElementById('analysis-report-title').textContent = `Report ${jobId}`;
+  document.getElementById('analysis-report-body').textContent = JSON.stringify(report, null, 2);
+  if (!dialog.open) dialog.showModal();
+}
+
 async function loadAnalysisJobs() {
   const rows = await opsApi('/analysis-jobs');
+  analysisReports.clear();
   document.getElementById('analysis-body').innerHTML = rows.length ? rows.map((row) => {
     const report = row.report || {};
-    const iocs = report.iocs || {};
+    analysisReports.set(row.job_id, report);
     const summary = report.deleted ? 'sample deleted (verified)' : (report.error || row.error || '—');
     const result = Object.keys(report).length && !report.deleted
-      ? `${(iocs.ips || []).length} IP · ${(iocs.domains || []).length} domain · ${(report.zip_entries || []).length} ZIP entries`
+      ? analysisSummary(report)
       : summary;
+    const actions = row.status === 'deleted' ? '' : `
+      ${Object.keys(report).length ? `<button class="view-analysis text-xs text-indigo-400 mr-3" data-job="${escapeHtml(row.job_id)}">Report</button>` : ''}
+      <button class="delete-analysis text-xs text-rose-400" data-job="${escapeHtml(row.job_id)}">Delete</button>`;
     return `
     <tr class="border-t border-slate-100 dark:border-slate-700/50">
       <td class="px-4 py-2.5">${escapeHtml(row.filename)}</td>
       <td class="px-4 py-2.5 font-mono text-[10px]">${escapeHtml(row.sha256)}</td>
       <td class="px-4 py-2.5">${escapeHtml(row.status)}</td>
-      <td class="px-4 py-2.5 text-xs text-slate-400">${escapeHtml(result)}</td>
-      <td class="px-4 py-2.5 text-right">${row.status === 'deleted' ? '' : `<button class="delete-analysis text-xs text-rose-400" data-job="${escapeHtml(row.job_id)}">Delete</button>`}</td>
+      <td class="px-4 py-2.5 text-xs text-slate-400">${escapeHtml(result)}<div class="text-[10px] text-slate-500">${escapeHtml(report.provenance || '')}</div></td>
+      <td class="px-4 py-2.5 text-right whitespace-nowrap">${actions}</td>
     </tr>`;
   }).join('') : '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No analysis jobs yet.</td></tr>';
+  document.querySelectorAll('.view-analysis').forEach((button) => {
+    button.addEventListener('click', () => openAnalysisReport(button.dataset.job));
+  });
   document.querySelectorAll('.delete-analysis').forEach((button) => {
     button.addEventListener('click', async () => {
       if (!confirm('Delete this sample and its stored object?')) return;

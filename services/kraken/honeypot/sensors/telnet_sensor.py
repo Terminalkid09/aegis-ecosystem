@@ -2,6 +2,7 @@ import asyncio
 import uuid
 from loguru import logger
 from app.core.config import settings
+from honeypot.shell import FakeShell
 from honeypot.sensors.ssh_sensor import (
     _post_ingest, _sandbox_create, _sandbox_exec, _sandbox_destroy,
 )
@@ -38,9 +39,10 @@ class TelnetSensor:
             await writer.drain()
 
             sandbox = await _sandbox_create(session_id)
+            shell = None if sandbox else FakeShell()
 
             while True:
-                writer.write(b"root@ubuntu:~# ")
+                writer.write((shell.prompt() if shell else "root@ubuntu:~# ").encode())
                 await writer.drain()
 
                 line = await reader.readline()
@@ -65,7 +67,12 @@ class TelnetSensor:
                     else:
                         writer.write(f"bash: {cmd}: command not found\r\n".encode())
                 else:
-                    writer.write(f"bash: {cmd}: command not found\r\n".encode())
+                    output = shell.execute(cmd)
+                    if output:
+                        out_str = output.replace('\n', '\r\n')
+                        writer.write(out_str.encode('utf-8'))
+                        if not out_str.endswith('\r\n'):
+                            writer.write(b"\r\n")
                 await writer.drain()
 
         except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError):

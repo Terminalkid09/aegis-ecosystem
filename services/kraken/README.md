@@ -1,173 +1,129 @@
-# Kraken — Honeypot Intelligence Platform
+# Kraken — deception and honeypot lab
 
-Multi-protocol honeypot system with interactive sandbox analysis, real-time attack detection, GeoIP enrichment, and full monitoring stack. Designed for threat intelligence gathering in production environments.
+Kraken is the optional deception service in the Aegis ecosystem. It is built for
+controlled labs and pilots, not for exposing a default stack directly to the
+Internet. It has its own database, Redis, users, session cookie scope and SSO
+assertion; the Brain receives only signed events and a read-only view.
 
-## Features
+## What runs
 
-| Capability | Implementation |
+| Component | Role |
 |---|---|
-| Multi-protocol sensors | SSH (asyncssh), HTTP, FTP, Telnet — fully passive |
-| Interactive sandboxes | Ephemeral Docker containers with auto-destroy watchdog |
-| GeoIP enrichment | Country, city, coordinates, ASN, ISP via MaxMind |
-| Real-time alerts | Telegram bot notifications on every hit |
-| Live dashboard | Leaflet world map, Chart.js stats, dark/light theme |
-| Export & reporting | CSV, JSON, PDF intelligence reports with ReportLab |
-| JWT authentication | Access + refresh tokens, HttpOnly cookies, Redis blacklist |
-| Rate limiting | Per-endpoint via SlowAPI + nginx burst limiting |
-| Malware capture | Automatic extraction from sandbox diffs, SHA256 hashing |
-| Monitoring | Prometheus metrics, Grafana dashboards, Alertmanager |
-| Secure by default | Security headers, non-root containers, sandbox isolation |
+| `aegis-kraken` | FastAPI application, own PostgreSQL/Redis, event/alert/incident API, reports, SSO. No Docker socket. |
+| `aegis-kraken-broker` | The only process that talks to the Docker daemon. Creates ephemeral sandboxes with a fixed policy. Internal-only, non-root, capability-dropped. |
+| `aegis-kraken-sensors` | Six deception listeners. No Docker socket; asks the app/broker for a sandbox over the internal HTTP API. |
+| `aegis-kraken-rdp` | Real xrdp + XFCE endpoint with disposable weak decoy accounts. No host filesystem or Kraken secrets. |
+| `aegis-kraken-db` / `aegis-kraken-redis` | Private state; never published to the host. |
 
-## Architecture
+## Sensors and real engines
 
-```
-kraken/
-├── app/                        # FastAPI backend
-│   ├── api/v1/endpoints/       # auth, events, export, containers, health
-│   ├── core/                   # config, security (JWT + bcrypt + API key)
-│   ├── db/                     # SQLAlchemy async + Redis + token blacklist
-│   ├── models/                 # ORM: User, AttackEvent, Command, Credential, MalwareSample
-│   ├── schemas/                # Pydantic v2 with strict IP/input validation
-│   ├── services/               # GeoIP, Telegram, Docker, ReportLab, SIEM, attack CRUD
-│   └── templates/              # Jinja2: login, dashboard, events
-├── honeypot/sensors/           # Passive protocol listeners (ssh, http, ftp, telnet)
-├── nginx/                      # Reverse proxy with TLS, rate limiting, security headers
-├── monitoring/                 # Prometheus, Alertmanager, Grafana configs
-├── alembic/                    # Database migrations
-├── scripts/                    # Admin creation, demo seeding, backup/restore
-├── tests/                      # 65+ unit tests, integration tests
-├── docker-compose.yml          # Full production stack (10 services)
-├── Dockerfile                  # Non-root user, pinned deps
-└── .env.example                # All configurable parameters documented
-```
+The base profile keeps every listener internal, but all six are enabled by
+default; exposure is still an explicit overlay. SMB and RDP use unprivileged
+container ports (`4445`/`33890`), so a client connecting to host 445/3389 is
+proxied by Compose without requiring a privileged sensor process.
 
-**Network isolation:**
-- `kraken_app` — Docker socket access (sandbox mgmt)
-- `kraken_sensors` — No Docker socket (sandbox via HTTP API to app)
-- `kraken_sandbox` — `network_mode: none`, read-only FS, cap_drop ALL
+| Protocol | Engine | Behavior |
+|---|---|---|
+| SSH | `asyncssh` | OpenSSH-compatible banner, accepts credentials, interactive shell backed by the sandbox; deterministic realistic fallback if the broker is down. |
+| HTTP | asyncio | Virtual hosts, portal/OWA/RDWeb pages, Apache-style 403/404, recon paths, method/path/header/body capture. |
+| FTP | `pyftpdlib` | Real login, PASV, LIST/RETR/STOR/DELE/MKD, decoy filesystem, upload SHA-256. |
+| Telnet | asyncio + sandbox | Ubuntu-style login and interactive shell; same fallback shell as SSH. |
+| SMB | `impacket` | SMB2 share, authentication, list/read/write and NetNTLMv2 capture. Relay/signing attacks are not implemented by design. `KRAKEN_SMB_ENGINE=raw` keeps the old negotiation-only probe. |
+| RDP | `xrdp` + XFCE | Real RDP session with `administrator`, `admin` and `kraken` decoy accounts. xrdp auth logs are container logs, not yet Aegis-ingested. |
 
-## Quick Start
+The SMB and RDP statements are deliberately narrower than “full enterprise
+protocol implementation”: there is no SMB relay, no RDP credential relay and no
+xrdp log shipper in this branch. The lab/telemetry gaps are tracked in
+`docs/ROADMAP_LIVE_VALIDATION.md`.
 
-### Prerequisites
-- Docker + Docker Compose
-- Python 3.10+ (for local dev/test)
-- MaxMind GeoLite2-City.mmdb → `./data/GeoLite2-City.mmdb` (optional)
+## Exposure model
 
-### Setup
+The base `docker-compose.yml` keeps every sensor on the internal network. It
+does **not** publish SSH, FTP, Telnet, SMB or RDP. This is intentional: a normal
+pilot must not inherit six exposed ports.
+
+For a disposable honeypot host, use the explicit overlay:
 
 ```bash
-cp .env.example .env
+KRAKEN_HONEYPOT_BIND_IP=0.0.0.0 \
+KRAKEN_SENSOR_PROTOCOLS=ssh,http,ftp,telnet,smb,rdp \
+KRAKEN_SSH_PORT=22 KRAKEN_HTTP_PORT=80 KRAKEN_FTP_PORT=21 \
+KRAKEN_TELNET_PORT=23 KRAKEN_SMB_PORT=445 KRAKEN_RDP_PORT=3389 \
+KRAKEN_FTP_PASV_ADVERTISE_HOST=<host-ip> \
+docker compose --profile kraken \
+  -f docker-compose.yml -f docker-compose.kraken-honeypot.yml up -d
 ```
 
-Edit `.env` and set:
-- `SECRET_KEY` — `python -c "import secrets; print(secrets.token_hex(32))"`
-- `INTERNAL_API_KEY` — same method
+- The overlay binds to `127.0.0.1` unless `KRAKEN_HONEYPOT_BIND_IP=0.0.0.0` is
+  set explicitly.
+- Use a dedicated host/VLAN with no sensitive data and egress filtering.
+- If a standard port is already in use, change `KRAKEN_*_PORT` rather than
+  exposing an obvious high port just to make it fit.
+- `KRAKEN_FTP_PASV_ADVERTISE_HOST` is the address the client can reach; the
+  container's `172.x` address is not routable from the attacker. The passive
+  range defaults to `30000-30009` and must match the published range.
+
+## Sandbox
+
+Sandboxes are created by the broker, not by the web process:
+
+- `network_mode: none`;
+- read-only root filesystem;
+- non-root `sandbox` user;
+- all capabilities dropped;
+- bounded CPU/RAM/PIDs;
+- ephemeral lifetime and explicit destroy.
+
+The broker needs the Docker socket to create these containers. It is not
+published, and Compose applies CPU/RAM/PID limits, `no-new-privileges` and
+`cap_drop: ALL`. This reduces, but does not eliminate, the risk of a
+Docker-socket compromise; treat the broker as a high-privilege component.
+
+On Linux the socket is usually owned by a non-root `docker` group. Export its
+GID before starting the profile, otherwise the non-root broker cannot open it:
 
 ```bash
-# Build & start everything
-docker compose up --build -d
-
-# Create admin user
-docker exec -it kraken_app python scripts/create_admin.py admin <your_password>
-
-# Open https://localhost (dev) or your domain (prod)
+export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
 ```
 
-### Demo data
-
-```bash
-docker exec -it kraken_app python scripts/seed_demo.py
-```
-
-## API Reference
-
-Full interactive docs at `/api/docs` (proxied through nginx).
-
-### Authentication
-- **JWT** — `Authorization: Bearer <token>` or `kraken_token` cookie
-- **Internal API Key** — `X-Internal-API-Key` header (sensor → app communication)
-- **Endpoints**: `/api/v1/auth/login`, `/api/v1/auth/refresh`, `/api/v1/auth/logout`
-
-### Key endpoints
-
-| Method | Path | Auth | Rate limit |
-|---|---|---|---|
-| `POST` | `/api/v1/auth/login` | — | 10/min |
-| `POST` | `/api/v1/auth/register` | — | 5/min |
-| `POST` | `/api/v1/events/ingest` | API Key | 200/min |
-| `GET` | `/api/v1/events/` | JWT | default |
-| `GET` | `/api/v1/events/stats` | JWT | default |
-| `GET` | `/api/v1/export/pdf` | JWT | 30/min |
-| `DELETE` | `/api/v1/containers/{id}` | Admin/API Key | default |
-| `GET` | `/api/v1/health/detailed` | — | — |
+Docker Desktop may use GID 0. The CI derives the same value instead of
+hard-coding it. The broker must not be switched back to root just to bypass
+this permission.
 
 ## Testing
 
 ```bash
-# Unit tests (65+ tests, zero external dependencies)
-pytest tests/unit/ -v
+# Unit tests: 108 passed in the 4.3 audit
+pytest tests/unit -q --no-cov
 
-# All tests (including integration, requires PG + Redis)
-pytest
+# Integration tests: 46 passed in the 4.3 audit, separate process
+pytest tests/integration -q --no-cov
 
-# Lint
-ruff check app/ honeypot/ tests/
+# Total: 154 passed
 ```
 
-Tests use **SQLite in-memory** and **fake Redis** by default — no external services needed.
+Unit and integration must run in separate processes: together they share the
+session-scoped SQLite fixture and produce false failures. CI runs them
+separately. The local audit used an isolated Python 3.13 venv; CI uses 3.11.
 
-## Deployment (Production)
+The live audit also verified 13 attack events, 13 deception alerts, 4
+incidents, signed outbox delivery **1/1**, SSO exchange **200**, replay **401**
+and all Kraken pages **200**.
 
-### Requirements
-- Linux server with Docker Engine 24+
-- 2 GB RAM minimum, 4 GB recommended
-- Domain with DNS pointing to server
-- GeoLite2-City.mmdb in `./data/`
+## Security notes
 
-### Steps
-
-```bash
-# 1. Generate strong secrets
-python -c "import secrets; print('SECRET_KEY=' + secrets.token_hex(32))"
-python -c "import secrets; print('INTERNAL_API_KEY=' + secrets.token_hex(32))"
-
-# 2. Configure .env
-nano .env
-
-# 3. Get SSL certs (Let's Encrypt) into nginx/ssl/
-#    — or remove HTTPS from nginx.conf and use your own reverse proxy
-
-# 4. Start
-docker compose up -d --build
-
-# 5. Create admin
-docker exec kraken_app python scripts/create_admin.py admin <strong_password>
-
-# 6. Set up monitoring
-#    Grafana: http://yourdomain:3000 (admin / admin)
-#    Import dashboard from monitoring/dashboards/
-```
-
-### Backup
-
-```bash
-# Manual
-docker exec kraken_backup /usr/local/bin/backup.sh
-
-# Automatic: daily at 02:00 (configured in Dockerfile.backup)
-```
-
-## Security
-
-- **Secrets validation at startup** — refuses to run with defaults in production
-- **Non-root containers** — app runs as `kraken` user, sandbox as `sandbox`
-- **Sandbox isolation** — `network_mode: none`, read-only FS, no capabilities, 128MB RAM, 64 pids
-- **No Docker socket in sensors** — sensors communicate via authenticated HTTP API
-- **JWT blacklist** — tokens revoked on logout via Redis
-- **Security headers** — HSTS, X-Frame-Options, X-Content-Type-Options, X-XSS-Protection
-- **Input validation** — Pydantic v2 with `ipaddress` stdlib, strict length/size limits
-- **Rate limiting** — nginx burst + SlowAPI per-endpoint limits
+- Secrets are required; the app refuses placeholders and weak values.
+- The app runs as `kraken`, not root.
+- The broker is now non-root; the Docker socket group is added explicitly.
+- Sensors do not receive the Docker socket.
+- Honeypot ports are internal by default; exposure is an explicit overlay.
+- Source-IP attribution on Docker Desktop collapses to the bridge gateway
+  (`172.21.0.1`). Validate source-IP preservation on a Linux host before using
+  GeoIP or attribution in a real lab; this is part of the advanced-lab roadmap.
 
 ## License
 
-MIT — see LICENSE.
+Kraken is licensed under **MIT** (`services/kraken/LICENSE`). The Aegis
+ecosystem root is **AGPL-3.0-only**; see the root `LICENSE`, `NOTICE` and
+`THIRD_PARTY_NOTICES.md`. The two notices are intentionally separate and must
+not be presented as one license.

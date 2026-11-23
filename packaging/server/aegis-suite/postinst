@@ -1,0 +1,13 @@
+#!/bin/sh
+# The metapackage installs aegis and kraken as independent packages. The actual
+# wiring lives in wire.sh so the two postinst scripts can call the same helper
+# when dpkg configures the suite before or after its dependencies.
+set -eu
+
+[ "${1:-}" = "configure" ] || exit 0
+
+if [ -x /usr/local/lib/aegis/suite-wire.sh ]; then
+    /usr/local/lib/aegis/suite-wire.sh
+fi
+
+exit 0

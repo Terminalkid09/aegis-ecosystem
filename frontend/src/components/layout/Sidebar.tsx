@@ -27,12 +27,13 @@ import {
   Clock3,
   ShieldCheck,
   ShieldOff,
+  Users as UsersIcon,
 } from 'lucide-react'
 import { type Page, useAppStore } from '@/store/appStore'
 import { cn } from '@/lib/utils'
 import { authAPI } from '@/services/api'
 
-const NAV_ITEMS: { id: Page; label: string; icon: React.ElementType; section?: string }[] = [
+const NAV_ITEMS: { id: Page; label: string; icon: React.ElementType; section?: string; adminOnly?: boolean }[] = [
   { id: 'dashboard',  label: 'Dashboard',      icon: LayoutDashboard, section: 'MONITOR' },
   { id: 'alerts',     label: 'Alerts',          icon: AlertTriangle },
   { id: 'agents',     label: 'Endpoints',       icon: Monitor },
@@ -55,12 +56,14 @@ const NAV_ITEMS: { id: Page; label: string; icon: React.ElementType; section?: s
   { id: 'audit',      label: 'Audit Log',       icon: FileText,        section: 'LOGS' },
   { id: 'syslog',     label: 'Syslog',          icon: ScrollText },
   { id: 'settings',   label: 'Settings',        icon: Settings,        section: 'SYSTEM' },
+  { id: 'users',      label: 'Users & Roles',   icon: UsersIcon,       section: 'SYSTEM', adminOnly: true },
 ]
 
 export function Sidebar() {
   const { currentPage, setCurrentPage, user, logout, liveStats, sidebarCollapsed, toggleSidebar } = useAppStore()
 
   const criticalCount = liveStats?.current_critical_alerts ?? 0
+  const navItems = NAV_ITEMS.filter(item => !item.adminOnly || (user?.role || '').toLowerCase() === 'admin')
 
   async function handleLogout() {
     try { await authAPI.logout() } catch {}
@@ -104,7 +107,7 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <div key={item.id}>
             {item.section && !sidebarCollapsed && (
               <p className="text-[10px] font-semibold tracking-widest text-[hsl(var(--muted-foreground))] px-2 pt-4 pb-1 uppercase">

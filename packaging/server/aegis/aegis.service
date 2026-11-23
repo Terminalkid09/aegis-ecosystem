@@ -1,0 +1,25 @@
+[Unit]
+Description=Aegis platform stack (Brain, Link, dashboard, PostgreSQL, Redis, Caddy)
+Documentation=https://github.com/Terminalkid09/aegis-ecosystem/blob/dev/docs/PACKAGING.md
+# Docker Desktop WSL exposes the socket without a docker.service unit. Use
+# Wants, not Requires, so the unit can start in both environments; the build
+# and compose commands still fail closed if the daemon/socket is unavailable.
+Wants=network-online.target
+Wants=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+Group=root
+UMask=0027
+WorkingDirectory=/opt/aegis/server
+EnvironmentFile=-/etc/aegis/server.env
+ExecStartPre=/usr/local/lib/aegis/build-server.sh
+ExecStart=/usr/bin/env docker compose --env-file /etc/aegis/server.env up -d --remove-orphans
+ExecStop=/usr/bin/env docker compose --env-file /etc/aegis/server.env down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

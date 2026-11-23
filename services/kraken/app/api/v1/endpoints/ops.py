@@ -157,20 +157,23 @@ async def create_analysis_job(
 ):
     if not settings.FILE_ANALYSIS_ENABLED:
         raise HTTPException(status_code=503, detail="File analysis is disabled")
+    job_id = f"analysis-{uuid.uuid4().hex[:12]}"
     try:
-        path, sha, size = await store_upload(file)
+        path, sha, size = await store_upload(file, job_id)
     except ValueError as exc:
         raise HTTPException(status_code=413, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Object storage unavailable: {exc}")
     job = AnalysisJob(
-        job_id=f"analysis-{uuid.uuid4().hex[:12]}", sha256=sha,
+        job_id=job_id, sha256=sha,
         filename=(file.filename or "upload.bin")[:255], size=size,
         storage_path=path, status="queued", report={},
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
-    # Analysis runs after the response, in a task with its own DB session. It
-    # has a timeout and never executes the sample.
+    # Fast path for latency; the durable DB row plus worker lease is what
+    # recovers the job if this process exits before the task starts or ends.
     asyncio.create_task(run_analysis_job(job.job_id))
     return _job_out(job)
 
@@ -202,7 +205,7 @@ async def delete_analysis_job(job_id: str, db: AsyncSession = Depends(get_db),
     )).scalars().first()
     if job is None:
         raise HTTPException(status_code=404, detail="Analysis job not found")
-    removed = delete_stored_sample(job.storage_path)
+    removed = await delete_stored_sample(job.storage_path)
     if not removed:
         raise HTTPException(status_code=500, detail="Sample deletion could not be verified")
     job.storage_path = None

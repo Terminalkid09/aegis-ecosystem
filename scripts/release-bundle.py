@@ -75,11 +75,6 @@ def _copy(src: Path, dst: Path) -> None:
     shutil.copy2(src, dst)
 
 
-NODETRACE_IDENTITY_FILES = frozenset({
-    "token.json", "device.crt", "device.key", "nodetrace.pid",
-})
-
-
 def _zip_tree(src: Path, dst: Path, exclude: frozenset[str] = frozenset()) -> None:
     if not src.is_dir():
         raise SystemExit(f"[X] missing release directory: {src}")
@@ -89,8 +84,103 @@ def _zip_tree(src: Path, dst: Path, exclude: frozenset[str] = frozenset()) -> No
                 archive.write(path, path.relative_to(src).as_posix())
 
 
+def _tar_member(archive: tarfile.TarFile, path: Path, arcname: str,
+                mode: int) -> None:
+    info = tarfile.TarInfo(arcname)
+    info.size = path.stat().st_size
+    info.mode = mode
+    info.mtime = int(path.stat().st_mtime)
+    with path.open("rb") as handle:
+        archive.addfile(info, handle)
+
+
+def _assert_lf_source(archive: Path) -> None:
+    """Reject CRLF text in the source archive: the bundle targets Linux.
+
+    `git archive` applies core.eol, so a Windows builder with autocrlf=true
+    wrote CRLF into every text file of the tarball even though the blobs are
+    LF. The archive is now generated with an explicit LF config; this guard
+    fails the build if any text member still contains CR.
+    """
+    offenders = []
+    with tarfile.open(archive, "r:gz") as tar:
+        for member in tar.getmembers():
+            if not member.isfile():
+                continue
+            handle = tar.extractfile(member)
+            data = handle.read() if handle else b""
+            if b"\r" not in data or b"\x00" in data:
+                continue
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            offenders.append(member.name)
+    if offenders:
+        raise SystemExit(
+            "[X] source archive ships CRLF text: " + ", ".join(offenders[:5])
+        )
+
+
 def _git(*args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=ROOT, text=True).strip()
+
+
+def _agent_assets(agent_dir: Path, out: Path, version: str,
+                  required: bool) -> list[str]:
+    """Ship only the unified Go agent and its kernel helpers.
+
+    4.3 is the unified-only release: Guard and NodeTrace are not copied into
+    the bundle. The four archives are the complete install set:
+
+      * Windows: `aegis-agent.exe` + `aegis-etw.exe`
+      * Linux: `aegis-agent` + `aegis-collector` + `aegis_exec.bpf.o`
+
+    The versioned copies make the signed OTA command (`UPDATE_AGENT` with an
+    explicit version) resolvable. Raw binaries are deliberately not shipped:
+    the installers consume the archives, and two extra copies only create
+    ambiguity about which file is the supported one.
+    """
+    windows = agent_dir / "aegis-agent.exe"
+    linux = agent_dir / "aegis-agent"
+    etw = agent_dir / "aegis-etw.exe"
+    collector = agent_dir / "aegis-collector"
+    bpf_obj = agent_dir / "aegis_exec.bpf.o"
+    required_files = (windows, linux, etw, collector, bpf_obj)
+    present = [path for path in required_files if path.is_file()]
+    if not present and not required:
+        return []
+    if required:
+        missing = [path.name for path in required_files if not path.is_file()]
+        if missing:
+            raise SystemExit(
+                "[X] incomplete unified agent directory; missing: "
+                + ", ".join(missing)
+            )
+
+    created: list[str] = []
+    tag = version.lstrip("v")
+    if windows.is_file():
+        with zipfile.ZipFile(out / "unified-latest.zip", "w",
+                             zipfile.ZIP_DEFLATED) as archive:
+            archive.write(windows, "aegis-agent.exe")
+            if etw.is_file():
+                archive.write(etw, "aegis-etw.exe")
+        shutil.copy2(out / "unified-latest.zip", out / f"unified-{tag}.zip")
+        created += ["unified-latest.zip", f"unified-{tag}.zip"]
+    if linux.is_file():
+        latest_tar = out / "unified-latest.tar.gz"
+        with tarfile.open(latest_tar, "w:gz") as archive:
+            _tar_member(archive, linux, "aegis-agent", 0o755)
+            if collector.is_file():
+                _tar_member(archive, collector, "aegis-collector", 0o755)
+            if bpf_obj.is_file():
+                _tar_member(archive, bpf_obj, "aegis_exec.bpf.o", 0o644)
+        # Build once and copy: separate tarfile runs embed different gzip
+        # timestamps, so the versioned OTA copy would not be byte-identical.
+        shutil.copy2(latest_tar, out / f"unified-{tag}.tar.gz")
+        created += ["unified-latest.tar.gz", f"unified-{tag}.tar.gz"]
+    return created
 
 
 def main() -> int:
@@ -99,11 +189,15 @@ def main() -> int:
     parser.add_argument("--out", default="release")
     parser.add_argument("--force", action="store_true", help="replace an existing bundle")
     parser.add_argument("--sbom-dir", help="directory with per-image CycloneDX SBOMs")
-    parser.add_argument("--require-nodetrace", action="store_true",
-                        help="fail if the Windows NodeTrace bundle is absent")
+    parser.add_argument("--agent-dir",
+                        help="directory with aegis-agent.exe (Windows) and aegis-agent (Linux)")
+    parser.add_argument("--require-agent", action="store_true",
+                        help="fail if the unified agent or kernel helpers are absent")
     args = parser.parse_args()
     if not re.fullmatch(r"v?[0-9]+\.[0-9]+\.[0-9]+(?:-rc[0-9]+)?", args.version):
         raise SystemExit("version must be SemVer or vX.Y.Z-rcN")
+    if args.require_agent and not args.agent_dir:
+        raise SystemExit("[X] --require-agent needs --agent-dir")
     out = (ROOT / args.out).resolve()
     if out.exists():
         if not args.force:
@@ -114,18 +208,16 @@ def main() -> int:
     for rel in CORE_FILES:
         _copy(ROOT / rel, out / release_name(rel))
 
-    _copy(ROOT / "aegis-guard/target/aegis-guard.jar", out / "aegis-guard.jar")
-
-    nt = ROOT / "NodeTrace/agents/python/dist/nodetrace-agent"
-    if nt.is_dir():
-        # Never ship a developer identity: the dist directory can contain the
-        # local device key, certificate, token and pid lock from a test run.
-        _zip_tree(nt, out / "nodetrace.zip", exclude=NODETRACE_IDENTITY_FILES)
-    elif args.require_nodetrace:
-        raise SystemExit("[X] NodeTrace Windows bundle missing: nodetrace_windows must upload it")
     frontend = ROOT / "frontend/dist"
     if frontend.is_dir():
         _zip_tree(frontend, out / "frontend.zip")
+
+    agent_files: list[str] = []
+    if args.agent_dir:
+        agent_dir = (ROOT / args.agent_dir).resolve()
+        if not agent_dir.is_dir():
+            raise SystemExit(f"[X] Go agent directory missing: {agent_dir}")
+        agent_files = _agent_assets(agent_dir, out, args.version, args.require_agent)
 
     sbom = ROOT / "sbom.cyclonedx.json"
     if not sbom.is_file():
@@ -152,7 +244,8 @@ def main() -> int:
     # the whole working tree (including local secrets and .perch).
     source = out / "aegis-source.tar.gz"
     subprocess.check_call(
-        ["git", "archive", "--format=tar.gz", f"--prefix=aegis-{args.version}/",
+        ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+         "archive", "--format=tar.gz", f"--prefix=aegis-{args.version}/",
          "-o", str(source), "HEAD"],
         cwd=ROOT,
     )
@@ -168,21 +261,27 @@ def main() -> int:
     if not files:
         raise SystemExit("[X] release bundle is empty")
 
+    # Write LF bytes explicitly: Path.write_text() applies the platform newline
+    # translation, and a CRLF SHA256SUMS.txt makes `sha256sum -c` fail on Unix
+    # and on Git Bash because the file name keeps a trailing '\r'.
     digest_lines = [f"{item['sha256']}  {item['name']}" for item in files]
-    (out / "SHA256SUMS.txt").write_text("\n".join(digest_lines) + "\n", encoding="utf-8")
+    (out / "SHA256SUMS.txt").write_bytes(
+        ("\n".join(digest_lines) + "\n").encode("utf-8")
+    )
     manifest = {
         "version": args.version,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "git_commit": _git("rev-parse", "HEAD"),
         "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
-        "components": ["aegis-brain", "aegis-guard", "aegis-link", "frontend",
-                       "NodeTrace", "services/kraken"],
+        "components": ["aegis-brain", "aegis-link", "frontend",
+                       "aegis-agent", "aegis-ebpf", "services/kraken"],
         "files": files,
+        "agent_files": agent_files,
         "image_sboms": image_sboms,
-        "signature": "not produced; 4.2.1 is unsigned by decision (RELEASE_SIGNING.md)",
+        "signature": "cosign keyless signature over SHA256SUMS.txt is produced by the tag workflow (RELEASE_SIGNING.md)",
     }
-    (out / "RELEASE_MANIFEST.json").write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    (out / "RELEASE_MANIFEST.json").write_bytes(
+        (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
     )
     print(f"Release bundle {args.version}: {len(files)} files in {out}")
     for item in files:

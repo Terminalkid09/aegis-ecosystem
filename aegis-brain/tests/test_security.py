@@ -35,6 +35,12 @@ def test_jwt_decoding_invalid():
     assert decode_access_token(invalid_token) is None
 
 
+def test_jwt_carries_token_version():
+    token, _, _ = create_access_token("42", "viewer", token_version=7)
+    payload = decode_access_token(token)
+    assert payload is not None and payload["ver"] == 7
+
+
 @pytest.mark.asyncio
 async def test_blacklist_fails_closed_when_redis_write_fails(monkeypatch):
     from app.core import security

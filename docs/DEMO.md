@@ -1,21 +1,21 @@
-# Demo pulita — inizializzazione ambiente di test isolato (Fase 6)
+# Clean demo — isolated test environment setup (Phase 6)
 
-Per non contaminare l'audit di produzione, ogni demo usa un **tenant di test**
-(`is_test=true`) separato dal pilot.
+To avoid contaminating the production audit, every demo uses a separate
+**test tenant** (`is_test=true`).
 
-## Tenant di test
+## Test tenant
 
-- Tutti gli utenti creati dai test automatici (`pytest`, `scripts/e2e_*.py`)
-  hanno username contenente `test` o `e2e` → `AuditLog.is_test = true`.
-- L'endpoint `GET /audit/logs?exclude_test=true` nasconde i record di test;
-  `include_test=true` (default) li mostra per debug.
-- Gli eventi di telemetria e2e sono contrassegnati `agent_id` con prefisso
-  test e filtrati via `fleet.py` site `test`.
+- Every user created by automated tests (`pytest`, `scripts/e2e_*.py`) has a
+  username containing `test` or `e2e` → `AuditLog.is_test = true`.
+- `GET /audit/logs?exclude_test=true` hides test records; `include_test=true`
+  (default) shows them for debugging.
+- E2E telemetry events use an `agent_id` with a test prefix and are filtered by
+  `fleet.py` site `test`.
 
-## Inizializzare una demo pulita
+## Initialize a clean demo
 
 ```bash
-# 1. Pulisci solo i dati di test (mai audit reali)
+# 1. Delete test data only (never real audit records)
 psql -h localhost -U postgres -d aegis -c "
   DELETE FROM incident_alerts WHERE alert_id IN (SELECT id FROM alerts WHERE agent_id IN (SELECT agent_id FROM agents WHERE hostname LIKE 'test-%'));
   DELETE FROM alerts WHERE agent_id IN (SELECT agent_id FROM agents WHERE hostname LIKE 'test-%');
@@ -23,29 +23,29 @@ psql -h localhost -U postgres -d aegis -c "
   DELETE FROM agents WHERE hostname LIKE 'test-%';
   UPDATE audit_logs SET is_test = true WHERE username ILIKE '%test%' OR username ILIKE '%e2e%';
 "
-# 2. Oppure ricrea da zero (solo lab, mai su pilot con dati reali)
-./scripts/run_integration_tests.py --collect-only  # verifica -q
+# 2. Or rebuild from scratch (lab only, never on a pilot with real data)
+./scripts/run_integration_tests.py --collect-only  # verify -q
 docker compose down -v
 docker compose up -d --build
-# 3. Verifica demo
+# 3. Verify the demo
 curl -sk http://localhost:8000/api/v1/audit/logs?exclude_test=true | jq length
-# deve restituire solo audit di produzione (0 su installazione pulita)
+# must return only production audit records (0 on a clean install)
 ```
 
-## Audit production immutabile
+## Immutable production audit
 
-- `audit_logs` non ha `DELETE` via API (solo `GET`).
-- La purge retention (`RETENTION_AUDIT_DAYS=365`) non cancella mai audit reali
-  se `is_test=false` a meno di `confirm=true` + `backup_verified=true`.
-- Backup cifrato (GPG) include audit + revoche.
+- `audit_logs` has no API `DELETE` (read-only `GET`).
+- Retention purge (`RETENTION_AUDIT_DAYS=365`) never deletes real audit records
+  when `is_test=false` unless `confirm=true` and `backup_verified=true`.
+- The encrypted GPG backup includes audit records and revocations.
 
-## Tenant isolato in codice
+## Tenant isolation in code
 
-- `app/core/audit.py:log_audit(is_test=...)` deduce automaticamente.
-- `app/api/v1/audit.py` filtra via `is_test`.
-- `conftest.py` imposta `AEGIS_TENANT=test` per i test.
+- `app/core/audit.py:log_audit(is_test=...)` infers the flag automatically.
+- `app/api/v1/audit.py` filters by `is_test`.
+- `conftest.py` sets `AEGIS_TENANT=test` for tests.
 
-## Limiti
+## Limits
 
-- Senza `AEGIS_TENANT=test`, un evento manuale con username normale
-  finisce in produzione. Per demo, crea sempre utenti con suffisso `test`.
+- Without `AEGIS_TENANT=test`, a manual event with a normal username is written
+  to production. For a demo, always create users with a `test` suffix.

@@ -1,0 +1,117 @@
+{
+  "date": "2026-11-18T19:56:04Z",
+  "platform": "win32",
+  "python": "3.13.14 (tags/v3.13.14:fd17997, Jun 10 2026, 13:03:48) [MSC v.1944 64 bit (AMD64)]",
+  "java": [
+    "openjdk version \"25.0.5\" 2026-10-20 LTS"
+  ],
+  "runs": 2,
+  "duration_seconds": 8.0,
+  "results": [
+    {
+      "agent": "python",
+      "returncode": 1,
+      "alive_seconds": 8.29,
+      "rss_mb_median": 27.28,
+      "rss_mb_max": 28.15,
+      "cpu_percent_median": 0.0,
+      "samples": 11,
+      "stderr_tail": "WARNING: token.json e' leggibile da altri utenti (permessi larghi): ripristinare 0600\r\n",
+      "run": 1
+    },
+    {
+      "agent": "python",
+      "returncode": 1,
+      "alive_seconds": 8.29,
+      "rss_mb_median": 27.28,
+      "rss_mb_max": 28.11,
+      "cpu_percent_median": 0.0,
+      "samples": 11,
+      "stderr_tail": "WARNING: token.json e' leggibile da altri utenti (permessi larghi): ripristinare 0600\r\n",
+      "run": 2
+    },
+    {
+      "agent": "go-sensor",
+      "returncode": 1,
+      "alive_seconds": 8.37,
+      "rss_mb_median": 18.42,
+      "rss_mb_max": 18.42,
+      "cpu_percent_median": 0.0,
+      "samples": 11,
+      "stderr_tail": "time=2026-11-18T20:55:14.553+01:00 level=WARN msg=\"identit\u00e0 device non disponibile\" error=\"richiesta certificato: HTTP 404\"\ntime=2026-11-18T20:55:14.577+01:00 level=INFO msg=\"identit\u00e0 caricata\" device_id=go-sensor\ntime=2026-11-18T20:55:14.579+01:00 level=WARN msg=\"identit\u00e0 device non disponibile\" error=\"richiesta certificato: HTTP 404\"\ntime=2026-11-18T20:55:14.579+01:00 level=INFO msg=\"identit\u00e0 caricata\" device_id=go-sensor\n",
+      "run": 1
+    },
+    {
+      "agent": "go-sensor",
+      "returncode": 1,
+      "alive_seconds": 8.35,
+      "rss_mb_median": 18.44,
+      "rss_mb_max": 18.46,
+      "cpu_percent_median": 0.0,
+      "samples": 11,
+      "stderr_tail": "time=2026-11-18T20:55:22.917+01:00 level=WARN msg=\"identit\u00e0 device non disponibile\" error=\"richiesta certificato: HTTP 404\"\ntime=2026-11-18T20:55:22.944+01:00 level=INFO msg=\"identit\u00e0 caricata\" device_id=go-sensor\ntime=2026-11-18T20:55:22.945+01:00 level=WARN msg=\"identit\u00e0 device non disponibile\" error=\"richiesta certificato: HTTP 404\"\ntime=2026-11-18T20:55:22.945+01:00 level=INFO msg=\"identit\u00e0 caricata\" device_id=go-sensor\n",
+      "run": 2
+    },
+    {
+      "agent": "java",
+      "returncode": 1,
+      "alive_seconds": 8.26,
+      "rss_mb_median": 123.34,
+      "rss_mb_max": 133.1,
+      "cpu_percent_median": 2.1,
+      "samples": 11,
+      "stderr_tail": "WARNING: A restricted method in java.lang.System has been called\nWARNING: java.lang.System::load has been called by com.sun.jna.Native in an unnamed module (file:/C:/Users/ilysm/Desktop/GitHub/aegis-ecosystem/aegis-guard/target/aegis-guard.jar)\nWARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module\nWARNING: Restricted methods will be blocked in a future release unless native access is enabled\n\r\n",
+      "run": 1
+    },
+    {
+      "agent": "java",
+      "returncode": 1,
+      "alive_seconds": 8.26,
+      "rss_mb_median": 129.56,
+      "rss_mb_max": 139.33,
+      "cpu_percent_median": 6.2,
+      "samples": 11,
+      "stderr_tail": "WARNING: A restricted method in java.lang.System has been called\nWARNING: java.lang.System::load has been called by com.sun.jna.Native in an unnamed module (file:/C:/Users/ilysm/Desktop/GitHub/aegis-ecosystem/aegis-guard/target/aegis-guard.jar)\nWARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module\nWARNING: Restricted methods will be blocked in a future release unless native access is enabled\n\r\n",
+      "run": 2
+    },
+    {
+      "agent": "go-endpoint",
+      "returncode": 1,
+      "alive_seconds": 8.35,
+      "rss_mb_median": 19.03,
+      "rss_mb_max": 19.42,
+      "cpu_percent_median": 4.2,
+      "samples": 11,
+      "stderr_tail": "time=2026-11-18T20:55:47.840+01:00 level=WARN msg=\"identit\u00e0 device Guard non disponibile\" error=\"richiesta certificato: HTTP 404\"\ntime=2026-11-18T20:55:47.864+01:00 level=INFO msg=\"identit\u00e0 Guard caricata\" agent_id=go-endpoint\ntime=2026-11-18T20:55:47.866+01:00 level=WARN msg=\"identit\u00e0 device Guard non disponibile\" error=\"richiesta certificato: HTTP 404\"\ntime=2026-11-18T20:55:47.866+01:00 level=INFO msg=\"identit\u00e0 Guard caricata\" agent_id=go-endpoint\ntime=2026-11-18T20:55:47.900+01:00 level=INFO msg=\"ETW non attivo; polling processi come fallback dichiarato\" reason=disabled\n",
+      "run": 1
+    },
+    {
+      "agent": "go-endpoint",
+      "returncode": 1,
+      "alive_seconds": 8.35,
+      "rss_mb_median": 18.5,
+      "rss_mb_max": 19.18,
+      "cpu_percent_median": 6.2,
+      "samples": 11,
+      "stderr_tail": "time=2026-11-18T20:55:56.192+01:00 level=WARN msg=\"identit\u00e0 device Guard non disponibile\" error=\"richiesta certificato: HTTP 404\"\ntime=2026-11-18T20:55:56.213+01:00 level=INFO msg=\"identit\u00e0 Guard caricata\" agent_id=go-endpoint\ntime=2026-11-18T20:55:56.213+01:00 level=WARN msg=\"identit\u00e0 device Guard non disponibile\" error=\"richiesta certificato: HTTP 404\"\ntime=2026-11-18T20:55:56.213+01:00 level=INFO msg=\"identit\u00e0 Guard caricata\" agent_id=go-endpoint\ntime=2026-11-18T20:55:56.250+01:00 level=INFO msg=\"ETW non attivo; polling processi come fallback dichiarato\" reason=disabled\n",
+      "run": 2
+    }
+  ],
+  "fake_brain_requests": {
+    "/api/v1/commands/batch?device_id=go-sensor&n=50": 2,
+    "/api/v1/enroll/csr": 10,
+    "/api/v1/heartbeat": 2,
+    "/api/v1/telemetry/commands": 2,
+    "/api/v1/telemetry/commands/batch?device_id=go-endpoint&n=50": 2,
+    "/api/v1/telemetry/commands/batch?n=50": 4,
+    "/api/v1/telemetry/report": 2,
+    "/api/v1/telemetry/report/batch": 28,
+    "/api/v1/update": 2
+  },
+  "artifacts": {
+    "go_binary_bytes": 12401152,
+    "java_jar_bytes": 18444017,
+    "python_bundle_bytes": 34214230,
+    "java_runtime_bytes": 304138987
+  }
+}

@@ -24,6 +24,7 @@ export type Page =
   | 'kraken'
   | 'yara'
   | 'settings'
+  | 'users'
 
 interface User {
   id: number

@@ -1,104 +1,108 @@
-# Upgrading to Aegis Ecosystem 4.2.1
+# Upgrading to Aegis Ecosystem 4.3.0
 
-This is the upgrade guide for the **4.2.1 maintenance release**. It contains
-the 4.2 expansion plus the release-packaging fix. The `v4.2.0` tag was created
-but did not publish a GitHub Release; use `v4.2.1`.
+This is the upgrade guide for the **4.3.0 release**. There is no `4.3.0-rc1`
+tag and no separate release-candidate cut: the release is cut directly as
+`v4.3.0` after the live gates are green.
+
+The 4.3.0 release ships **only** the unified Go agent runtime for controlled
+pilots. Guard Java and NodeTrace Python remain in the source tree for 4.2.1
+compatibility, but they are not in the 4.3 bundle and are not offered by the
+4.3 deployment UI. Rolling back those legacy agents is **not** part of 4.3.0;
+the supported rollback boundary is the server stack.
 
 ## Before upgrading
 
 1. Take an encrypted backup and verify its restore on a disposable database.
 2. Export the current `.env` (or secret store) and compare it with the new
    `.env.example`.
-3. Keep the previous image digests and the previous tag; rollback is described
-   below.
+3. Keep the previous image digests and the previous tag.
 4. Do not run the migration against a database you have not backed up.
 
 ## Changes that require action
 
-### Aegis Brain
+### Brain and database
 
-- The application now runs as the non-root user `aegis`. Existing named volumes
-  `pki_data` and `artifact_data` created by root may need the one-time `chown`
-  documented in `docs/OPERATIONS.md` §8.
-- `AEGIS_PROFILE=prod` requires `MTLS_MODE=required`, `ENTERPRISE_STRICT=true`
-  and a shared `RATE_LIMIT_STORAGE_URI`. A configuration that violated these
-  rules before now fails at startup instead of running in a weaker mode.
-- The removed `script` playbook action is rejected. Replace it with a named
-  action before importing old playbooks.
-- OTA requires an Ed25519-signed manifest. The legacy HMAC fallback is gone.
-- Re-enrollment of an existing host requires a token issued for that hostname;
-  the static enrollment key only creates new agents.
-- Brain now defaults to two uvicorn workers. Keep `RATE_LIMIT_STORAGE_URI`
-  shared (Redis) when scaling workers; in-memory limits would be per worker.
-- The legacy `X-Client-Cert` header is rejected. Guard and NodeTrace send the
-  device certificate fingerprint in `X-Client-Cert-Hash`; a proxy that still
-  forwards the full certificate must be updated.
+- Brain reports version `4.3.0` and applies every pending Alembic revision on
+  startup.
+- The server upgrade path was exercised from the running 4.2.1 database into a
+  fresh 4.3.0 project; the database dump is restored before the new Brain
+  starts. A schema downgrade is not automatic.
+- `AEGIS_PROFILE=prod` still requires `MTLS_MODE=required`,
+  `ENTERPRISE_STRICT=true` and a shared `RATE_LIMIT_STORAGE_URI`.
+- The legacy `X-Client-Cert` header is rejected; use
+  `X-Client-Cert-Hash`.
+- Re-enrollment of an existing host requires a host-bound token.
 
-### Kraken (separate service, now in `services/kraken`)
+### Agents
 
-- Kraken remains a separate process, database and network. It is **not** part of
-  the Brain; the only channel is the signed `/api/v1/ingest/kraken` event.
-- The application has no Docker socket. Sandboxes are created through the
-  broker with `network_mode=none`, a read-only root filesystem, dropped
-  capabilities and a bounded tmpfs.
-- Set `AEGIS_INGEST_URL`, `AEGIS_INGEST_KEY` and `AEGIS_INGEST_SECRET` in the
-  Kraken environment to enable event forwarding (disabled by default).
-- Compose now fails if a required secret is missing. Copy the values into the
-  external `.env` before starting; there are no default passwords.
-- Backup requires `BACKUP_PASSPHRASE` and produces GPG-encrypted dumps with a
-  checksum and a tested restore.
-- Existing plaintext credential attempts must be removed by the migration;
-  only HMAC values remain.
-- Set `SENSOR_CONFIG_SIGNING_KEY` to enable signed sensor configuration. SMB
-  and RDP listeners are opt-in through their compose ports; they never relay
-  authentication.
-- File analysis is asynchronous and static-only. Set `FILE_ANALYSIS_ENABLED`
-  and a persistent `FILE_ANALYSIS_STORAGE_DIR`; samples never enter the Brain
-  and deletion is verified. Object storage/S3 is not part of this candidate.
+- The Go agent reports `agent_version=4.3.0` and supports the `sensor`,
+  `endpoint` and `unified` profiles.
+- Existing Guard and NodeTrace installations keep running against the 4.3
+  Brain, but the 4.3 bundle no longer contains their artifacts. A host that
+  must be reinstalled or upgraded moves to the unified agent; there is no
+  artifact-level fallback in this bundle.
+- This release does **not** require or test rollback to the previous Java or
+  Python agent. Do not promise that rollback in a pilot.
+
+### Link and command delivery
+
+- Link keeps the durable spool, atomic check+push, visibility timeout and
+  idempotent ack.
+- Command delivery is **at-least-once**. A crash after execution and before
+  the ack can replay the same command. The UI now says `queued — not executed`
+  and requires an agent ack before treating the action as run.
+- The 50k Link boundary is a tested single-host limit, not a cluster claim.
 
 ## Upgrade
 
 ```bash
 git fetch --tags
-git checkout <v4.2.1 tag>
-cp env.example .env 2>/dev/null || cp .env.example .env  # merge, do not overwrite secrets
-docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+git checkout v4.3.0
+cp .env.example .env  # merge; do not overwrite existing secrets
+docker compose build aegis-brain aegis-link aegis-frontend
+docker compose up -d
 docker compose ps
 curl -fsS https://aegis.local/health/ready
 ```
 
-Alembic runs `upgrade head` at startup. If it fails, the container must not be
-started with a partially migrated schema; restore the backup.
+For a clean install in an isolated project, use new Docker project names and
+new volumes. Do not reuse a 4.2.1 data volume without a verified backup.
 
 ## Rollback
 
 ```bash
+# Server-only rollback: restore the pre-upgrade database first, then start the
+# previous server tag. Agent rollback is outside the 4.3.0 scope.
 docker compose down
 git checkout <previous-tag>
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
-A schema downgrade is **not** automatic. If the previous release cannot read the
-new schema, restore the pre-upgrade database backup first. Agent rollback uses
-`POST /api/v1/deploy/update-command` with the previous version; artifacts are
-versioned and never overwritten.
+If the previous release cannot read the new schema, restore the database
+backup. Never run an older Brain against a newer schema without that restore.
 
 ## Release verification
 
-The bundle contains `RELEASE_MANIFEST.json`, `SHA256SUMS.txt`, the compose and
-installer files, the Guard jar, NodeTrace/frontend archives, the source archive
-and the SBOM. Verify before installing:
+Verify the downloaded bundle before installing:
 
 ```bash
 sha256sum -c SHA256SUMS.txt
-python scripts/release-smoke.py release --require-nodetrace --require-image-sboms
+python scripts/release-smoke.py release --require-agent --require-image-sboms
 ```
 
-Starting with the 4.2 release pipeline, the bundle ships `env.example` rather
-than `.env.example`: GitHub rewrites asset names that begin with a dot. The
-installers accept either name; the smoke test requires `env.example`.
+The bundle ships `env.example` rather than `.env.example`: GitHub rewrites
+asset names that begin with a dot. The installers accept either name.
 
-The release job attaches the checksummed bundle. Cosign signing is a separate
-step: verify `SHA256SUMS.txt.sig` when it is present, and do not describe a
-bundle without it as a signed production artifact.
+The 4.3.0 bundle ships only the unified agent: `unified-latest.zip` on Windows
+and `unified-latest.tar.gz` on Linux, plus the versioned `unified-4.3.0.*` OTA
+copies. The Windows archive contains `aegis-agent.exe` and `aegis-etw.exe`; the
+Linux archive contains `aegis-agent`, `aegis-collector` and
+`aegis_exec.bpf.o`. Guard/NodeTrace artifacts are not present.
+
+The tag workflow signs `SHA256SUMS.txt` with cosign keyless OIDC, verifies the
+signature, and attaches the bundle next to the release assets. The package
+signature is separate: the MSI requires the operator's Authenticode
+certificate and the deb requires the operator's GPG key. Until `v4.3.0` is
+tagged, those signatures are an implemented path, not a published artifact.
+The release also carries a build-provenance attestation. See
+`docs/RELEASE_SIGNING.md`.

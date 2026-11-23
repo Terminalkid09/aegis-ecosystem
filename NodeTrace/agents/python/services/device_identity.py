@@ -150,7 +150,7 @@ def needs_renewal(cert_pem, days=RENEW_DAYS):
 
 
 def cert_b64der(cert_pem):
-    """DER-base64 single-line per l'header X-Client-Cert."""
+    """DER-base64 single-line (solo test/compatibilità, non inviato)."""
     _x509, _h, _s, _ec, _N = _need_crypto()
     cert = _x509.load_pem_x509_certificate(cert_pem.encode("ascii"))
     return base64.b64encode(

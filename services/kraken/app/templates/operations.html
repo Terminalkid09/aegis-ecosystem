@@ -85,14 +85,21 @@
 
 <section data-panel="analysis" class="hidden">
     <div class="card mb-4">
-        <h2 class="font-semibold mb-3">Static file / ZIP analysis</h2>
+        <h2 class="font-semibold mb-3">File / ZIP analysis</h2>
         <form id="analysis-form" class="flex flex-wrap items-center gap-3">
             <input id="analysis-file" name="file" type="file" required class="text-sm text-slate-300" />
             <button class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg px-4 py-2">Upload and analyse</button>
         </form>
-        <p class="text-xs text-slate-400 mt-2">Bounded, asynchronous and static-only: no execution, no network. The sample stays in Kraken's storage; delete removes it and verifies absence.</p>
+        <p class="text-xs text-slate-400 mt-2">Bounded and asynchronous. Static analysis never executes the sample; process tree and DNS appear only when an isolated external <code>DETONATION_URL</code> is configured. The sample stays in Kraken's object store; delete removes it and verifies absence.</p>
     </div>
     <div class="card p-0 overflow-hidden"><table class="w-full text-sm"><thead class="bg-slate-50 dark:bg-slate-700/50 text-xs uppercase text-slate-400"><tr><th class="px-4 py-3 text-left">File</th><th class="px-4 py-3 text-left">SHA-256</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-left">Result</th><th class="px-4 py-3"></th></tr></thead><tbody id="analysis-body"></tbody></table></div>
+    <dialog id="analysis-report-dialog" class="w-[min(900px,92vw)] rounded-xl border border-slate-700 bg-slate-900 text-slate-100 p-5 backdrop:bg-black/60">
+        <div class="flex items-center justify-between gap-4 mb-3">
+            <h3 id="analysis-report-title" class="font-semibold">Report</h3>
+            <form method="dialog"><button class="text-sm bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg">Close</button></form>
+        </div>
+        <pre id="analysis-report-body" class="text-xs whitespace-pre-wrap break-words max-h-[70vh] overflow-auto p-3 rounded-lg bg-slate-950/70"></pre>
+    </dialog>
 </section>
 {% endblock %}
 

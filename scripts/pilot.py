@@ -175,12 +175,23 @@ def main() -> int:
     log("smoke API...")
     # Audit: lo smoke senza credenziali esce 2 (run incompleto) e prima il pilot
     # lo trattava come fallimento: PILOT UP era irraggiungibile senza passare
-    # --email/--password a mano. Ora le prende dal .env (bootstrap di setup.py
-    # le scrive lì) e in assenza dichiara il run incompleto invece di fallire.
+    # --email/--password a mano. Ora le prende dal .env (compatibilita' con
+    # installazioni esistenti), da AEGIS_ADMIN_PASSWORD_FILE o dall'ambiente e
+    # in assenza dichiara il run incompleto invece di fallire.
     email = args.email or read_env_file().get("AEGIS_ADMIN_EMAIL") \
         or os.environ.get("AEGIS_SMOKE_EMAIL")
     password = args.password or read_env_file().get("AEGIS_ADMIN_PASSWORD") \
-        or os.environ.get("AEGIS_SMOKE_PASSWORD")
+        or os.environ.get("AEGIS_SMOKE_PASSWORD") \
+        or os.environ.get("AEGIS_ADMIN_PASSWORD")
+    # setup.py no longer writes the admin password to .env. A mounted secret
+    # file keeps automation (pilot/CI) possible without persisting plaintext.
+    password_file = os.environ.get("AEGIS_ADMIN_PASSWORD_FILE")
+    if not password and password_file:
+        try:
+            with open(password_file, encoding="utf-8") as f:
+                password = f.read().strip()
+        except OSError:
+            password = ""
     smoke_cmd = [sys.executable, os.path.join(REPO, "scripts", "api_smoke.py"),
                  "--base", args.base]
     if email and password:

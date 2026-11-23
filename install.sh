@@ -46,6 +46,14 @@ $COMPOSE up -d --remove-orphans
 echo "[3/4] Attesa healthcheck..."
 for i in {1..30}; do if $COMPOSE ps | grep -q "healthy"; then break; fi; sleep 2; done
 $COMPOSE ps
+# Il bundle 4.3 include solo l'agente Go: pubblichiamo gli archivi nel volume
+# che il Brain serve agli installer, cosi' il one-liner non richiede una copia
+# manuale.
+for artifact in unified-*; do
+  [ -f "$artifact" ] || continue
+  $COMPOSE cp "$artifact" aegis-brain:/app/artifacts/ 2>/dev/null \
+    || echo "[WARN] impossibile pubblicare $artifact in aegis-brain:/app/artifacts"
+done
 echo "[4/4] Verifica health..."
 curl -sk http://localhost:8000/health/live | head -c 200; echo
 if [[ "$MODE" == "pilot" ]]; then
@@ -53,4 +61,8 @@ if [[ "$MODE" == "pilot" ]]; then
   echo "  docker compose exec aegis-brain python -m app.services.pki --dir /app/pki"
   echo "[INFO] Verifica mTLS: :8443 richiede cert device (vedi docs/OPERATIONS.md §2b)"
 fi
-echo "[OK] Deploy $MODE completato. Dashboard: http://localhost:3000  API: http://localhost:8000  Caddy: https://aegis.local"
+UI_PORT="$(sed -n 's/^AEGIS_UI_PORT=//p' .env | head -n 1)"
+UI_PORT="${UI_PORT:-3000}"
+echo "[OK] Deploy $MODE completato. Dashboard: http://localhost:$UI_PORT  API: http://localhost:8000  Caddy: https://aegis.local"
+echo "[INFO] Primo admin (se non esiste): docker compose exec aegis-brain python -m app.admin bootstrap admin@aegis.local '<password-forte>'"
+echo "[INFO] Verifica admin esistenti: docker compose exec aegis-brain python -m app.admin list"

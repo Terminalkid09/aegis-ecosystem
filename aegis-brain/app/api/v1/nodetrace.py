@@ -256,14 +256,13 @@ async def get_commands(
     await verify_nodetrace_agent(device_id, authorization, db, request, x_client_cert)
 
     import redis.asyncio as redis
+    from app.services.command_queue import pop_commands
     rc = redis.from_url(settings.REDIS_URL, decode_responses=True)
-    queue_name = f"aegis:commands:{device_id}"
-
-    command = await rc.lpop(queue_name)
-    if command:
-        return json.loads(command)
-
-    return None
+    try:
+        commands = await pop_commands(rc, device_id, 1)
+        return commands[0] if commands else None
+    finally:
+        await rc.aclose()
 
 
 @router.get("/commands/batch")
@@ -277,18 +276,11 @@ async def get_commands_batch(
 ):
     await verify_nodetrace_agent(device_id, authorization, db, request, x_client_cert)
     import redis.asyncio as redis
+    from app.services.command_queue import pop_commands
     rc = redis.from_url(settings.REDIS_URL, decode_responses=True)
-    queue_name = f"aegis:commands:{device_id}"
-    out = []
     try:
-        for _ in range(max(1, min(n, 100))):
-            raw = await rc.lpop(queue_name)
-            if not raw:
-                break
-            try:
-                out.append(json.loads(raw))
-            except Exception:
-                continue
+        return await pop_commands(rc, device_id, max(1, min(n, 100)))
     except Exception:
-        pass
-    return out
+        return []
+    finally:
+        await rc.aclose()

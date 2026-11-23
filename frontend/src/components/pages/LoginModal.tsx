@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Shield, Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react'
 import { authAPI } from '@/services/api'
 import { useAppStore } from '@/store/appStore'
+import { cn } from '@/lib/utils'
 
 const LAST_EMAIL_KEY = 'aegis-last-email'
 
@@ -22,12 +23,27 @@ export default function LoginModal() {
   // null = policy not loaded yet. Keep Register hidden until the server says
   // it is open; fail closed if the config request itself fails.
   const [registrationEnabled, setRegistrationEnabled] = useState<boolean | null>(null)
+  // SSO is rendered only after the public policy endpoint confirms it. A
+  // failed request fails closed (no orphan "Sign in with SSO" button).
+  const [sso, setSso] = useState<{ enabled: boolean; button_label: string; local_login: boolean } | null>(null)
+  const [ssoError, setSsoError] = useState<string | null>(() => {
+    try { return new URLSearchParams(window.location.search).get('sso_error') } catch { return null }
+  })
 
   useEffect(() => {
     let cancelled = false
     authAPI.config()
       .then(res => { if (!cancelled) setRegistrationEnabled(res.data?.open_registration === true) })
       .catch(() => { if (!cancelled) setRegistrationEnabled(false) })
+    authAPI.oidcConfig()
+      .then(res => {
+        if (!cancelled) setSso({
+          enabled: res.data?.enabled === true,
+          button_label: res.data?.button_label || 'Sign in with SSO',
+          local_login: res.data?.local_login !== false,
+        })
+      })
+      .catch(() => { if (!cancelled) setSso(null) })
     return () => { cancelled = true }
   }, [])
 
@@ -83,8 +99,33 @@ export default function LoginModal() {
 
         {/* Card */}
         <div className="glass p-8 space-y-5">
+          {sso?.enabled && (
+            <div className="space-y-3">
+              <a
+                href={authAPI.oidcLoginUrl()}
+                data-testid="sso-login"
+                className="btn btn-primary w-full justify-center py-2.5 text-sm font-semibold"
+              >
+                <Shield size={15} /> {sso.button_label}
+              </a>
+              {sso.local_login && (
+                <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-[hsl(var(--muted-foreground))]">
+                  <span className="h-px flex-1 bg-[hsl(var(--border))]" />
+                  or local credentials
+                  <span className="h-px flex-1 bg-[hsl(var(--border))]" />
+                </div>
+              )}
+            </div>
+          )}
+
+          {sso?.enabled && !sso.local_login && (
+            <p className="text-center text-xs text-[hsl(var(--muted-foreground))]">
+              Local password login is disabled by policy. Use your organization SSO account.
+            </p>
+          )}
+
           {/* Mode tabs */}
-          <div className="flex gap-1 p-1 rounded-lg bg-[hsl(var(--secondary))]">
+          <div className={cn('flex gap-1 p-1 rounded-lg bg-[hsl(var(--secondary))]', sso?.enabled && !sso.local_login && 'hidden')}>
             <button
               type="button"
               data-testid="auth-tab-login"
@@ -119,7 +160,7 @@ export default function LoginModal() {
             </p>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className={cn('space-y-4', sso?.enabled && !sso.local_login && 'hidden')}>
             {mode === 'register' && (
               <div>
                 <label className="text-xs text-[hsl(var(--muted-foreground))] font-medium mb-1.5 block uppercase tracking-wider">Username</label>
@@ -188,10 +229,15 @@ export default function LoginModal() {
               </label>
             )}
 
-            {error && (
+            {(error || ssoError) && (
               <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
                 <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                <span>{error}</span>
+                <span>{error || ssoError}</span>
+                {ssoError && (
+                  <button type="button" onClick={() => setSsoError(null)} className="ml-auto text-red-300 hover:text-white">
+                    <EyeOff size={12} />
+                  </button>
+                )}
               </div>
             )}
 

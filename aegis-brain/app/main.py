@@ -154,6 +154,13 @@ async def lifespan(app: FastAPI):
                 logger.info("Retention scheduler avviato (dry-run=False, backup check attivo)")
         except Exception as e:
             logger.warning(f"Retention scheduler non avviato: {e}")
+        # Signed YARA feed sync: off by default; when enabled it is
+        # single-flight across workers thanks to a PostgreSQL advisory lock.
+        try:
+            from app.services.yara_feed import start_yara_feed_task
+            await start_yara_feed_task()
+        except Exception as e:
+            logger.warning(f"YARA feed scheduler non avviato: {e}")
         # Heartbeat Telegram: il bot che dice "Aegis e' vivo" anche quando la
         # dashboard e' chiusa (solo se configurato: enable=true + token + chat).
         try:
@@ -183,6 +190,11 @@ async def lifespan(app: FastAPI):
         try:
             from app.services.retention import stop_retention_task
             stop_retention_task()
+        except Exception:
+            pass
+        try:
+            from app.services.yara_feed import stop_yara_feed_task
+            await stop_yara_feed_task()
         except Exception:
             pass
         try:
@@ -322,7 +334,9 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    if request.url.scheme == "https" or forwarded == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     if request.url.path.startswith("/api/"):
         response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none';"
     return response
@@ -363,7 +377,8 @@ async def sliding_session_middleware(request: Request, call_next):
         if jti and await is_token_blacklisted(jti):
             return response
         fresh, _, _ = create_access_token(
-            subject=str(payload.get("sub")), role=str(payload.get("role") or "user"))
+            subject=str(payload.get("sub")), role=str(payload.get("role") or "user"),
+            token_version=int(payload.get("ver", 0) or 0))
         response.set_cookie(
             key=SESSION_COOKIE,
             value=fresh,

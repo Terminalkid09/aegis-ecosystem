@@ -2,7 +2,7 @@
 
 Kraken è un servizio separato: questo modulo è l'unico punto in cui il Brain
 conosce la forma dei suoi eventi. Il parser non legge il DB Kraken e non
-importa codice Kraken; traduce solo il JSON documentato in `docs/PLAN_AEGIS_KRAKEN_HANDOFF.md` §5.3.
+importa codice Kraken; traduce solo il JSON documentato in `docs/archive/PLAN_AEGIS_KRAKEN_HANDOFF.md` §5.3.
 
 Regola di privacy: password, token e segreti non entrano mai in `raw`, `extra`,
 `message` o negli alert. Il campo password del payload originale viene

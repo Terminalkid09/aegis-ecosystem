@@ -1,15 +1,29 @@
 # Secrets and Config
 .env
 .env.*
+# I template restano versionabili: servono a un clone pulito. I file .env
+# reali, inclusi backup e varianti locali, restano ignorati sopra.
+!.env.example
+!**/.env.example
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 secret.json
 token.json
+# Secret file montati dal compose (./secrets -> /run/secrets): mai versionare.
+/secrets/
 token_agent.json
 *.pem
 *.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.kdbx
+*.ovpn
+id_rsa*
+.npmrc
 *.secret
 .aegis-guard-secret.json
 .nodetrace-token.json
@@ -146,6 +160,15 @@ aegis-guard/install/windows/install_log.txt
 
 # Generated release bundles (AP-50)
 release/
+# Local Go build output (do not commit the 12 MB binary)
+/aegis-agent/aegis-agent
+/aegis-agent/aegis-agent.exe
+# Scratch/release locale: non deve finire in un commit per errore.
+/.tmp/
+# Gli artefatti di deploy sono prodotti dalla CI e montati in ARTIFACT_DIR:
+# non vanno versionati. Il .gitkeep mantiene la directory nel repo.
+aegis-brain/artifacts/*
+!aegis-brain/artifacts/.gitkeep
 
 # Docs suggestions / scratch
 *.suggestion.*

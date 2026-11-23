@@ -141,7 +141,7 @@ giuridica autonoma.
 ## 11. Documenti collegati
 
 - [`DPA_TEMPLATE.md`](DPA_TEMPLATE.md)
-- [`TRADEMARK_RESEARCH.md`](TRADEMARK_RESEARCH.md)
+- [`archive/TRADEMARK_RESEARCH.md`](archive/TRADEMARK_RESEARCH.md)
 - [`OPERATIONS.md`](OPERATIONS.md) — retention e backup
 - [`../SECURITY.md`](../SECURITY.md) — segnalazione vulnerabilità
 
