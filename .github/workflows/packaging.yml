@@ -307,10 +307,15 @@ jobs:
             gpg --batch --verify "$f.asc" "$f"
             (cd dist && sha256sum -c "$(basename "$f").sha256")
           done
-          dpkg-deb --contents dist/aegis_4.3.0_amd64.deb | grep -q './opt/aegis/server/frontend/package.json'
-          dpkg-deb --contents dist/aegis_4.3.0_amd64.deb | grep -q './opt/aegis/server/aegis-link/pom.xml'
-          dpkg-deb --contents dist/kraken_4.3.0_amd64.deb | grep -q './opt/aegis/kraken/services/kraken/honeypot/runner.py'
-          tar -tzf dist/aegis-suite-4.3.0.tar.gz | grep -q 'aegis-suite-4.3.0/install.sh'
+          # grep -q closes the pipe early; under pipefail the producer then dies
+          # with SIGPIPE (tar: stdout: write error / dpkg-deb exit 2).
+          dpkg-deb --contents dist/aegis_4.3.0_amd64.deb > /tmp/aegis-contents.txt
+          grep -F './opt/aegis/server/frontend/package.json' /tmp/aegis-contents.txt > /dev/null
+          grep -F './opt/aegis/server/aegis-link/pom.xml' /tmp/aegis-contents.txt > /dev/null
+          dpkg-deb --contents dist/kraken_4.3.0_amd64.deb > /tmp/kraken-contents.txt
+          grep -F './opt/aegis/kraken/services/kraken/honeypot/runner.py' /tmp/kraken-contents.txt > /dev/null
+          tar -tzf dist/aegis-suite-4.3.0.tar.gz > /tmp/suite-contents.txt
+          grep -F 'aegis-suite-4.3.0/install.sh' /tmp/suite-contents.txt > /dev/null
       - name: Upload server packages
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -394,7 +399,8 @@ jobs:
       - name: Verify ipk structure
         run: |
           ar t dist/aegis-agent_4.3.0_x86_64.ipk
-          tar -tzf <(ar p dist/aegis-agent_4.3.0_x86_64.ipk control.tar.gz) | grep -q ./control
+          tar -tzf <(ar p dist/aegis-agent_4.3.0_x86_64.ipk control.tar.gz) > /tmp/ipk-contents.txt
+          grep -F ./control /tmp/ipk-contents.txt > /dev/null
           (cd dist && sha256sum -c aegis-agent_4.3.0_x86_64.ipk.sha256)
       - name: Upload ipk artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
