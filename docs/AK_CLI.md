@@ -265,14 +265,38 @@ application and not a service. On Linux `dockerd` is native and systemd owns it.
 Everything that is ours is still native Windows: the MSI, `ak.ps1`, the
 FQDN/ACME/port wizard, env generation, ACLs, registry entries and `PATH`.
 
-The **only** remaining parity differenceThe **only** remaining parity difference
-is boot timing: the Linux package owns a systemd unit and can start at boot;
-the Windows packages cannot create a per-machine pre-login container service
-with Docker Desktop. `ak start`, a scheduled task at logon, or Docker Desktop's
-own startup are the supported Windows bring-up paths. A true pre-login service
-requires a per-machine container runtime or a native Windows port, not a
-cosmetic MSI change. That work is tracked in
-[the roadmap](ROADMAP_LIVE_VALIDATION.md).
+The **only** remaining parity difference is boot timing: the Linux package owns
+a systemd unit and can start at boot; the Windows packages cannot create a
+per-machine pre-login container service with Docker Desktop. `ak start`, a
+scheduled task at logon, or Docker Desktop's own startup are the supported
+Windows bring-up paths. A true pre-login service requires a per-machine
+container runtime or a native Windows port, not a cosmetic MSI change. That work
+is tracked in [the roadmap](ROADMAP_LIVE_VALIDATION.md).
+
+### Command differences between Linux and Windows
+
+The command names, components and exit codes are identical, so shared scripts
+keep working. The mechanisms behind them differ, and the CLI does not pretend
+otherwise:
+
+| Area | Linux (deb/rpm) | Windows (server MSI) |
+|---|---|---|
+| State read by `ak status` | `systemctl is-active` + `is-enabled` for the unit | Docker containers of the Compose project; there is no unit |
+| `ak start` timing | Returns after `systemctl start --no-block`; `--wait` polls the containers | Polls until a container runs and none is starting/unhealthy; `--no-wait` returns immediately |
+| Boot | Unit enabled at install, containers are `restart: unless-stopped` | No pre-login service; run `ak start` after logon or a logon task |
+| `ak stop` | Stops the unit; it stays enabled for the next boot | Stops the Compose containers; `ak start` is the next bring-up |
+| `ak configure` | `--domain/--email/--port/--public-url`, `--restart` | Same options plus `--no-restart` |
+| `ak update` artifact | `.deb` packages (`aegis`, `kraken`, suite) installed with apt/dpkg | The edition MSI installed with `msiexec`; `--from` also accepts a local `.msi` |
+| `ak update --from` | Directory or URL, and requires `--version` | Directory, local MSI or URL; the version can be inferred from the MSI name |
+| `ak doctor` | systemd, unit enablement, env file mode `0600`, Docker, memory | Docker Desktop, Compose, env file, dashboard port, elevation, memory |
+| Privileges | `sudo` for start/stop/restart/configure/update | Elevated PowerShell for the same commands |
+| `ak version` | CLI version plus `dpkg-query` package versions | CLI version, edition and the installed server version |
+
+Both platforms verify a SHA-256 sidecar before installing an update and refuse a
+downgrade without `--allow-downgrade`. On Windows the update must match the
+installed edition (Aegis Server, Kraken Server or Aegis Suite); on Linux the
+edition is derived from the installed packages, including the `aegis-suite`
+metapackage.
 
 The endpoint MSI still accepts `BRAIN_URL=https://...` for a custom server
 origin; that property configures the agent, not the server dashboard.

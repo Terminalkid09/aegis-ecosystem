@@ -1,0 +1,1771 @@
+{
+  "schema": "aegis-deep-simulation-v1",
+  "run": "20261123T173125Z",
+  "base": "http://127.0.0.1:8000",
+  "started_at": "2026-11-23T17:31:25.281987+00:00",
+  "mode": "scenarios+soak",
+  "metrics": {
+    "malicious_total": 39,
+    "benign_total": 46,
+    "tp": 38,
+    "fn": 1,
+    "fp": 0,
+    "tn": 46,
+    "precision": 1.0,
+    "recall": 0.9744,
+    "f1": 0.987,
+    "false_positive_rate": 0.0,
+    "severity_checked": 28,
+    "severity_correct": 23,
+    "false_negatives": [
+      {
+        "id": "mal-linux-shadow",
+        "title": "lettura shadow",
+        "technique": "T1003.008",
+        "note": "T1003.008 non ha una regola statica: FN atteso"
+      }
+    ],
+    "false_positives": [],
+    "severity_mismatches": [
+      {
+        "id": "mal-psh-encoded",
+        "expected": "HIGH",
+        "got": [
+          "CRITICAL"
+        ]
+      },
+      {
+        "id": "mal-rundll32-js",
+        "expected": "HIGH",
+        "got": [
+          "LOW"
+        ]
+      },
+      {
+        "id": "mal-threads",
+        "expected": "MEDIUM",
+        "got": [
+          "LOW"
+        ]
+      },
+      {
+        "id": "mal-double-ext",
+        "expected": "HIGH",
+        "got": [
+          "CRITICAL"
+        ]
+      },
+      {
+        "id": "mal-lolbin-temp",
+        "expected": "HIGH",
+        "got": [
+          "CRITICAL"
+        ]
+      }
+    ]
+  },
+  "rules": {
+    "AEGIS-S012": 12,
+    "AEGIS-S004": 11,
+    "AEGIS-S009": 11,
+    "AEGIS-S001": 8,
+    "AEGIS-S021": 3,
+    "AEGIS-S015": 2,
+    "AEGIS-S007": 2,
+    "AEGIS-S002": 2,
+    "AEGIS-S016": 2,
+    "AEGIS-S017": 2,
+    "AEGIS-S019": 2,
+    "AEGIS-S018": 2,
+    "AEGIS-S013": 1,
+    "AEGIS-S011": 1,
+    "AEGIS-S020": 1,
+    "AEGIS-S010": 1,
+    "AEGIS-S014": 1,
+    "AEGIS-S006": 1
+  },
+  "cases": [
+    {
+      "id": "ben-code",
+      "group": "benign",
+      "title": "VS Code",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "69bb9974-6884-4900-bfe0-a22ba6c71fc6",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.048,
+      "error": null
+    },
+    {
+      "id": "ben-chrome",
+      "group": "benign",
+      "title": "Chrome",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "2cc33ea4-1e6b-467f-98e3-bd50883b8240",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.041,
+      "error": null
+    },
+    {
+      "id": "ben-edge-renderer",
+      "group": "benign",
+      "title": "Edge renderer 180 thread",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "003463de-fda8-496e-a16a-5f38bd1b694e",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.039,
+      "error": null
+    },
+    {
+      "id": "ben-pwsh-getproc",
+      "group": "benign",
+      "title": "PowerShell Get-Process",
+      "technique": "T1059.001",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "df0f497b-cfc9-49a2-8a2f-418299bb72d4",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.042,
+      "error": null
+    },
+    {
+      "id": "ben-powershell-legacy",
+      "group": "benign",
+      "title": "PowerShell aggiornamento policy",
+      "technique": "T1059.001",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "8b5f68c0-1f76-4d77-abdc-338fb73fae55",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.045,
+      "error": null
+    },
+    {
+      "id": "ben-cmd-dir",
+      "group": "benign",
+      "title": "cmd /c dir",
+      "technique": "T1059.003",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "be025fa1-27bb-483d-936f-35a8d5ff16a7",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.052,
+      "error": null
+    },
+    {
+      "id": "ben-git",
+      "group": "benign",
+      "title": "git status",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "960e8008-1e15-47f8-be7d-3824c88deaf5",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.041,
+      "error": null
+    },
+    {
+      "id": "ben-node",
+      "group": "benign",
+      "title": "node app",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "173d6cc4-1035-4e7b-9378-5d370d86ce74",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.041,
+      "error": null
+    },
+    {
+      "id": "ben-npm",
+      "group": "benign",
+      "title": "npm test",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "2e285748-1384-4828-b55b-89094484cf44",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.081,
+      "error": null
+    },
+    {
+      "id": "ben-python",
+      "group": "benign",
+      "title": "python -c print",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "64ef8586-ff7f-489a-9f78-ab3b2c6b53dc",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.079,
+      "error": null
+    },
+    {
+      "id": "ben-java",
+      "group": "benign",
+      "title": "java -version",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "1ca1820b-46cc-436c-ba41-cf40993b92b4",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.084,
+      "error": null
+    },
+    {
+      "id": "ben-dotnet",
+      "group": "benign",
+      "title": ".NET --info",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "be703996-22ff-4a2b-8611-58363d2fdf84",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.083,
+      "error": null
+    },
+    {
+      "id": "ben-notepad-temp",
+      "group": "benign",
+      "title": "notepad apre file in Temp",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "6f4d3334-9459-4036-b932-b07b216be4a6",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.083,
+      "error": null
+    },
+    {
+      "id": "ben-explorer-chrome",
+      "group": "benign",
+      "title": "Explorer apre Chrome",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "39dfedeb-6514-4424-a496-8c87d027fd23",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.081,
+      "error": null
+    },
+    {
+      "id": "ben-certutil-hash",
+      "group": "benign",
+      "title": "certutil -hashfile",
+      "technique": "T1140",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "c7b02cc9-40c4-466e-91a1-572663a05bdb",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.082,
+      "error": null
+    },
+    {
+      "id": "ben-rundll32-printui",
+      "group": "benign",
+      "title": "rundll32 printui.dll",
+      "technique": "T1218.011",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "bf4713ba-43e6-4afc-afc2-11ff5c462409",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.076,
+      "error": null
+    },
+    {
+      "id": "ben-reg-query",
+      "group": "benign",
+      "title": "reg query Run",
+      "technique": "T1012",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "d9d793c8-cdbf-4360-8c74-abda68c3e8f1",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.066,
+      "error": null
+    },
+    {
+      "id": "ben-schtasks-query",
+      "group": "benign",
+      "title": "schtasks /query",
+      "technique": "T1053.005",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "60f9f2fe-ba41-499c-9d2e-622456fc3d9c",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.061,
+      "error": null
+    },
+    {
+      "id": "ben-netstat",
+      "group": "benign",
+      "title": "netstat -ano",
+      "technique": "T1016",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "1d9f33fd-9778-443f-8784-4324469e0c1d",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.08,
+      "error": null
+    },
+    {
+      "id": "ben-ipconfig",
+      "group": "benign",
+      "title": "ipconfig /all",
+      "technique": "T1016",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "b3975d78-6e89-41fe-bfd2-620c96119ee6",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.066,
+      "error": null
+    },
+    {
+      "id": "ben-tasklist",
+      "group": "benign",
+      "title": "tasklist",
+      "technique": "T1057",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "ee4b13d8-a441-4228-baa3-0eb1a4997a85",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.074,
+      "error": null
+    },
+    {
+      "id": "ben-whoami",
+      "group": "benign",
+      "title": "whoami (senza /all)",
+      "technique": "T1033",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "d8ef5163-be7a-4a1c-a812-17fc5c85f173",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.079,
+      "error": null
+    },
+    {
+      "id": "ben-ping",
+      "group": "benign",
+      "title": "ping host interno",
+      "technique": "T1018",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "9c6bf835-ea46-4b39-a1a7-83b6a47c22b0",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.066,
+      "error": null
+    },
+    {
+      "id": "ben-ssh-admin",
+      "group": "benign",
+      "title": "ssh amministrativo",
+      "technique": "T1021.004",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "e61051d5-3448-427c-9b0c-4a5b8827af95",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.064,
+      "error": null
+    },
+    {
+      "id": "ben-mstsc",
+      "group": "benign",
+      "title": "RDP client",
+      "technique": "T1021.001",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "f2a447bb-5c59-4de2-84d7-0e84e99e0e57",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.062,
+      "error": null
+    },
+    {
+      "id": "ben-wsl",
+      "group": "benign",
+      "title": "wsl --list",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "107cd610-9e03-40e1-9d63-69ed078b39be",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.062,
+      "error": null
+    },
+    {
+      "id": "ben-signed-installer",
+      "group": "benign",
+      "title": "installer firmato in Downloads",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "path utente-scrivibile ma firma valida: S004 deve essere LOW e soppressa",
+      "agent_id": "c8584009-ca66-4ae3-a342-07e8f6cf81df",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.067,
+      "error": null
+    },
+    {
+      "id": "ben-updater",
+      "group": "benign",
+      "title": "updater in Program Files",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "9bda93d5-bc72-469d-ad88-3afb58b8fa65",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.061,
+      "error": null
+    },
+    {
+      "id": "ben-teams",
+      "group": "benign",
+      "title": "Teams",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "41971392-4eac-4acd-a762-8f41f9d023c5",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.065,
+      "error": null
+    },
+    {
+      "id": "ben-certutil-verify",
+      "group": "benign",
+      "title": "certutil -verifyctl",
+      "technique": "T1140",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "ef6d1aee-0dda-4081-9fc8-ce54205a12c0",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.058,
+      "error": null
+    },
+    {
+      "id": "ben-sc-query",
+      "group": "benign",
+      "title": "sc query",
+      "technique": "T1007",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "3261ccbd-60d3-4a19-ad9a-75d314690288",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.062,
+      "error": null
+    },
+    {
+      "id": "ben-defender-update",
+      "group": "benign",
+      "title": "Defender aggiorna firme",
+      "technique": "T1562",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "e6629c40-2960-41c4-a7d2-334f47268751",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.062,
+      "error": null
+    },
+    {
+      "id": "ben-vssadmin-list",
+      "group": "benign",
+      "title": "vssadmin list shadows",
+      "technique": "T1490",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "822fc3de-1c9f-46b9-b0a1-dfdca08959ed",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.062,
+      "error": null
+    },
+    {
+      "id": "ben-bcdedit-enum",
+      "group": "benign",
+      "title": "bcdedit /enum",
+      "technique": "T1490",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "f57dc2ee-55f2-4e00-81b5-cf36f80f7c70",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.058,
+      "error": null
+    },
+    {
+      "id": "ben-reg-add-policy",
+      "group": "benign",
+      "title": "policy di gruppo locale",
+      "technique": "T1112",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "03a88e29-41bb-40c5-aee2-01ffdf79e7ea",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.067,
+      "error": null
+    },
+    {
+      "id": "ben-schtasks-change",
+      "group": "benign",
+      "title": "modifica task esistente",
+      "technique": "T1053.005",
+      "expected": false,
+      "severity": null,
+      "note": "S017 scatta su /change: verificare se e' un FP accettabile",
+      "agent_id": "be86d1c1-ffdf-4f0a-9909-bdd5fff064e3",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.067,
+      "error": null
+    },
+    {
+      "id": "ben-linux-bash-ls",
+      "group": "benign",
+      "title": "bash ls",
+      "technique": "T1059.004",
+      "expected": false,
+      "severity": null,
+      "note": "Linux: nessuna firma disponibile; S009 e' l'unico match atteso",
+      "agent_id": "e5f6ecb9-b5b7-4819-9e86-c939d08e28b0",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.057,
+      "error": null
+    },
+    {
+      "id": "ben-linux-systemctl",
+      "group": "benign",
+      "title": "systemctl status",
+      "technique": "T1569",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "a0095336-d8e3-46a9-b904-1e61e2037f8c",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.067,
+      "error": null
+    },
+    {
+      "id": "ben-linux-apt",
+      "group": "benign",
+      "title": "apt-get update",
+      "technique": "T1072",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "59693296-20e8-4a5b-a1b2-a3bc8b4c4d55",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.062,
+      "error": null
+    },
+    {
+      "id": "ben-linux-curl",
+      "group": "benign",
+      "title": "curl https",
+      "technique": "T1071.001",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "1c72a010-3070-44fa-abb3-d068b52698b9",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.057,
+      "error": null
+    },
+    {
+      "id": "ben-linux-python",
+      "group": "benign",
+      "title": "python3 script",
+      "technique": "T1059.006",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "e117323a-f316-427d-a366-99365b516695",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.058,
+      "error": null
+    },
+    {
+      "id": "ben-linux-node",
+      "group": "benign",
+      "title": "node server",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "8451cf67-108d-424b-a2b4-ff3182caa811",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.058,
+      "error": null
+    },
+    {
+      "id": "ben-linux-git",
+      "group": "benign",
+      "title": "git fetch",
+      "technique": "T1204",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "24ed0ba1-e695-41c2-aeb6-35525f0f1452",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.058,
+      "error": null
+    },
+    {
+      "id": "ben-linux-docker",
+      "group": "benign",
+      "title": "docker ps",
+      "technique": "T1610",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "61c202a9-48a0-41de-b682-57b8573d4cbf",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.058,
+      "error": null
+    },
+    {
+      "id": "ben-linux-journalctl",
+      "group": "benign",
+      "title": "journalctl",
+      "technique": "T1654",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "8ab21273-38b0-40ef-9bc5-9df4ae91e9f6",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.062,
+      "error": null
+    },
+    {
+      "id": "ben-linux-ssh",
+      "group": "benign",
+      "title": "ssh admin",
+      "technique": "T1021.004",
+      "expected": false,
+      "severity": null,
+      "note": "",
+      "agent_id": "2f021cdf-7d50-4daa-9d2d-89b105a2b373",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.066,
+      "error": null
+    },
+    {
+      "id": "mal-mimikatz",
+      "group": "malicious",
+      "title": "Mimikatz in Temp",
+      "technique": "T1003.001",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "4b4dafa4-3a4f-49c6-91af-cbbc772b6a9b",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.106,
+      "error": null
+    },
+    {
+      "id": "mal-mimikatz-renamed",
+      "group": "malicious",
+      "title": "Mimikatz rinominato in Roaming",
+      "technique": "T1036",
+      "expected": true,
+      "severity": null,
+      "note": "",
+      "agent_id": "13434306-5933-4579-8796-852171de0c3f",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.107,
+      "error": null
+    },
+    {
+      "id": "mal-procdump-lsass",
+      "group": "malicious",
+      "title": "procdump su lsass",
+      "technique": "T1003.001",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "a6ed1d4b-482c-4197-b139-635c17007b07",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.093,
+      "error": null
+    },
+    {
+      "id": "mal-lazagne",
+      "group": "malicious",
+      "title": "LaZagne",
+      "technique": "T1555",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "63af5bfa-f4a5-40ce-bfcf-809bc7b71584",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.089,
+      "error": null
+    },
+    {
+      "id": "mal-ntdsutil",
+      "group": "malicious",
+      "title": "ntdsutil IFM",
+      "technique": "T1003.003",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "35db1b61-08a4-4c71-9e2e-7627fdeebbd4",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.071,
+      "error": null
+    },
+    {
+      "id": "mal-psh-encoded",
+      "group": "malicious",
+      "title": "PowerShell encoded hidden",
+      "technique": "T1059.001",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "f3656667-52fd-4676-8b2a-671f22a6ec38",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.071,
+      "error": null
+    },
+    {
+      "id": "mal-psh-iex",
+      "group": "malicious",
+      "title": "IEX download string",
+      "technique": "T1059.001",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "c5aacd03-e33a-4044-b533-c3c19710d4c1",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.067,
+      "error": null
+    },
+    {
+      "id": "mal-psh-downloadfile",
+      "group": "malicious",
+      "title": "DownloadFile in temp",
+      "technique": "T1105",
+      "expected": true,
+      "severity": null,
+      "note": "",
+      "agent_id": "516de903-edb4-442f-aa48-dc7a39bbfcdf",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.071,
+      "error": null
+    },
+    {
+      "id": "mal-mshta-url",
+      "group": "malicious",
+      "title": "mshta URL remoto",
+      "technique": "T1218.005",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "73003fda-8804-4f46-8707-de1fb20e848d",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.075,
+      "error": null
+    },
+    {
+      "id": "mal-regsvr32-squiblydoo",
+      "group": "malicious",
+      "title": "regsvr32 squiblydoo",
+      "technique": "T1218.010",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "3acb156c-ae67-40e8-9f3c-636de33299b9",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.067,
+      "error": null
+    },
+    {
+      "id": "mal-rundll32-js",
+      "group": "malicious",
+      "title": "rundll32 javascript",
+      "technique": "T1218.011",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "a9d8577d-e5d9-4b6c-aabf-bc254f6dd18b",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.089,
+      "error": null
+    },
+    {
+      "id": "mal-certutil-urlcache",
+      "group": "malicious",
+      "title": "certutil -urlcache",
+      "technique": "T1105",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "9d33048b-36ac-485a-a9c1-1d5fc3cfcf8f",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.102,
+      "error": null
+    },
+    {
+      "id": "mal-bitsadmin",
+      "group": "malicious",
+      "title": "bitsadmin transfer",
+      "technique": "T1197",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "04878c85-c500-4f14-996f-1cf11f1881e6",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.102,
+      "error": null
+    },
+    {
+      "id": "mal-wmic-create",
+      "group": "malicious",
+      "title": "wmic process call create",
+      "technique": "T1047",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "69c58e35-2d8c-423b-b9a1-2a0279b39062",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.094,
+      "error": null
+    },
+    {
+      "id": "mal-office-psh",
+      "group": "malicious",
+      "title": "Word genera PowerShell",
+      "technique": "T1566",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "c4564251-99b7-4f85-b0c8-a077787c5bae",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.094,
+      "error": null
+    },
+    {
+      "id": "mal-browser-svchost",
+      "group": "malicious",
+      "title": "Chrome genera svchost",
+      "technique": "T1055",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "087ec38a-8977-40c6-a114-6b8cdccd9a3b",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.089,
+      "error": null
+    },
+    {
+      "id": "mal-threads",
+      "group": "malicious",
+      "title": "250 thread (injection)",
+      "technique": "T1055",
+      "expected": true,
+      "severity": "MEDIUM",
+      "note": "",
+      "agent_id": "776cad04-4612-42d2-9121-996c677c1d65",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.067,
+      "error": null
+    },
+    {
+      "id": "mal-dll-temp",
+      "group": "malicious",
+      "title": "DLL da Temp",
+      "technique": "T1574",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "3893dc53-a9eb-4b9c-998d-de22e8d6530d",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.076,
+      "error": null
+    },
+    {
+      "id": "mal-runkey",
+      "group": "malicious",
+      "title": "Run key persistence",
+      "technique": "T1547.001",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "64eb55ba-d3b9-42d7-81e4-cd55d07e0987",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.076,
+      "error": null
+    },
+    {
+      "id": "mal-schtasks-psh",
+      "group": "malicious",
+      "title": "Task che esegue PowerShell",
+      "technique": "T1053.005",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "bdc96b76-9de5-4baf-a721-a40253a81cd5",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.07,
+      "error": null
+    },
+    {
+      "id": "mal-defender-disable",
+      "group": "malicious",
+      "title": "Defender disabilitato",
+      "technique": "T1562.001",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "ab28ba55-8f88-4e87-aaef-edd5ed1cf5ca",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.07,
+      "error": null
+    },
+    {
+      "id": "mal-kill-av",
+      "group": "malicious",
+      "title": "taskkill su MsMpEng",
+      "technique": "T1562.001",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "ce5ba858-afae-4495-a0aa-18b461f1e20a",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.113,
+      "error": null
+    },
+    {
+      "id": "mal-log-clear",
+      "group": "malicious",
+      "title": "wevtutil cl Security",
+      "technique": "T1070.001",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "3956baa1-edc6-4569-9fe3-a1baf3727c83",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.111,
+      "error": null
+    },
+    {
+      "id": "mal-bcdedit",
+      "group": "malicious",
+      "title": "recovery disabilitato",
+      "technique": "T1490",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "5b1700f8-b1f1-4122-b915-74a00e3e77a5",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.111,
+      "error": null
+    },
+    {
+      "id": "mal-vssadmin",
+      "group": "malicious",
+      "title": "shadow copy cancellate",
+      "technique": "T1490",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "3d625399-5e46-4fca-86ab-3319fe61e32a",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.095,
+      "error": null
+    },
+    {
+      "id": "mal-wbadmin",
+      "group": "malicious",
+      "title": "catalogo backup cancellato",
+      "technique": "T1490",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "12c714f6-1a07-4e47-85e0-6aaecccf6091",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.081,
+      "error": null
+    },
+    {
+      "id": "mal-nc-beacon",
+      "group": "malicious",
+      "title": "netcat verso IP pubblico",
+      "technique": "T1071",
+      "expected": true,
+      "severity": null,
+      "note": "",
+      "agent_id": "52306331-be89-4d7c-8345-8e4738b658dd",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.071,
+      "error": null
+    },
+    {
+      "id": "mal-fileless-enc",
+      "group": "malicious",
+      "title": "Fileless: nessun path, encoded",
+      "technique": "T1027",
+      "expected": true,
+      "severity": null,
+      "note": "solo RAM: nessun file sul disco da analizzare",
+      "agent_id": "a855efe9-fbfd-498f-ba9a-18cfdee66e34",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.068,
+      "error": null
+    },
+    {
+      "id": "mal-fileless-rundll",
+      "group": "malicious",
+      "title": "Fileless rundll32",
+      "technique": "T1218.011",
+      "expected": true,
+      "severity": null,
+      "note": "",
+      "agent_id": "76467826-2053-490e-af1d-4e0a7d936a05",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.067,
+      "error": null
+    },
+    {
+      "id": "mal-masq-svchost",
+      "group": "malicious",
+      "title": "svchost in Roaming",
+      "technique": "T1036",
+      "expected": true,
+      "severity": "CRITICAL",
+      "note": "",
+      "agent_id": "3701a978-5166-46ba-802c-6e3186ee263b",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.098,
+      "error": null
+    },
+    {
+      "id": "mal-double-ext",
+      "group": "malicious",
+      "title": "invoice.pdf.exe",
+      "technique": "T1036",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "e4790726-b9f6-4ba8-a64b-0c937bba3fac",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.099,
+      "error": null
+    },
+    {
+      "id": "mal-dropper",
+      "group": "malicious",
+      "title": "Dropper non firmato",
+      "technique": "T1204",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "ec8386f3-1dcf-4be4-855c-1edcd1339229",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.097,
+      "error": null
+    },
+    {
+      "id": "mal-cmd-base64",
+      "group": "malicious",
+      "title": "cmd con base64 decode",
+      "technique": "T1027",
+      "expected": true,
+      "severity": null,
+      "note": "",
+      "agent_id": "b1150ba6-6e3f-4108-8a5c-9d8ecd8b975e",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.07,
+      "error": null
+    },
+    {
+      "id": "mal-lolbin-temp",
+      "group": "malicious",
+      "title": "LOLBin da Temp",
+      "technique": "T1218",
+      "expected": true,
+      "severity": "HIGH",
+      "note": "",
+      "agent_id": "0cc9b7f8-d0d9-4358-aff4-ddde9c338291",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.098,
+      "error": null
+    },
+    {
+      "id": "mal-linux-revshell",
+      "group": "malicious",
+      "title": "Reverse shell /dev/tcp",
+      "technique": "T1059.004",
+      "expected": true,
+      "severity": null,
+      "note": "",
+      "agent_id": "c195cf05-d0d5-459e-86f0-61c0ff6d479f",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.094,
+      "error": null
+    },
+    {
+      "id": "mal-linux-xmrig",
+      "group": "malicious",
+      "title": "xmrig in /tmp",
+      "technique": "T1496",
+      "expected": true,
+      "severity": null,
+      "note": "",
+      "agent_id": "504bc9d9-094a-44dd-b170-cb2e790a0836",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.089,
+      "error": null
+    },
+    {
+      "id": "mal-linux-curl-pipe",
+      "group": "malicious",
+      "title": "curl | bash",
+      "technique": "T1059.004",
+      "expected": true,
+      "severity": null,
+      "note": "",
+      "agent_id": "b0a81b21-4c0c-4f07-bd52-7aca28125233",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.088,
+      "error": null
+    },
+    {
+      "id": "mal-linux-shadow",
+      "group": "malicious",
+      "title": "lettura shadow",
+      "technique": "T1003.008",
+      "expected": true,
+      "severity": null,
+      "note": "T1003.008 non ha una regola statica: FN atteso",
+      "agent_id": "a85240b1-9680-46a7-ad94-a4f58b451319",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.057,
+      "error": null
+    },
+    {
+      "id": "mal-linux-tmp-payload",
+      "group": "malicious",
+      "title": "payload in /tmp eseguito",
+      "technique": "T1036",
+      "expected": true,
+      "severity": null,
+      "note": "",
+      "agent_id": "04add38e-d1de-4c73-b99e-4af0c54948ea",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.08,
+      "error": null
+    },
+    {
+      "id": "dual-whoami-all",
+      "group": "dual",
+      "title": "whoami /all",
+      "technique": "T1033",
+      "expected": null,
+      "severity": "MEDIUM",
+      "note": "",
+      "agent_id": "fa15725e-3ad2-4214-8d3b-21589f148510",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.08,
+      "error": null
+    },
+    {
+      "id": "dual-net-user",
+      "group": "dual",
+      "title": "net user",
+      "technique": "T1087",
+      "expected": null,
+      "severity": "MEDIUM",
+      "note": "",
+      "agent_id": "9eab7a1b-e5ab-4654-9f7c-61a00a7957fd",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.074,
+      "error": null
+    },
+    {
+      "id": "dual-psexec",
+      "group": "dual",
+      "title": "psexec amministrativo",
+      "technique": "T1021.002",
+      "expected": null,
+      "severity": null,
+      "note": "",
+      "agent_id": "309ce678-dea1-4aa9-a719-f4931a99c7f2",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.078,
+      "error": null
+    },
+    {
+      "id": "dual-7z",
+      "group": "dual",
+      "title": "7-Zip con password",
+      "technique": "T1560",
+      "expected": null,
+      "severity": null,
+      "note": "",
+      "agent_id": "d47e595e-0c64-4a70-9882-c68877b64822",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.067,
+      "error": null
+    },
+    {
+      "id": "dual-bitsadmin-update",
+      "group": "dual",
+      "title": "BITS update Microsoft",
+      "technique": "T1197",
+      "expected": null,
+      "severity": null,
+      "note": "",
+      "agent_id": "378c511a-f66b-4619-b166-26fd6ea6e53d",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.066,
+      "error": null
+    },
+    {
+      "id": "dual-python-socket",
+      "group": "dual",
+      "title": "python socket lookup",
+      "technique": "T1071",
+      "expected": null,
+      "severity": null,
+      "note": "",
+      "agent_id": "19c91184-60cf-4ef3-b6de-d06cc9ff460e",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.066,
+      "error": null
+    },
+    {
+      "id": "dual-schtasks-backup",
+      "group": "dual",
+      "title": "task di backup",
+      "technique": "T1053.005",
+      "expected": null,
+      "severity": null,
+      "note": "",
+      "agent_id": "8ab48f77-5167-46d0-a640-e027eb26463f",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.062,
+      "error": null
+    },
+    {
+      "id": "dual-run-installer",
+      "group": "dual",
+      "title": "installer scrive Run key",
+      "technique": "T1547.001",
+      "expected": null,
+      "severity": null,
+      "note": "",
+      "agent_id": "590b85d1-e224-4fa6-9215-10373904aca0",
+      "send_status": 200,
+      "send_body": "{\"status\":\"ok\"}",
+      "send_latency_s": 0.062,
+      "error": null
+    }
+  ],
+  "dual_use": [
+    {
+      "id": "dual-whoami-all",
+      "title": "whoami /all",
+      "alerts": [
+        {
+          "severity": "MEDIUM",
+          "rules": [
+            "AEGIS-S018"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dual-net-user",
+      "title": "net user",
+      "alerts": [
+        {
+          "severity": "MEDIUM",
+          "rules": [
+            "AEGIS-S018"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dual-psexec",
+      "title": "psexec amministrativo",
+      "alerts": [
+        {
+          "severity": "CRITICAL",
+          "rules": [
+            "AEGIS-S001"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dual-7z",
+      "title": "7-Zip con password",
+      "alerts": []
+    },
+    {
+      "id": "dual-bitsadmin-update",
+      "title": "BITS update Microsoft",
+      "alerts": []
+    },
+    {
+      "id": "dual-python-socket",
+      "title": "python socket lookup",
+      "alerts": []
+    },
+    {
+      "id": "dual-schtasks-backup",
+      "title": "task di backup",
+      "alerts": [
+        {
+          "severity": "HIGH",
+          "rules": [
+            "AEGIS-S017"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dual-run-installer",
+      "title": "installer scrive Run key",
+      "alerts": [
+        {
+          "severity": "HIGH",
+          "rules": [
+            "AEGIS-S016"
+          ]
+        }
+      ]
+    }
+  ],
+  "telemetry": {
+    "heartbeat": 200,
+    "duplicate": {
+      "first": 200,
+      "second": 200,
+      "status": "duplicate",
+      "rows": "1"
+    },
+    "missing_event_type": 422,
+    "bad_secret": 401,
+    "long_command_line": 200,
+    "processes_600": {
+      "status": 200,
+      "stored": "500"
+    },
+    "nul_byte": 200,
+    "unknown_agent": 401
+  },
+  "resolvers": {
+    "created": 585,
+    "resolve": {
+      "status": 200,
+      "muted_s": 604800,
+      "killed": true
+    },
+    "muted_after_resolve": {
+      "before": 1,
+      "after": 1
+    },
+    "reopen": {
+      "before": 1,
+      "after": 2
+    },
+    "resolve_all": {
+      "resolved": 86,
+      "muted": 86,
+      "second": 0
+    },
+    "viewer_resolve_all": 403,
+    "viewer_delete_all": 403
+  },
+  "kraken": {
+    "health": 200,
+    "ingest": {
+      "ssh": {
+        "status": 201,
+        "session": "sim-ssh-20261123T173125Z"
+      },
+      "http": {
+        "status": 201,
+        "session": "sim-http-20261123T173125Z"
+      },
+      "ftp": {
+        "status": 201,
+        "session": "sim-ftp-20261123T173125Z"
+      },
+      "telnet": {
+        "status": 201,
+        "session": "sim-telnet-20261123T173125Z"
+      },
+      "smb": {
+        "status": 201,
+        "session": "sim-smb-20261123T173125Z"
+      },
+      "rdp": {
+        "status": 201,
+        "session": "sim-rdp-20261123T173125Z"
+      }
+    },
+    "duplicate_session": {
+      "status": 201,
+      "rows": "301"
+    },
+    "bad_key": 403,
+    "aegis": {
+      "sessions_delta": 6,
+      "incidents_delta": 6
+    },
+    "outbox": {
+      "sent": "307",
+      "pending": "0"
+    },
+    "alert_row": "600|HIGH|RDP",
+    "resolve_alert": 200,
+    "secret_leak_rows": "0"
+  },
+  "soak": {
+    "agents": 10,
+    "duration_s": 120.1,
+    "requests": 16301,
+    "accepted": 16301,
+    "duplicates": 0,
+    "errors": 0,
+    "rps": 135.69,
+    "p50_ms": 70.6,
+    "p95_ms": 101.4,
+    "p99_ms": 124.9,
+    "events_lost_delta": null
+  },
+  "finished_at": "2026-11-23T17:44:16.055807+00:00",
+  "elapsed_s": 770.8,
+  "checks": [
+    {
+      "name": "tutti i casi inviati con 200",
+      "ok": true,
+      "detail": "esempi=[]"
+    },
+    {
+      "name": "heartbeat 200",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "event_id duplicato riconosciuto",
+      "ok": true,
+      "detail": "200 status=duplicate"
+    },
+    {
+      "name": "payload senza event_type rifiutato 422",
+      "ok": true,
+      "detail": "422"
+    },
+    {
+      "name": "segreto agente errato rifiutato",
+      "ok": true,
+      "detail": "401"
+    },
+    {
+      "name": "command_line oltre il limite troncata, non 422",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "600 processi accettati (lista troncata, non 422)",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "lista processi troncata a 500 nel DB",
+      "ok": true,
+      "detail": "righe=500"
+    },
+    {
+      "name": "NUL nella command line non rompe la scrittura",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "agente sconosciuto rifiutato",
+      "ok": true,
+      "detail": "401"
+    },
+    {
+      "name": "alert presente tra i non risolti",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "PATCH resolve 200",
+      "ok": true,
+      "detail": "{\"id\":585,\"agent_id\":\"334e052f-b39a-4243-aa07-0472ed283292\",\"agent_hostname\":null,\"timestamp\":\"2026-11-23T17:36:18.97130"
+    },
+    {
+      "name": "resolve riporta il muting attivo",
+      "ok": true,
+      "detail": "triage_muted_seconds=604800"
+    },
+    {
+      "name": "resolve imposta is_resolved",
+      "ok": true,
+      "detail": "True"
+    },
+    {
+      "name": "risolto fuori dai non risolti",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "risolto presente nei risolti",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "dettaglio coerente con il resolve",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "detection identica silenziata dopo il resolve",
+      "ok": true,
+      "detail": "1->1"
+    },
+    {
+      "name": "riapertura alert 200",
+      "ok": true,
+      "detail": "{\"id\":585,\"agent_id\":\"334e052f-b39a-4243-aa07-0472ed283292\",\"agent_hostname\":null,\"timestamp\":\"2026-11-23T17:36:18.97130"
+    },
+    {
+      "name": "dopo la riapertura la detection torna visibile",
+      "ok": true,
+      "detail": "1->2"
+    },
+    {
+      "name": "resolve-all 200",
+      "ok": true,
+      "detail": "{\"resolved\":86,\"triage_muted\":86,\"detail\":\"Resolved 86 alerts; similar detections muted ~7d for triaged patterns\"}"
+    },
+    {
+      "name": "resolve-all idempotente (seconda chiamata 0)",
+      "ok": true,
+      "detail": "second=0"
+    },
+    {
+      "name": "viewer non puo' fare resolve-all (403)",
+      "ok": true,
+      "detail": "403"
+    },
+    {
+      "name": "viewer non puo' cancellare gli alert (403)",
+      "ok": true,
+      "detail": "403"
+    },
+    {
+      "name": "Kraken health 200",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "Kraken ingest ssh 201",
+      "ok": true,
+      "detail": "201"
+    },
+    {
+      "name": "Kraken ingest http 201",
+      "ok": true,
+      "detail": "201"
+    },
+    {
+      "name": "Kraken ingest ftp 201",
+      "ok": true,
+      "detail": "201"
+    },
+    {
+      "name": "Kraken ingest telnet 201",
+      "ok": true,
+      "detail": "201"
+    },
+    {
+      "name": "Kraken ingest smb 201",
+      "ok": true,
+      "detail": "201"
+    },
+    {
+      "name": "Kraken ingest rdp 201",
+      "ok": true,
+      "detail": "201"
+    },
+    {
+      "name": "Kraken retry idempotente: nessuna seconda riga",
+      "ok": true,
+      "detail": "status=201 rows=301->301"
+    },
+    {
+      "name": "Kraken rifiuta chiave interna errata",
+      "ok": true,
+      "detail": "403"
+    },
+    {
+      "name": "Aegis vede le sessioni deception Kraken",
+      "ok": true,
+      "detail": "+6"
+    },
+    {
+      "name": "Aegis crea l'incidente Kraken",
+      "ok": true,
+      "detail": "+6"
+    },
+    {
+      "name": "outbox Kraken consegnata",
+      "ok": true,
+      "detail": "pending=0"
+    },
+    {
+      "name": "alert Kraken risolvibile dalla dashboard Aegis",
+      "ok": true,
+      "detail": "{\"id\":600,\"agent_id\":\"02c99b74-b95e-4b2a-8ac2-b68180df0d16\",\"agent_hostname\":null,\"timestamp\":\"2026-11-23T17:40:17.88742"
+    },
+    {
+      "name": "nessuna password in chiaro negli incidenti Aegis",
+      "ok": true,
+      "detail": "rows=0"
+    },
+    {
+      "name": "soak senza errori HTTP",
+      "ok": true,
+      "detail": "errors=0"
+    },
+    {
+      "name": "soak senza eventi persi",
+      "ok": true,
+      "detail": "lost=None"
+    }
+  ]
+}

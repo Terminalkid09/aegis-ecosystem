@@ -168,7 +168,7 @@ suppressed **by name** (`wix msi validate -sice ICE61 <msi>`) because
 version. The warning is expected, the downgrade is intentional, and every other
 ICE stays enabled; CI runs the same command for the three editions.
 
-**MSIX:** not emitted as the service package.**MSIX:** not emitted as the service package. MSIX is an application packaging
+**MSIX:** not emitted as the service package. MSIX is an application packaging
 format and does not register a Windows service like `AegisAgent`; using it here
 would produce a package that cannot provide the required background service.
 The supported Windows installation contracts are the endpoint MSI and the server
@@ -350,6 +350,29 @@ The units use `Wants=docker.service`, not `Requires`, so Docker Desktop WSL can
 start them when the CLI/socket is available; a normal Linux server still orders
 Docker Engine first. Removal stops and disables the unit but keeps
 `/etc/aegis/*.env` and the Docker volumes; back them up before a purge.
+
+### MSI and deb: what still differs
+
+The payloads are the same Compose source and the same operators use the same
+`ak` commands, but the packages are not interchangeable. The remaining
+differences are deliberate and must be stated in a pilot:
+
+| Area | Debian/Ubuntu package | Windows server MSI |
+|---|---|---|
+| Signing in this repo's default flow | Self-signed pilot GPG key plus SHA-256; production needs the operator key | Test-signed Authenticode (`-TestSign`) plus SHA-256; production needs the operator PFX/thumbprint |
+| Boot before login | Yes: systemd unit enabled at install | No: Docker Desktop is per-user, `ak start` after logon (or a logon task) |
+| Container runtime | Docker Engine owned by systemd | Docker Desktop (WSL2 VM) owned by the user session |
+| Update mechanism | `apt`/`dpkg` with `--force-confdef --force-confold` | `msiexec /qn` on the edition MSI |
+| Uninstall | Removes the unit and binaries, keeps env files and volumes | Removes the service/binaries, keeps `C:\ProgramData\Aegis` unless the operator deletes it |
+| Privileges | root for lifecycle commands | Administrator for lifecycle commands |
+| Dashboard port fallback | Package picks a free port in 3000-3099 | Same behaviour in `ak start`/`configure-server.ps1` |
+| Headless CLI | `/usr/local/bin/ak` via update-alternatives | `ak.cmd` on the machine `PATH` |
+
+The MSI cannot honestly provide pre-login availability with Docker Desktop, and
+the pilot packages are not publicly trusted until the operator supplies the
+Authenticode certificate and the GPG key. Everything else (Compose payload,
+dashboard, wizard, env generation, ACLs, `ak` command matrix) is at parity and is
+tested by the Windows release run and by CI.
 
 The Windows server path is Docker Desktop, delivered by the three server MSIs.
 On 2026-11-22 the same Compose stack was verified healthy on Docker Desktop:

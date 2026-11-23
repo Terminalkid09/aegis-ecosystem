@@ -243,6 +243,17 @@ async def resolve_alert(
             )
         except Exception:
             pass
+        # Riaprire deve rendere di nuovo visibile la detection. Il muting di
+        # triage non e' l'unico blocco: l'ingest tiene un cooldown di un'ora per
+        # (agente, gravita', processo) contro le tempeste di alert. Senza
+        # rimuovere anche quello, "riaperto" restava senza nuovi alert per
+        # un'ora (verificato end-to-end: 1 -> 1 dopo il reopen).
+        try:
+            await telemetry_service.redis_client.delete(
+                f"sup:alert:{alert.agent_id}:static:{alert.severity}:{alert.process_name}"
+            )
+        except Exception:
+            pass
         muted_seconds = 0
 
     was_resolved = alert.is_resolved

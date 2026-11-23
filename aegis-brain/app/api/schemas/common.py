@@ -219,6 +219,17 @@ class EventSchema(BaseModel):
         truncated: list[str] = []
         stripped = False
         for key, value in data.items():
+            # 0) Liste oltre il limite dichiarato (processes, loaded_modules,
+            #    anomalies): si troncano come le stringhe. Prima il limite
+            #    scattava in validazione e un sensore che riportava 600 processi
+            #    riceveva 422: l'evento intero era perso, non solo l'eccesso.
+            if isinstance(value, list):
+                entry = limits.get(key)
+                if entry is not None and len(value) > entry[1]:
+                    clean[key] = value[: entry[1]]
+                    if entry[0] != "quality":
+                        truncated.append(entry[0])
+                continue
             # 1) Caratteri di controllo non memorizzabili (NUL): si tolgono su
             #    OGNI stringa di primo livello, anche su un campo senza
             #    max_length, perché il problema non è la lunghezza ma il byte.
