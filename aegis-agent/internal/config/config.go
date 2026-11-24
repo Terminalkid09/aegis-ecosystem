@@ -429,8 +429,23 @@ func (c *Config) deriveURLs() {
 		c.ServerURL = originURL(c.HeartbeatURL)
 	}
 
+	// The MSI, the deb and Deployment Manager provide AEGIS_BRAIN_URL only: an
+	// origin (https://host) or an API base (https://host/api/v1). Deriving the
+	// rest from HeartbeatURL alone left every endpoint empty in that case, so a
+	// properly configured endpoint refused to start with "heartbeat non
+	// configurato". Fall back to the API base the Brain actually serves.
+	if base == "" && c.ServerURL != "" {
+		if api := apiBaseFromServerURL(c.ServerURL); api != "" {
+			base = api
+			if c.HeartbeatURL == "" {
+				c.HeartbeatURL = base + "/heartbeat"
+			}
+		}
+	}
 	if c.RegisterURL == "" && c.ServerURL != "" {
-		c.RegisterURL = strings.TrimRight(c.ServerURL, "/") + "/api/v1/register"
+		if api := apiBaseFromServerURL(c.ServerURL); api != "" {
+			c.RegisterURL = api + "/register"
+		}
 	}
 	if base != "" {
 		if c.UpdateURL == "" {

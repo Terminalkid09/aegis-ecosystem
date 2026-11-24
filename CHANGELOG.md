@@ -12,6 +12,32 @@ the tag audit and the release policy.
 > after the batch tags: the full Kraken vertical ships with the hardening
 > fixes, and expansion moves to 4.2+.
 
+## [Unreleased]
+
+### Fixed
+
+- `aegis-agent` derives the heartbeat, update, command, ack and report
+  endpoints from `AEGIS_BRAIN_URL` / `BRAIN_URL` when only the server URL is
+  configured. Previously every endpoint stayed empty and a correctly configured
+  endpoint refused to start with `endpoint heartbeat non configurato`; the
+  register URL no longer doubles the `/api/v1` prefix.
+- `aegis-agent -check` is a real pre-flight check: it exits 1 for a missing
+  server URL, a malformed endpoint or an explicit `-config` that does not
+  exist, and only warns when the enrollment token has not been provisioned yet.
+- `docker-compose.ha.yml` merges with the base file again. The overlay set
+  `deploy.resources` while the base kept the legacy `cpus`, `mem_limit` and
+  `pids_limit` keys, which Compose rejects with `can't set distinct values`; the
+  overlay now resets those keys before applying the HA limits.
+
+### CI
+
+- The lint job validates every compose overlay (`prod`, `ha`, `mtls`,
+  `observability`, `kraken-honeypot`) with `docker compose config`.
+- A `version_guard` job runs before the packaging jobs on a `v*` tag and fails
+  when the tag does not match the version literals embedded in
+  `packaging.yml`, so a mislabelled release cannot publish artifacts for the
+  previous version.
+
 ## [4.3.0] - 2026-11-23
 
 ### Packaging server e persistenza (2026-11-22)

@@ -12,6 +12,12 @@
 services:
   aegis-brain:
     container_name: !reset null
+    # The base file still sets the legacy service-level resource keys; Compose
+    # refuses to merge them with deploy.resources on the same service, so the
+    # override clears them explicitly and lets the deploy block own the limits.
+    cpus: !reset null
+    mem_limit: !reset null
+    pids_limit: !reset null
     deploy:
       resources:
         limits:
@@ -22,6 +28,9 @@ services:
 
   aegis-link:
     container_name: !reset null
+    cpus: !reset null
+    mem_limit: !reset null
+    pids_limit: !reset null
     deploy:
       resources:
         limits:
@@ -32,6 +41,9 @@ services:
 
   aegis-frontend:
     container_name: !reset null
+    cpus: !reset null
+    mem_limit: !reset null
+    pids_limit: !reset null
     deploy:
       resources:
         limits:

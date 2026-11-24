@@ -79,6 +79,19 @@ func runAgent(ctx context.Context, serviceMode bool) (err error) {
 		return nil
 	}
 	if flagCheck {
+		// -check is the pre-flight an operator runs before enrollment. It used
+		// to print the values and exit 0 even with a mistyped -config path, an
+		// empty server URL and no token, so it could never gate anything. It now
+		// fails exactly where the real start would fail.
+		if flagConfig != "" && !fileExists(cfg.ConfigFile) {
+			return fmt.Errorf("configurazione: config %s non trovata", cfg.ConfigFile)
+		}
+		if err := cfg.ValidateNetwork(); err != nil {
+			return fmt.Errorf("endpoint: %w", err)
+		}
+		if cfg.EndpointEnabled() && !fileExists(cfg.TokenFile) {
+			fmt.Fprintf(os.Stderr, "avviso: token assente in %s, l'agente si registra al primo avvio\n", cfg.TokenFile)
+		}
 		fmt.Printf("profile=%s mode=%s sensor=%t endpoint=%t version=%s home=%s server=%s token=%s\n",
 			cfg.Profile, cfg.Mode, cfg.SensorEnabled(), cfg.EndpointEnabled(),
 			cfg.Version, cfg.AgentHome, cfg.ServerURL, cfg.TokenFile)
