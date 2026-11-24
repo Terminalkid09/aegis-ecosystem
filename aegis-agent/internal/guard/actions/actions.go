@@ -107,7 +107,7 @@ func (e *Executor) Execute(ctx context.Context, command transport.Command) (Resu
 	case commands.UpdateAgent:
 		return Result{}, ErrAgentHandled
 	default:
-		return Result{}, fmt.Errorf("comando non supportato: %s", command.Command)
+		return Result{}, fmt.Errorf("unsupported command: %s", command.Command)
 	}
 }
 
@@ -120,7 +120,7 @@ func (e *Executor) killProcess(command transport.Command) (Result, error) {
 	}
 	p, err := process.NewProcess(int32(command.PID))
 	if err != nil {
-		return Result{}, fmt.Errorf("KILL_PROCESS: processo %d non trovato: %w", command.PID, err)
+		return Result{}, fmt.Errorf("KILL_PROCESS: process %d not found: %w", command.PID, err)
 	}
 	if err := p.Kill(); err != nil {
 		return Result{}, fmt.Errorf("KILL_PROCESS: %w", err)
@@ -143,7 +143,7 @@ func (e *Executor) killProcessTree(ctx context.Context, command transport.Comman
 	}
 	p, err := process.NewProcess(int32(command.PID))
 	if err != nil {
-		return Result{}, fmt.Errorf("KILL_PROCESS_TREE: processo %d non trovato: %w", command.PID, err)
+		return Result{}, fmt.Errorf("KILL_PROCESS_TREE: process %d not found: %w", command.PID, err)
 	}
 	children, _ := p.Children()
 	for _, child := range children {
@@ -158,11 +158,11 @@ func (e *Executor) killProcessTree(ctx context.Context, command transport.Comman
 func (e *Executor) blockIP(ctx context.Context, command transport.Command, temporal bool, duration int) (Result, error) {
 	ip := strings.TrimSpace(command.IP)
 	if !commands.IsIPLiteral(ip) {
-		return Result{}, fmt.Errorf("BLOCK_IP: IP non valido %q", ip)
+		return Result{}, fmt.Errorf("BLOCK_IP: invalid IP %q", ip)
 	}
 	brainHost := commands.ExtractBrainHost(e.BrainURL)
 	if brainHost != "" && strings.EqualFold(brainHost, ip) {
-		return Result{}, fmt.Errorf("BLOCK_IP: rifiuto di bloccare il Brain %s", brainHost)
+		return Result{}, fmt.Errorf("BLOCK_IP: refusing to block the Brain %s", brainHost)
 	}
 	var name string
 	if runtime.GOOS == "windows" {
@@ -196,7 +196,7 @@ func (e *Executor) blockIP(ctx context.Context, command transport.Command, tempo
 	}
 	detail := fmt.Sprintf("IP %s bloccato", ip)
 	if temporal {
-		detail += fmt.Sprintf(" per %ds", duration)
+		detail += fmt.Sprintf(" for %ds", duration)
 	}
 	return Result{Details: detail}, nil
 }
@@ -214,11 +214,11 @@ func (e *Executor) quarantine(command transport.Command) (Result, error) {
 	}
 	p, err := process.NewProcess(int32(command.PID))
 	if err != nil {
-		return Result{}, fmt.Errorf("QUARANTINE_BINARY: processo non trovato: %w", err)
+		return Result{}, fmt.Errorf("QUARANTINE_BINARY: process not found: %w", err)
 	}
 	exe, err := p.Exe()
 	if err != nil || strings.TrimSpace(exe) == "" {
-		return Result{}, fmt.Errorf("QUARANTINE_BINARY: path non risolvibile")
+		return Result{}, fmt.Errorf("QUARANTINE_BINARY: path cannot be resolved")
 	}
 	if err := os.MkdirAll(e.QuarantineDir, 0o700); err != nil {
 		return Result{}, fmt.Errorf("QUARANTINE_BINARY: %w", err)
@@ -249,7 +249,7 @@ func (e *Executor) removePersistence(ctx context.Context, command transport.Comm
 		return Result{}, fmt.Errorf("REMOVE_PERSISTENCE: process_name mancante")
 	}
 	if runtime.GOOS != "windows" {
-		return Result{}, fmt.Errorf("REMOVE_PERSISTENCE: non supportato su %s", runtime.GOOS)
+		return Result{}, fmt.Errorf("REMOVE_PERSISTENCE: not supported on %s", runtime.GOOS)
 	}
 	needle := strings.ToLower(command.ProcessName)
 	removed := 0
@@ -290,15 +290,15 @@ func (e *Executor) removePersistence(ctx context.Context, command transport.Comm
 		}
 	}
 	if removed == 0 {
-		return Result{}, fmt.Errorf("REMOVE_PERSISTENCE: nessuna persistenza rimossa per %s", command.ProcessName)
+		return Result{}, fmt.Errorf("REMOVE_PERSISTENCE: no persistence entry removed for %s", command.ProcessName)
 	}
-	return Result{Details: fmt.Sprintf("%d voci di persistenza rimosse per %s", removed, command.ProcessName)}, nil
+	return Result{Details: fmt.Sprintf("%d persistence entries removed for %s", removed, command.ProcessName)}, nil
 }
 
 func (e *Executor) dnsSinkhole(command transport.Command) (Result, error) {
 	domain := strings.ToLower(strings.TrimSpace(command.Domain))
 	if !commands.IsDomainName(domain) {
-		return Result{}, fmt.Errorf("DNS_SINKHOLE: dominio non valido %q", domain)
+		return Result{}, fmt.Errorf("DNS_SINKHOLE: invalid domain %q", domain)
 	}
 	hostsPath := e.HostsFile
 	if hostsPath == "" {
@@ -306,7 +306,7 @@ func (e *Executor) dnsSinkhole(command transport.Command) (Result, error) {
 	}
 	data, err := os.ReadFile(hostsPath)
 	if err != nil {
-		return Result{}, fmt.Errorf("DNS_SINKHOLE: hosts non leggibile: %w", err)
+		return Result{}, fmt.Errorf("DNS_SINKHOLE: hosts file is not readable: %w", err)
 	}
 	entry := "0.0.0.0 " + domain
 	for _, line := range strings.Split(string(data), "\n") {
@@ -316,7 +316,7 @@ func (e *Executor) dnsSinkhole(command transport.Command) (Result, error) {
 	}
 	file, err := os.OpenFile(hostsPath, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		return Result{}, fmt.Errorf("DNS_SINKHOLE: hosts non scrivibile: %w", err)
+		return Result{}, fmt.Errorf("DNS_SINKHOLE: hosts file is not writable: %w", err)
 	}
 	defer file.Close()
 	if _, err := fmt.Fprintf(file, "\n# Aegis block - %s\n%s\n", e.Now().UTC().Format(time.RFC3339), entry); err != nil {
@@ -331,7 +331,7 @@ func (e *Executor) collectIOC(ctx context.Context, command transport.Command) (R
 	}
 	p, err := process.NewProcess(int32(command.PID))
 	if err != nil {
-		return Result{}, fmt.Errorf("COLLECT_IOC: processo non trovato: %w", err)
+		return Result{}, fmt.Errorf("COLLECT_IOC: process not found: %w", err)
 	}
 	exe, _ := p.Exe()
 	cmdline, _ := p.Cmdline()
@@ -361,7 +361,7 @@ func (e *Executor) verify(command transport.Command) (Result, error) {
 	}
 	_, err := process.NewProcess(int32(command.PID))
 	if err != nil {
-		return Result{Details: fmt.Sprintf("PID %d non attivo", command.PID)}, nil
+		return Result{Details: fmt.Sprintf("PID %d is not running", command.PID)}, nil
 	}
 	return Result{Details: fmt.Sprintf("PID %d attivo", command.PID)}, nil
 }
@@ -393,7 +393,7 @@ func (e *Executor) isolate(ctx context.Context, isolate bool) (Result, error) {
 
 func (e *Executor) setFIM(command transport.Command) (Result, error) {
 	if e.FIM == nil {
-		return Result{}, fmt.Errorf("FIM_SET_WATCH: monitor non inizializzato")
+		return Result{}, fmt.Errorf("FIM_SET_WATCH: monitor not initialized")
 	}
 	recursive := true
 	if command.Recursive != nil {
@@ -412,7 +412,7 @@ func (e *Executor) setFIM(command transport.Command) (Result, error) {
 
 func (e *Executor) scanYara(ctx context.Context, command transport.Command) (Result, error) {
 	if e.Yara == nil {
-		return Result{}, fmt.Errorf("YARA_SCAN: scanner non configurato")
+		return Result{}, fmt.Errorf("YARA_SCAN: scanner is not configured")
 	}
 	matches, err := e.Yara.Scan(ctx, command.RulesYARA, command.Targets)
 	if err != nil {

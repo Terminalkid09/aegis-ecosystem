@@ -16,5 +16,5 @@ func (unsupportedCollector) Collect(ctx context.Context) (Snapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return Snapshot{}, err
 	}
-	return Snapshot{}, fmt.Errorf("collector non supportato su %s", runtime.GOOS)
+	return Snapshot{}, fmt.Errorf("collector not supported on %s", runtime.GOOS)
 }
