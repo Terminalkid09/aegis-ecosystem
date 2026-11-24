@@ -1,64 +1,64 @@
-# Runbook — agente endpoint compromesso
+# Runbook — compromised endpoint agent
 
-**Obiettivo:** impedire che un `agent_id` compromesso riceva comandi,
-inietti telemetria o venga usato per re-enrollare un altro host.
+**Objective:** prevent a compromised `agent_id` from receiving commands,
+injecting telemetry or being used to re-enroll another host.
 
-## 1. Conferma e contiene
+## 1. Confirm and contain
 
-1. annota `agent_id`, hostname, ultimo `last_seen`, versione e sito;
-2. metti l'host in isolamento di rete dal firewall o dal playbook
-   `isolate_host`, se disponibile;
-3. revoca il certificato device e il device secret dall'interfaccia o dalla
-   CLI amministrativa;
-4. disabilita l'account locale o il servizio `AegisGuard` / `AegisNodeTrace`
-   sull'host;
-5. non riavviare l'agente finché non hai copiato i suoi log e il suo spool.
+1. record the `agent_id`, hostname, last `last_seen`, version and site;
+2. put the host into network isolation through the firewall or the
+   `isolate_host` playbook, if available;
+3. revoke the device certificate and the device secret from the UI or the
+   administrative CLI;
+4. disable the local account or the `AegisGuard` / `AegisNodeTrace` service on
+   the host;
+5. do not restart the agent until you have copied its logs and its spool.
 
-Comandi utili sul Brain:
+Useful commands on the Brain:
 
 ```bash
 docker exec aegis-brain python -m app.admin list
 docker exec aegis-brain python -m app.admin set-role <email> analyst
 ```
 
-La revoca PKI e la revoca dell'agente sono operazioni distinte: esegui
-entrambe. La revoca dell'account non sostituisce quella del device.
+PKI revocation and agent revocation are separate operations: perform both.
+Revoking the account does not replace revoking the device.
 
-## 2. Evidenza
+## 2. Evidence
 
-Prima di cancellare l'host o il container, conserva:
+Before deleting the host or the container, preserve:
 
-- `journalctl -u AegisGuard` / `journalctl -u AegisNodeTrace` (Linux) o
-  Event Viewer (Windows);
-- `secret.json`, `token.json`, `device.crt` e lo spool locale, con hash e
-  permessi, su un supporto cifrato;
-- gli ultimi comandi ricevuti e gli ack dal DB/audit;
-- l'elenco delle regole YARA e delle watchlist FIM inviate all'agente.
+- `journalctl -u AegisGuard` / `journalctl -u AegisNodeTrace` (Linux) or Event
+  Viewer (Windows);
+- `secret.json`, `token.json`, `device.crt` and the local spool, with hashes and
+  permissions, on encrypted media;
+- the last commands received and the acks from the DB/audit log;
+- the list of YARA rules and FIM watchlists sent to the agent.
 
-Non includere il device secret nei ticket. Se devi correlare un secret, usa
-l'hash o l'ID della credenziale.
+Do not include the device secret in tickets. If you must correlate a secret,
+use its hash or the credential ID.
 
-## 3. Analisi
+## 3. Analysis
 
-- Cerca eventi di re-enroll per lo stesso hostname/os da IP diversi.
-- Verifica se il token di enroll era monouso o statico.
-- Confronta i comandi in coda con quelli attesi dal playbook.
-- Controlla se l'agente ha inviato eventi con `event_id` duplicati o
-  sequenze fuori ordine.
-- Se il secret è finito in un log o in un crash dump, consideralo noto
-  all'attaccante e ruota tutta la catena di enroll.
+- Look for re-enrollment events for the same hostname/OS from different IPs.
+- Check whether the enrollment token was single-use or static.
+- Compare the queued commands with the ones expected from the playbook.
+- Check whether the agent sent events with duplicate `event_id` values or
+  out-of-order sequences.
+- If the secret leaked into a log or a crash dump, treat it as known to the
+  attacker and rotate the whole enrollment chain.
 
-## 4. Ripristino
+## 4. Recovery
 
-1. ricostruisci l'host da immagine pulita, non ripararlo in place;
-2. installa l'agente con un token di enroll monouso e un nuovo device secret;
-3. verifica che il vecchio `agent_id` non possa più autenticarsi;
-4. esegui uno smoke di telemetria e un comando non distruttivo;
-5. riapri l'host in rete solo dopo il triage.
+1. rebuild the host from a clean image, do not repair it in place;
+2. install the agent with a single-use enrollment token and a new device
+   secret;
+3. verify that the old `agent_id` can no longer authenticate;
+4. run a telemetry smoke test and a non-destructive command;
+5. only put the host back on the network after triage.
 
-## 5. Chiusura
+## 5. Closure
 
-Registra: causa, tempo di contenimento, comandi eseguiti, secret ruotati,
-impatto sui dati e verifica del ripristino. Apri un follow-up se la revoca
-richiede più di un'operazione manuale o se il vecchio agente continua a
-comparire nella flotta.
+Record: cause, containment time, commands executed, rotated secrets, data
+impact and recovery verification. Open a follow-up if revocation requires more
+than one manual operation or if the old agent keeps appearing in the fleet.

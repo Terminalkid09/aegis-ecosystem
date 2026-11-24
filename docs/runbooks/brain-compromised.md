@@ -1,20 +1,21 @@
-# Runbook — Aegis Brain compromesso
+# Runbook — compromised Aegis Brain
 
-**Obiettivo:** proteggere la PKI, i secret degli agenti, l'audit e il database
-quando il piano di controllo è sospetto. Il Brain non deve essere raggiungibile
-dagli agenti mentre viene analizzato.
+**Objective:** protect the PKI, the agent secrets, the audit log and the
+database when the control plane is suspect. The Brain must not be reachable by
+agents while it is being analysed.
 
-## 1. Isolamento immediato
+## 1. Immediate isolation
 
-1. togli il Brain dal bilanciatore/Caddy e blocca le porte `8000` e `443`
-   verso l'esterno;
-2. ferma i worker outbox e i consumer Redis per evitare comandi o ingestione
-   durante l'analisi;
-3. revoca gli access token attivi e ruota `JWT_SECRET`;
-4. ruota `AEGIS_API_KEY`, `AGENT_ENROLL_KEY` e i secret di integrazione;
-5. non cancellare il container: esporta prima il filesystem, i log e il DB.
+1. remove the Brain from the load balancer/Caddy and block ports `8000` and
+   `443` towards the outside;
+2. stop the outbox workers and the Redis consumers to prevent commands or
+   ingestion during the analysis;
+3. revoke active access tokens and rotate `JWT_SECRET`;
+4. rotate `AEGIS_API_KEY`, `AGENT_ENROLL_KEY` and the integration secrets;
+5. do not delete the container: export the filesystem, the logs and the DB
+   first.
 
-Comandi di contenimento (esempio Compose):
+Containment commands (Compose example):
 
 ```bash
 docker compose stop aegis-caddy aegis-brain
@@ -22,43 +23,41 @@ docker compose exec -T aegis-postgres pg_dump -U postgres aegis > evidence/aegis
 docker cp aegis-brain:/app/pki evidence/pki
 ```
 
-Se il socket Docker è raggiungibile dal processo Brain, considera l'host
-compromesso: non basta fermare il container.
+If the Docker socket is reachable from the Brain process, treat the host as
+compromised: stopping the container is not enough.
 
-## 2. Evidenza
+## 2. Evidence
 
-- audit log completo, con hash e timestamp;
-- `docker inspect` di Brain, Postgres e Redis;
-- configurazione effettiva senza valori dei secret (`env` filtrato);
-- dump DB e WAL, se disponibili;
-- log di accesso Caddy e log applicativi;
-- elenco dei certificati emessi e delle revoche.
+- the complete audit log, with hashes and timestamps;
+- `docker inspect` of Brain, Postgres and Redis;
+- the effective configuration without secret values (filtered `env`);
+- DB and WAL dumps, where available;
+- Caddy access logs and application logs;
+- the list of issued certificates and revocations.
 
-Non copiare `MASTER_KEY_B64`, `JWT_SECRET` o chiavi private nei ticket.
+Do not copy `MASTER_KEY_B64`, `JWT_SECRET` or private keys into tickets.
 
 ## 3. Triage
 
-- C'è stata una modifica di ruolo, una creazione utente o una revoca non
-  autorizzata?
-- Sono stati emessi certificati per agenti sconosciuti?
-- Le regole Sigma o le soppressioni sono state alterate?
-- Il database contiene tabelle o utenti nuovi?
-- Un comando `script` o un'azione di remediation è stato eseguito fuori
-  playbook?
-- I backup sono integri e precedenti alla compromissione?
+- Was there a role change, a user creation or an unauthorised revocation?
+- Were certificates issued to unknown agents?
+- Have the Sigma rules or the suppressions been altered?
+- Does the database contain new tables or users?
+- Was a `script` command or a remediation action executed outside a playbook?
+- Are the backups intact and older than the compromise?
 
-## 4. Ripristino
+## 4. Recovery
 
-1. ricostruisci Brain e Caddy da immagine pulita e digest noto;
-2. ripristina il DB da un backup verificato precedente alla compromissione;
-3. ripristina la PKI solo se la CA non è stata esposta; altrimenti emetti una
-   nuova CA e re-enrolla gli agenti;
-4. ruota tutti i secret e invalida le sessioni;
-5. verifica login, readiness, ingestione firmata e un alert di test;
-6. riapri il traffico in modo graduale e monitora gli errori.
+1. rebuild Brain and Caddy from a clean image with a known digest;
+2. restore the DB from a verified backup that predates the compromise;
+3. restore the PKI only if the CA was not exposed; otherwise issue a new CA and
+   re-enroll the agents;
+4. rotate all secrets and invalidate the sessions;
+5. verify login, readiness, signed ingestion and a test alert;
+6. reopen traffic gradually and monitor for errors.
 
-## 5. Chiusura
+## 5. Closure
 
-Registra l'intervallo di esposizione, i dati toccati, le revoche, il backup
-usato e la verifica. Se la CA è stata compromessa, la chiusura include la
-migrazione di tutti gli agenti alla nuova trust chain.
+Record the exposure window, the data touched, the revocations, the backup used
+and the verification. If the CA was compromised, closure includes migrating
+every agent to the new trust chain.
