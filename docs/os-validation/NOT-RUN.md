@@ -1,20 +1,20 @@
-# OS validation — stato esecuzione
+# OS validation — execution status
 
-Data report: 2026-09-13.
+Report date: 2026-09-13.
 
-## Coperto in CI (job `os_compat`, ubuntu-latest + windows-latest)
-- Event contract eBPF, replay detection 3 split, NodeTrace unit, Guard unit
-  (test OS-specifici skippati fuori piattaforma).
-- Preflight: `os-preflight.ps1` 7/7 PASS su host dev Windows (non e' validazione).
+## Covered in CI (job `os_compat`, ubuntu-latest + windows-latest)
+- eBPF event contract, replay detection on 3 splits, NodeTrace unit tests, Guard
+  unit tests (OS-specific tests skipped off-platform).
+- Preflight: `os-preflight.ps1` 7/7 PASS on a Windows dev host (not validation).
 
-## NOT-RUN (richiede macchine dedicate)
-| OS | Preflight | Install | Smoke API | 24h telemetria | Stato |
+## NOT-RUN (requires dedicated machines)
+| OS | Preflight | Install | API smoke | 24h telemetry | Status |
 |---|---|---|---|---|---|
-| Windows 11 (pulita) | not-run | not-run | not-run | not-run | NOT-RUN |
+| Windows 11 (clean) | not-run | not-run | not-run | not-run | NOT-RUN |
 | Windows Server 2022 | not-run | not-run | not-run | not-run | NOT-RUN |
-| Ubuntu 22.04+ (pulita) | not-run | not-run | not-run | not-run | NOT-RUN |
+| Ubuntu 22.04+ (clean) | not-run | not-run | not-run | not-run | NOT-RUN |
 | Debian 12+ | not-run | not-run | not-run | not-run | NOT-RUN |
 | RHEL 9+ | not-run | not-run | not-run | not-run | NOT-RUN |
 
-Per `pilot-tested`: 1 run completo documentato su Windows 11 + 1 su Ubuntu 22.04
-secondo `README.md`. Per `production-ready`: tutti e 5 gli OS + HA + scala reale.
+For `pilot-tested`: 1 documented full run on Windows 11 + 1 on Ubuntu 22.04
+according to `README.md`. For `production-ready`: all 5 OSes + HA + real scale.
