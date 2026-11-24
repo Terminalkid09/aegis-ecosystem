@@ -1,9 +1,10 @@
 # `ak` operator CLI
 
 Status: **4.3.0 pilot**. `ak` is the supported command-line interface for the
-packaged Aegis and Kraken **server** stacks. It is not a desktop launcher. The
-Windows endpoint MSI does not install it; the separate Windows server MSI does,
-as `C:\Program Files\Aegis Server\bin\ak.cmd` on the machine `PATH`.
+packaged Aegis and Kraken **server** stacks. It is not a desktop launcher and it
+does not manage endpoint agents. No endpoint package (deb, rpm, ipk or MSI)
+installs it; the separate Windows server MSI puts `ak.cmd` on the machine
+`PATH` as `C:\Program Files\Aegis Server\bin\ak.cmd`.
 
 ## What installs it
 
@@ -17,6 +18,12 @@ as `C:\Program Files\Aegis Server\bin\ak.cmd` on the machine `PATH`.
 | `kraken-server-<version>-x64.msi` | Yes, on Windows | Kraken only through Docker Desktop |
 | `aegis-suite-<version>-x64.msi` | Yes, on Windows | Aegis and Kraken together through Docker Desktop |
 | `aegis-agent-<version>-x64.msi` | No | None: this is the endpoint agent |
+| `aegis-agent_<version>_amd64.deb` | No | None: this is the endpoint agent |
+
+The endpoint agent also ships as `aegis-agent-<version>-1.x86_64.rpm` and
+`aegis-agent_<version>_x86_64.ipk`. None of those four packages installs `ak`
+and `ak` never manages them; [PACKAGING.md](PACKAGING.md) documents the endpoint
+install, the enrollment token and the kernel requirement.
 
 The server packages install a private copy under
 `/usr/local/lib/aegis/ak-aegis` or `ak-kraken`. `update-alternatives` exposes
@@ -156,11 +163,11 @@ that name is lab-only and uses Caddy's internal CA.
 | `ak status [component]` | No | systemd active/enabled state. |
 | `ak ps [component]` | No* | Compose containers, health and ports. |
 | `ak logs [component] [-f] [--tail N]` | No* | Container logs; default tail 100. |
-| `ak doctor` | No* | Read-only checks for prerequisites, files and memory budget. || `ak doctor` | No* | Read-only prerequisite and file checks. |
+| `ak doctor` | No* | Read-only checks for prerequisites, files and memory budget. |
 | `ak url [component]` | No | Public and local URLs from the env files. |
 | `ak configure [options]` | Yes | Change hostname, email, public URL or local port. |
 | `ak update [options]` | Yes* | Install a selected release, update the CLI and restart services. `--check`/`--dry-run` are read-only. |
-| `sudo ak start [component] [--wait]` | Yes | Start through systemd; `--wait` blocks until containers are running. || `sudo ak start [component]` | Yes | Start through systemd; first start builds images. |
+| `sudo ak start [component] [--wait]` | Yes | Start through systemd; first start builds images, `--wait` blocks until containers are running. |
 | `sudo ak stop [component]` | Yes | Stop through systemd; keep data and enablement. |
 | `sudo ak restart [component]` | Yes | Restart after configuration changes. |
 
@@ -301,11 +308,34 @@ metapackage.
 The endpoint MSI still accepts `BRAIN_URL=https://...` for a custom server
 origin; that property configures the agent, not the server dashboard.
 
+## The endpoint agent is outside `ak`
+
+`ak` manages the server stacks only. The endpoint agent is a separate product
+with its own package, unit and lifecycle:
+
+| Platform | Package | Service | Managed by `ak`? |
+|---|---|---|---|
+| Debian/Ubuntu | `aegis-agent_<version>_amd64.deb` | `aegis-agent.service` | No |
+| RHEL/Rocky/Fedora | `aegis-agent-<version>-1.x86_64.rpm` | `aegis-agent.service` | No |
+| OpenWrt | `aegis-agent_<version>_x86_64.ipk` | procd init script | No |
+| Windows | `aegis-agent-<version>-x64.msi` | `AegisAgent` service | No |
+
+The endpoint packages enable the unit but do not start it, and none of them
+contains an enrollment token: write a short-lived, single-use token to
+`/etc/aegis-agent/enroll.token` or `C:\ProgramData\Aegis\enroll.token` before the
+first start, or the unit fails visibly instead of pretending to enroll. To
+upgrade an endpoint, install the newer package over the old one (`sudo dpkg -i`,
+`sudo rpm -U`, `opkg install` or `msiexec /i`) after checking its `.sha256`
+sidecar; there is no `ak update` path for endpoints. Build, install and
+verification commands for every format are in [PACKAGING.md](PACKAGING.md).
+
 ## Update and version selection
 
 `ak update` installs a published release package, which updates both the CLI and
 the server payload; the post-install lifecycle rebuilds changed images. It is
-explicit, never automatic. `--latest` selects the latest non-prerelease
+explicit, never automatic, and it covers the server packages only: endpoints are
+upgraded by reinstalling the endpoint package as described above. `--latest`
+selects the latest non-prerelease
 release; `--version X.Y.Z` pins one. The updater verifies the SHA-256 sidecar
 before apt/dpkg or `msiexec`, preserves the FQDN/ACME/port settings, and
 restarts the stack unless `--no-restart` is given.
