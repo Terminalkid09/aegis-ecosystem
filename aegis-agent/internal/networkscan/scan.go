@@ -75,7 +75,7 @@ func (s *Scanner) Scan(ctx context.Context, cidr string, ports []int, probeTimeo
 
 	_, network, err := net.ParseCIDR(cidr)
 	if err != nil {
-		return nil, fmt.Errorf("CIDR non valido: %w", err)
+		return nil, fmt.Errorf("invalid CIDR: %w", err)
 	}
 	if network.IP.To4() == nil {
 		return nil, fmt.Errorf("solo IPv4 supportato")

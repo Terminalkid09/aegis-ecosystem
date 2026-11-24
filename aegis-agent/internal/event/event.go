@@ -82,7 +82,7 @@ func (e Event) Validate() error {
 		return fmt.Errorf("timestamp mancante")
 	}
 	if e.SchemaVersion != 0 && e.SchemaVersion != SchemaVersion {
-		return fmt.Errorf("schema_version non supportata: %d", e.SchemaVersion)
+		return fmt.Errorf("unsupported schema_version: %d", e.SchemaVersion)
 	}
 	if e.Seq != nil && *e.Seq < 0 {
 		return fmt.Errorf("seq negativa")

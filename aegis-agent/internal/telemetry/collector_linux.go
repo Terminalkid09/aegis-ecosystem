@@ -129,7 +129,7 @@ func readMeminfo() (totalKB, availableKB int64, err error) {
 		availableKB = free + buffers + cached
 	}
 	if totalKB == 0 {
-		return 0, 0, fmt.Errorf("/proc/meminfo: MemTotal assente")
+		return 0, 0, fmt.Errorf("/proc/meminfo: MemTotal missing")
 	}
 	return totalKB, availableKB, nil
 }

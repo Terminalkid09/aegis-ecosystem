@@ -24,7 +24,7 @@ const (
 	RenewFor = 30 * 24 * time.Hour
 )
 
-var ErrNoDeviceIdentity = errors.New("identità device assente")
+var ErrNoDeviceIdentity = errors.New("device identity missing")
 
 func DevicePaths(dir string) (keyPath, certPath string) {
 	return filepath.Join(dir, KeyFile), filepath.Join(dir, CertFile)
@@ -34,7 +34,7 @@ func DevicePaths(dir string) (keyPath, certPath string) {
 // key never leaves the host.
 func BuildCSR(agentID string) (keyPEM, csrPEM []byte, err error) {
 	if strings.TrimSpace(agentID) == "" {
-		return nil, nil, fmt.Errorf("agent_id mancante per la CSR")
+		return nil, nil, fmt.Errorf("missing agent_id for the CSR")
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -61,7 +61,7 @@ func SaveDeviceIdentity(dir string, keyPEM, certPEM []byte) (string, string, err
 	}
 	if !strings.Contains(string(keyPEM), "PRIVATE KEY") ||
 		!strings.Contains(string(certPEM), "CERTIFICATE") {
-		return "", "", fmt.Errorf("identità non PEM valida")
+		return "", "", fmt.Errorf("identity is not valid PEM")
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", fmt.Errorf("creazione identity dir: %w", err)
@@ -119,7 +119,7 @@ func NeedsRenewal(certPEM []byte, now time.Time) bool {
 func CertB64DER(certPEM []byte) (string, error) {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
-		return "", fmt.Errorf("certificato non PEM")
+		return "", fmt.Errorf("certificate is not PEM")
 	}
 	return base64.StdEncoding.EncodeToString(block.Bytes), nil
 }
@@ -127,7 +127,7 @@ func CertB64DER(certPEM []byte) (string, error) {
 func CertFingerprint(certPEM []byte) (string, error) {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
-		return "", fmt.Errorf("certificato non PEM")
+		return "", fmt.Errorf("certificate is not PEM")
 	}
 	sum := sha256.Sum256(block.Bytes)
 	return hex.EncodeToString(sum[:]), nil

@@ -125,7 +125,7 @@ func RegistryDeleteValue(ctx context.Context, runner CommandRunner, key, value s
 		runner = ExecRunner{}
 	}
 	if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" || strings.ContainsAny(key+value, "\r\n") {
-		return fmt.Errorf("registry delete non valido")
+		return fmt.Errorf("invalid registry delete")
 	}
 	return runner.Run(ctx, "reg", "delete", key, "/v", value, "/f")
 }
@@ -159,7 +159,7 @@ type Service struct {
 // service. Details are fetched only for suspicious names.
 func Services(ctx context.Context, runner CommandRunner) ([]Service, error) {
 	if runtime.GOOS != "windows" {
-		return nil, fmt.Errorf("servizi: non-Windows")
+		return nil, fmt.Errorf("services: not Windows")
 	}
 	output, err := RegistryQuery(ctx, runner, `HKLM\SYSTEM\CurrentControlSet\Services`, false)
 	if err != nil {
@@ -191,7 +191,7 @@ type PersistenceItem struct {
 
 func Persistence(ctx context.Context, runner CommandRunner) ([]PersistenceItem, error) {
 	if runtime.GOOS != "windows" {
-		return nil, fmt.Errorf("persistence: non-Windows")
+		return nil, fmt.Errorf("persistence: not Windows")
 	}
 	keys := []string{
 		`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`,

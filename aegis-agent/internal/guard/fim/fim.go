@@ -132,7 +132,7 @@ func (m *Monitor) Apply(paths []string, recursive bool) (int, []string, error) {
 	m.mu.Lock()
 	if m.closed || m.watcher == nil {
 		m.mu.Unlock()
-		return 0, nil, fmt.Errorf("FIM non disponibile")
+		return 0, nil, fmt.Errorf("FIM unavailable")
 	}
 	for path := range m.watches {
 		_ = m.watcher.Remove(path)

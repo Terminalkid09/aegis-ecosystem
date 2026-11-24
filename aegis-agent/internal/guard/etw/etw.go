@@ -307,7 +307,7 @@ func int64Value(value any) (int64, bool) {
 func (s *Source) Probe(ctx context.Context) error {
 	ok, reason := s.Available(ctx)
 	if !ok {
-		return fmt.Errorf("ETW non disponibile: %s", reason)
+		return fmt.Errorf("ETW unavailable: %s", reason)
 	}
 	return nil
 }

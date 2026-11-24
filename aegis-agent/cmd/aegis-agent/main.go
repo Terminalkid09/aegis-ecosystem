@@ -36,12 +36,12 @@ var (
 
 func main() {
 	flag.StringVar(&flagProfile, "profile", "", "profilo: sensor, endpoint, unified o router")
-	flag.StringVar(&flagMode, "mode", "", "modalità unified: full, sensor o endpoint (un solo agente)")
+	flag.StringVar(&flagMode, "mode", "", "unified mode: full, sensor or endpoint (single agent)")
 	flag.StringVar(&flagHome, "home", "", "directory stato agente")
 	flag.StringVar(&flagConfig, "config", "", "path config.json")
-	flag.BoolVar(&flagOnce, "once", false, "invia un ciclo e termina")
-	flag.BoolVar(&flagCheck, "check", false, "verifica configurazione e identità senza rete")
-	flag.BoolVar(&flagVersion, "version", false, "stampa la versione")
+	flag.BoolVar(&flagOnce, "once", false, "send one cycle and exit")
+	flag.BoolVar(&flagCheck, "check", false, "check configuration and identity without network")
+	flag.BoolVar(&flagVersion, "version", false, "print the version")
 	flag.Parse()
 
 	// The MSI and the Deployment Manager one-liner register AegisAgent as a
@@ -72,7 +72,7 @@ func runAgent(ctx context.Context, serviceMode bool) (err error) {
 		Version:    buildVersion,
 	})
 	if err != nil {
-		return fmt.Errorf("configurazione: %w", err)
+		return fmt.Errorf("configuration: %w", err)
 	}
 	if flagVersion {
 		fmt.Println(cfg.Version)
@@ -84,13 +84,13 @@ func runAgent(ctx context.Context, serviceMode bool) (err error) {
 		// empty server URL and no token, so it could never gate anything. It now
 		// fails exactly where the real start would fail.
 		if flagConfig != "" && !fileExists(cfg.ConfigFile) {
-			return fmt.Errorf("configurazione: config %s non trovata", cfg.ConfigFile)
+			return fmt.Errorf("configuration: config %s not found", cfg.ConfigFile)
 		}
 		if err := cfg.ValidateNetwork(); err != nil {
 			return fmt.Errorf("endpoint: %w", err)
 		}
 		if cfg.EndpointEnabled() && !fileExists(cfg.TokenFile) {
-			fmt.Fprintf(os.Stderr, "avviso: token assente in %s, l'agente si registra al primo avvio\n", cfg.TokenFile)
+			fmt.Fprintf(os.Stderr, "warning: no token at %s, the agent enrolls on first start\n", cfg.TokenFile)
 		}
 		fmt.Printf("profile=%s mode=%s sensor=%t endpoint=%t version=%s home=%s server=%s token=%s\n",
 			cfg.Profile, cfg.Mode, cfg.SensorEnabled(), cfg.EndpointEnabled(),
@@ -171,7 +171,7 @@ func buildHTTPClient(cfg config.Config) (*http.Client, string, error) {
 			roots = x509.NewCertPool()
 		}
 		if !roots.AppendCertsFromPEM(data) {
-			return nil, "", fmt.Errorf("CA bundle senza certificati PEM: %s", cfg.CACertFile)
+			return nil, "", fmt.Errorf("CA bundle carries no PEM certificate: %s", cfg.CACertFile)
 		}
 		tlsConfig.RootCAs = roots
 	}
@@ -205,7 +205,7 @@ func certificateFingerprint(path string) (string, error) {
 	}
 	fingerprint, err := identity.CertFingerprint(data)
 	if err != nil {
-		return "", fmt.Errorf("certificato client non PEM: %s: %w", path, err)
+		return "", fmt.Errorf("client certificate is not PEM: %s: %w", path, err)
 	}
 	return fingerprint, nil
 }

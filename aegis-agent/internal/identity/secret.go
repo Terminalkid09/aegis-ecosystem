@@ -44,7 +44,7 @@ func (s *SecretStore) Load() (Secret, error) {
 		if os.IsNotExist(err) {
 			return Secret{}, ErrNotFound
 		}
-		return Secret{}, fmt.Errorf("secret %s non leggibile: %w", s.Path, err)
+		return Secret{}, fmt.Errorf("secret %s is not readable: %w", s.Path, err)
 	}
 	var secret Secret
 	if err := json.Unmarshal(data, &secret); err != nil {

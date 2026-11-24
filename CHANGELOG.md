@@ -18,8 +18,8 @@ the tag audit and the release policy.
 
 - `aegis-agent` derives the heartbeat, update, command, ack and report
   endpoints from `AEGIS_BRAIN_URL` / `BRAIN_URL` when only the server URL is
-  configured. Previously every endpoint stayed empty and a correctly configured
-  endpoint refused to start with `endpoint heartbeat non configurato`; the
+  configured. Previously every endpoint stayed empty and a correctly configuredendpoint refused to start
+  with `endpoint heartbeat is not configured`; the
   register URL no longer doubles the `/api/v1` prefix.
 - `aegis-agent -check` is a real pre-flight check: it exits 1 for a missing
   server URL, a malformed endpoint or an explicit `-config` that does not

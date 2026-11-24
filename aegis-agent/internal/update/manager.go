@@ -39,14 +39,14 @@ func VerifyManifest(manifest []byte, signatureHex, pubkeyB64 string) error {
 	}
 	pubRaw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(pubkeyB64))
 	if err != nil || len(pubRaw) != ed25519.PublicKeySize {
-		return fmt.Errorf("chiave pubblica Ed25519 non valida")
+		return fmt.Errorf("invalid Ed25519 public key")
 	}
 	sig, err := hex.DecodeString(strings.TrimSpace(signatureHex))
 	if err != nil || len(sig) != ed25519.SignatureSize {
-		return fmt.Errorf("firma Ed25519 non valida")
+		return fmt.Errorf("invalid Ed25519 signature")
 	}
 	if !ed25519.Verify(ed25519.PublicKey(pubRaw), manifest, sig) {
-		return fmt.Errorf("manifest Ed25519 non valido")
+		return fmt.Errorf("invalid Ed25519 manifest")
 	}
 	return nil
 }

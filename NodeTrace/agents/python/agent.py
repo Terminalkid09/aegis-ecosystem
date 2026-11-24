@@ -71,7 +71,7 @@ class PidLock:
                 if _pid_alive(old_pid) and self._is_our_agent(old_pid):
                     Logger.error(f"NodeTrace agent already running (PID {old_pid})")
                     sys.exit(1)
-                Logger.warn(f"Stale/alien pid file (PID {old_pid}): sovrascrivo.")
+                Logger.warn(f"Stale/alien pid file (PID {old_pid}): overwriting it.")
             except (ValueError, OSError):
                 pass
             with open(self.pid_file, "w", encoding="utf-8") as f:
@@ -175,7 +175,7 @@ class Agent:
                 if token:
                     return token
             except OSError as e:
-                Logger.warn(f"Enrollment token file non leggibile ({e}): fallback env.")
+                Logger.warn(f"Enrollment token file is not readable ({e}): falling back to env.")
         return os.getenv("AEGIS_ENROLL_KEY", "").strip()
 
     def _brain_base(self):
@@ -197,19 +197,19 @@ class Agent:
             from utils import curl_http as _http
             key_pem, cert_pem = _di.load_identity(self.identity_dir)
             if not cert_pem or _di.needs_renewal(cert_pem):
-                action = "rinnovo" if cert_pem else "bootstrap"
-                Logger.info(f"Identità device: {action} CSR...")
+                action = "renewal" if cert_pem else "bootstrap"
+                Logger.info(f"Device identity: {action} CSR...")
                 new_key, csr_pem = _di.build_csr(device_id)
                 r = post(f"{self._brain_base()}/enroll/csr",
                          json_data={"csr_pem": csr_pem},
                          headers={"Authorization": f"Bearer {token}",
                                   "X-Agent-Id": device_id}, timeout=30)
                 if r.status_code != 200:
-                    Logger.warn(f"CSR rifiutata (HTTP {r.status_code}): {r.text[:200]}")
+                    Logger.warn(f"CSR rejected (HTTP {r.status_code}): {r.text[:200]}")
                     return False
                 cert_pem = r.json()["certificate_pem"]
                 _di.save_identity(self.identity_dir, new_key, cert_pem)
-                Logger.info("Identità device emessa dal SOC.")
+                Logger.info("Device identity issued by the SOC.")
                 key_pem = new_key
             _http.set_client_cert(os.path.join(self.identity_dir, "device.crt"),
                                   os.path.join(self.identity_dir, "device.key"))
@@ -217,7 +217,7 @@ class Agent:
             self._identity_hash = _di.fingerprint_sha256(cert_pem)
             return True
         except Exception as e:
-            Logger.warn(f"Identità device non disponibile ({e}): senza mTLS")
+            Logger.warn(f"Device identity unavailable ({e}): continuing without mTLS")
             return False
 
     def _note_cert_problem(self, status_code):
@@ -229,8 +229,8 @@ class Agent:
         if now - self._last_cert_warn < 60:
             return
         self._last_cert_warn = now
-        Logger.warn("401 con certificato device: possibile REVOCA o scadenza — "
-                    "ricontrollare enrollment sul SOC (nessun wipe automatico)")
+        Logger.warn("401 with a device certificate: possible REVOCATION or expiry — "
+                    "re-check enrollment on the SOC (no automatic wipe)")
 
     @retry(5, 1)
     def register(self):
@@ -437,7 +437,7 @@ class Agent:
         # brain compromesso/MITM dirottava il download (con Bearer+cert!)
         # verso host arbitrari. Solo artefatti del brain pinnato.
         if not self._update_url_allowed(url):
-            Logger.error("UPDATE_AGENT url fuori allowlist — refusing.")
+            Logger.error("UPDATE_AGENT url outside the allowlist — refusing.")
             self._ack_command(token, device_id, cmd_name, "failed", "url not allowed", delivery_id=delivery_id)
             return
         # Ed25519 obbligatorio (AEGIS-SEC-002): niente HMAC OTA.
@@ -454,11 +454,11 @@ class Agent:
         fname = url.rsplit("/", 1)[-1] if "/" in url else url
         verified = verify_manifest_ed25519(manifest, manifest_sig, pubkey)
         if verified is None:
-            Logger.error("UPDATE_AGENT: manifest pubkey set ma cryptography assente — refusing.")
+            Logger.error("UPDATE_AGENT: manifest pubkey set but cryptography is missing — refusing.")
             self._ack_command(token, device_id, cmd_name, "failed", "manifest needs cryptography lib", delivery_id=delivery_id)
             return
         if not verified or not manifest_covers(manifest, fname, sha):
-            Logger.error("UPDATE_AGENT: manifest Ed25519 invalido o artefatto non coperto — refusing.")
+            Logger.error("UPDATE_AGENT: invalid Ed25519 manifest or artifact not covered — refusing.")
             self._ack_command(token, device_id, cmd_name, "failed", "bad manifest", delivery_id=delivery_id)
             return
         Logger.info(f"UPDATE_AGENT: manifest Ed25519 verificato per {fname}.")
@@ -473,7 +473,7 @@ class Agent:
                 if os.path.isfile(_kp) and os.path.isfile(_cp):
                     ctx.load_cert_chain(_cp, _kp)
             except Exception as e:
-                Logger.warn(f"UPDATE_AGENT: client cert non caricato ({e})")
+                Logger.warn(f"UPDATE_AGENT: client cert not loaded ({e})")
             import tempfile
             fd, tmp = tempfile.mkstemp(prefix="aegis-update-", suffix=".pkg")
             try:
@@ -542,8 +542,8 @@ class Agent:
                     headers=self._agent_headers(token, device_id), timeout=15)
             return getattr(r, "status_code", 0) != 401
         except Exception as e:
-            Logger.warn(f"Verifica credenziali non eseguibile ({e}): "
-                        "proseguo con il token salvato")
+            Logger.warn(f"Credentials check not runnable ({e}): "
+                        "continuing with the stored token")
             return True
 
     def _ensure_registered(self):
@@ -557,8 +557,8 @@ class Agent:
                 raise RuntimeError(f"[FATAL] {pin_err}")
 
             if not self._verify_token(token, device_id):
-                Logger.warn("Token device rifiutato dal brain (401): "
-                            "re-enrollment in corso...")
+                Logger.warn("Device token rejected by the Brain (401): "
+                            "re-enrolling...")
                 token = None  # il ramo di registrazione qui sotto ripara
 
         while not token:
@@ -602,7 +602,7 @@ class Agent:
                 return
             Logger.warn(f"Kernel batch got HTTP {r.status_code}, fallback singoli")
         except Exception as e:
-            Logger.warn(f"Kernel batch failed: {e}, fallback singoli")
+            Logger.warn(f"Kernel batch failed: {e}, falling back to single events")
         for rep in batch:
             self._forward_kernel_event(token, device_id, rep)
 
@@ -611,10 +611,10 @@ class Agent:
         import subprocess
         from services.ebpf import parse_line, event_to_report, collector_cmd
         if sys.platform != "linux":
-            Logger.error("eBPF stream solo su Linux.")
+            Logger.error("eBPF stream is Linux only.")
             return
         if not self.ebpf_collector or not os.path.exists(self.ebpf_collector):
-            Logger.error("eBPF collector non trovato — disabilitato.")
+            Logger.error("eBPF collector not found — disabled.")
             return
         from services.ebpf import KernelEventBatcher, SeenCache
         seen = SeenCache()

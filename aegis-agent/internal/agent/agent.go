@@ -75,7 +75,7 @@ func (a *Agent) EnsureIdentity(ctx context.Context) error {
 		}
 		a.client.SetCredentials(token.Token, token.DeviceID, a.client.ClientCert)
 		if err := a.ensureDeviceIdentity(ctx); err != nil {
-			a.log.Warn("identità device non disponibile", "error", err)
+			a.log.Warn("device identity unavailable", "error", err)
 		}
 		a.log.Info("identità caricata", "device_id", token.DeviceID)
 		return nil
@@ -84,7 +84,7 @@ func (a *Agent) EnsureIdentity(ctx context.Context) error {
 		return err
 	}
 	if a.cfg.RegisterURL == "" {
-		return fmt.Errorf("register URL non configurato")
+		return fmt.Errorf("register URL is not configured")
 	}
 	enrollToken, err := a.cfg.ReadEnrollToken()
 	if err != nil {
@@ -115,7 +115,7 @@ func (a *Agent) EnsureIdentity(ctx context.Context) error {
 	}
 	a.client.SetCredentials(token.Token, token.DeviceID, a.client.ClientCert)
 	if err := a.ensureDeviceIdentity(ctx); err != nil {
-		a.log.Warn("CSR/mTLS non completato", "error", err)
+		a.log.Warn("CSR/mTLS not completed", "error", err)
 	}
 	a.log.Info("enrollment completato", "device_id", token.DeviceID, "status", resp.Status)
 	return nil
@@ -134,7 +134,7 @@ func (a *Agent) ensureGuardIdentity(ctx context.Context) error {
 		}
 		a.client.SetCredentials(secret.AgentSecret, secret.AgentID, a.client.ClientCert)
 		if err := a.ensureDeviceIdentity(ctx); err != nil {
-			a.log.Warn("identità device Guard non disponibile", "error", err)
+			a.log.Warn("Guard device identity unavailable", "error", err)
 		}
 		a.log.Info("identità Guard caricata", "agent_id", secret.AgentID)
 		return nil
@@ -143,7 +143,7 @@ func (a *Agent) ensureGuardIdentity(ctx context.Context) error {
 		return err
 	}
 	if a.cfg.GuardEnrollURL == "" {
-		return fmt.Errorf("enrollment Guard URL non configurato")
+		return fmt.Errorf("Guard enrollment URL is not configured")
 	}
 	enrollToken, err := a.cfg.ReadEnrollToken()
 	if err != nil {
@@ -169,7 +169,7 @@ func (a *Agent) ensureGuardIdentity(ctx context.Context) error {
 	}
 	a.client.SetCredentials(secret.AgentSecret, secret.AgentID, a.client.ClientCert)
 	if err := a.ensureDeviceIdentity(ctx); err != nil {
-		a.log.Warn("CSR/mTLS Guard non completato", "error", err)
+		a.log.Warn("Guard CSR/mTLS not completed", "error", err)
 	}
 	a.log.Info("enrollment Guard completato", "agent_id", secret.AgentID)
 	return nil
@@ -184,7 +184,7 @@ func (a *Agent) ensureDeviceIdentity(ctx context.Context) error {
 		return err
 	}
 	if a.cfg.CSRURL == "" {
-		return fmt.Errorf("CSR URL non configurato")
+		return fmt.Errorf("CSR URL is not configured")
 	}
 	keyPEM, csrPEM, err := identity.BuildCSR(a.client.AgentID)
 	if err != nil {
@@ -197,7 +197,7 @@ func (a *Agent) ensureDeviceIdentity(ctx context.Context) error {
 		return fmt.Errorf("richiesta certificato: %w", err)
 	}
 	if strings.TrimSpace(response.CertificatePEM) == "" {
-		return fmt.Errorf("risposta CSR senza certificate_pem")
+		return fmt.Errorf("CSR response without certificate_pem")
 	}
 	if _, _, err := identity.SaveDeviceIdentity(a.cfg.IdentityDir, keyPEM, []byte(response.CertificatePEM)); err != nil {
 		return err
@@ -220,7 +220,7 @@ func (a *Agent) installDeviceCert(certPEM []byte) error {
 
 func (a *Agent) RunOnce(ctx context.Context) error {
 	if a.client.AgentID == "" || a.client.Token == "" {
-		return fmt.Errorf("identità non inizializzata")
+		return fmt.Errorf("identity not initialized")
 	}
 	if a.cfg.Profile == config.ProfileEndpoint || a.cfg.Profile == config.ProfileUnified {
 		a.bootstrapSensors(ctx)
@@ -386,7 +386,7 @@ func (a *Agent) runNetworkScan(ctx context.Context, command transport.Command) {
 
 func (a *Agent) handleUpdate(ctx context.Context, command transport.Command) error {
 	if strings.TrimSpace(a.cfg.ManifestPubKey) == "" {
-		return fmt.Errorf("manifest public key non configurata")
+		return fmt.Errorf("manifest public key is not configured")
 	}
 	if command.URL == "" || command.Manifest == "" || command.ManifestSig == "" || command.SHA256 == "" {
 		return fmt.Errorf("comando update incompleto")
@@ -400,7 +400,7 @@ func (a *Agent) handleUpdate(ctx context.Context, command transport.Command) err
 	}
 	name := update.ArtifactName(command.URL)
 	if !update.ManifestCovers(manifest, name, command.SHA256) {
-		return fmt.Errorf("manifest non copre %s", name)
+		return fmt.Errorf("manifest does not cover %s", name)
 	}
 	path, err := update.TempDownloadPath(a.cfg.AgentHome)
 	if err != nil {
@@ -650,7 +650,7 @@ func (a *Agent) bootstrapGuard(ctx context.Context) {
 	if created, err := spool.New(spoolPath, a.client.Token, a.cfg.SpoolMaxBytes); err == nil {
 		encrypted = created
 	} else {
-		a.log.Warn("spool Guard non attivo", "error", err)
+		a.log.Warn("Guard spool not active", "error", err)
 	}
 	batchURL := a.cfg.ReportBatchURL
 	if batchURL == "" {
@@ -666,7 +666,7 @@ func (a *Agent) bootstrapGuard(ctx context.Context) {
 		a.guardFIM = monitorFIM
 		monitorFIM.Start(ctx)
 	} else {
-		a.log.Warn("FIM non disponibile", "error", err)
+		a.log.Warn("FIM unavailable", "error", err)
 	}
 
 	yaraScanner := yara.New(a.cfg.YaraPath)
@@ -688,7 +688,7 @@ func (a *Agent) bootstrapGuard(ctx context.Context) {
 		a.guardETW = etw.NewSupervisor(etwSource, a.emitGuardEvent, a.log)
 		a.guardETW.Start(ctx)
 	} else {
-		a.log.Info("ETW non attivo; polling processi come fallback dichiarato", "reason", "disabled")
+		a.log.Info("ETW not active; process polling as the declared fallback", "reason", "disabled")
 	}
 
 	a.guardCaps = map[string]any{
@@ -719,7 +719,7 @@ func (a *Agent) bootstrapGuard(ctx context.Context) {
 
 func (a *Agent) emitGuardEvent(ev event.Event) {
 	if err := a.enqueueGuard(ev); err != nil {
-		a.log.Warn("evento Guard non accodato", "event", ev.EventType, "error", err)
+		a.log.Warn("Guard event not queued", "event", ev.EventType, "error", err)
 	}
 }
 
@@ -751,7 +751,7 @@ func (a *Agent) executeGuard(ctx context.Context, command transport.Command) err
 		return a.ackWithAlert(ctx, command.Command, "ok", "update staged; restart required", command.AlertID, command.DeliveryID)
 	}
 	if a.guardActions == nil {
-		err := fmt.Errorf("runtime Guard non inizializzato")
+		err := fmt.Errorf("Guard runtime not initialized")
 		_ = a.ackWithAlert(ctx, command.Command, "failed", err.Error(), command.AlertID, command.DeliveryID)
 		return err
 	}

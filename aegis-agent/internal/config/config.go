@@ -179,7 +179,7 @@ func Load(opts Options) (Config, error) {
 		cfg.Profile = Profile(v)
 	}
 	if !cfg.Profile.Valid() {
-		return Config{}, fmt.Errorf("profilo agente non valido: %q", cfg.Profile)
+		return Config{}, fmt.Errorf("invalid agent profile: %q", cfg.Profile)
 	}
 
 	if opts.Version != "" {
@@ -200,10 +200,10 @@ func Load(opts Options) (Config, error) {
 	var fc fileConfig
 	if data, err := os.ReadFile(cfg.ConfigFile); err == nil {
 		if err := json.Unmarshal(data, &fc); err != nil {
-			return Config{}, fmt.Errorf("config %s non valida: %w", cfg.ConfigFile, err)
+			return Config{}, fmt.Errorf("config %s is invalid: %w", cfg.ConfigFile, err)
 		}
 	} else if !os.IsNotExist(err) {
-		return Config{}, fmt.Errorf("config %s non leggibile: %w", cfg.ConfigFile, err)
+		return Config{}, fmt.Errorf("config %s is not readable: %w", cfg.ConfigFile, err)
 	}
 
 	cfg.ServerURL = fc.ServerURL
@@ -296,10 +296,10 @@ func resolveMode(cfg *Config, cliMode, fileMode string) error {
 			m = Mode(cliMode)
 		}
 	} else if cliMode != "" && Mode(cliMode) != m {
-		return fmt.Errorf("modalità %q non valida per il profilo %q", cliMode, cfg.Profile)
+		return fmt.Errorf("mode %q is not valid for profile %q", cliMode, cfg.Profile)
 	}
 	if !m.Valid() {
-		return fmt.Errorf("modalità agente non valida: %q", m)
+		return fmt.Errorf("invalid agent mode: %q", m)
 	}
 	cfg.Mode = m
 	return nil
@@ -529,7 +529,7 @@ func (c *Config) ResolveGuardSecret() error {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return fmt.Errorf("secret Guard %s non leggibile: %w", c.SecretFile, err)
+		return fmt.Errorf("Guard secret %s is not readable: %w", c.SecretFile, err)
 	}
 	var secret struct {
 		ServerURL string `json:"server_url"`
@@ -597,10 +597,10 @@ func (c Config) ValidateNetwork() error {
 	}
 	for name, raw := range required {
 		if strings.TrimSpace(raw) == "" {
-			return fmt.Errorf("endpoint %s non configurato", name)
+			return fmt.Errorf("endpoint %s is not configured", name)
 		}
 		if err := validateHTTPURL(raw); err != nil {
-			return fmt.Errorf("endpoint %s non valido: %w", name, err)
+			return fmt.Errorf("endpoint %s is invalid: %w", name, err)
 		}
 	}
 	return nil
@@ -639,7 +639,7 @@ func validateHTTPURL(raw string) error {
 		return err
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("schema %q non supportato", u.Scheme)
+		return fmt.Errorf("unsupported scheme %q", u.Scheme)
 	}
 	if u.Host == "" {
 		return fmt.Errorf("host mancante")
@@ -656,7 +656,7 @@ func (c Config) ReadEnrollToken() (string, error) {
 				return token, nil
 			}
 		} else if !os.IsNotExist(err) {
-			return "", fmt.Errorf("enrollment token file non leggibile: %w", err)
+			return "", fmt.Errorf("enrollment token file is not readable: %w", err)
 		}
 	}
 	if token := strings.TrimSpace(c.EnrollKey); token != "" {
@@ -736,7 +736,7 @@ func resolveHome(explicit string) (string, error) {
 	if err != nil {
 		wd, wdErr := os.Getwd()
 		if wdErr != nil {
-			return "", fmt.Errorf("directory agente non determinabile: %w", err)
+			return "", fmt.Errorf("cannot determine the agent directory: %w", err)
 		}
 		return wd, nil
 	}
@@ -783,7 +783,7 @@ func envBool(name string) (bool, bool) {
 func ParseSeconds(raw string) (time.Duration, error) {
 	n, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("intervallo non valido: %q", raw)
+		return 0, fmt.Errorf("invalid interval: %q", raw)
 	}
 	return time.Duration(n) * time.Second, nil
 }
