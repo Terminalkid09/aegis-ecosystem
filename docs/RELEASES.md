@@ -1,8 +1,10 @@
 # Release audit — Aegis Ecosystem
 
-Status: 2026-11-19. This document audits the tags that already exist, including
-the completed `v4.1.0` release. It does not move history. The current release
-being prepared is `v4.3.0`; it is not tagged or published yet.
+Status: 2026-11-24. This document audits the tags that already exist, including
+the published `v4.1.0`, `v4.2.1` and `v4.3.0` releases. It does not move history
+for the older tags. `v4.3.0` was re-cut once, on 2026-11-24, onto the final
+commit of the cycle that translated the documentation and attached the
+installable packages; that decision is recorded below.
 
 ## Published tags are immutable
 
@@ -33,7 +35,7 @@ tags.
 | `v4.0.0` | 2026-09-21 | `38e245f` | `de52206` | yes | `aegis-guard.jar`, `sbom.spdx.json`, `SHA256SUMS.txt` |
 | `v4.1.0` | 2026-11-16 | `17c499f` | `17c499f` | yes | 24 assets: Brain/Link/Frontend/Guard/NodeTrace, compose, SBOM, source, seven images, manifests/checksums |
 | `v4.2.1` | 2026-11-18 | `1de7443` | `1de7443` | yes | 32 assets; checksummed, not cosign-signed |
-| `v4.3.0` | not cut | — | — | no | unified-only 24-file bundle prepared; tag workflow now includes cosign signing; hosted tag CI still required |
+| `v4.3.0` | 2026-11-23, re-cut 2026-11-24 | tag `v4.3.0` (`git rev-list -n1 v4.3.0`) | same | yes | signed bundle rebuilt from the final commit: unified bundle, seven images, five SBOMs, source, compose, manifests and checksums; plus the pilot-signed MSI, deb, RPM and ipk attached separately |
 
 The first four are lightweight tags; `v4.1.0` is annotated. `v4.0.0` and
 `v4.1.0` are the only ones whose code version matches the tag: `aegis-brain`
@@ -78,7 +80,7 @@ The safe correction is:
 | `v4.0.0` | EDR + SIEM platform, ETW, Sigma, Telegram, signed enrollment | historical; last batch tag |
 | `v4.1.0` | Foundation + complete Kraken vertical: blocking fixes, CI green, compose/outbox/UI/unified view, complete release | released 2026-11-16; complete |
 | `v4.2.1` | Kraken outbox/lab hardening and 4.2 maintenance | released 2026-11-18 |
-| `v4.3.0` | Unified Go agent, at-least-once commands, 50k Link and release gates | prepared 2026-11-19; tag not cut |
+| `v4.3.0` | Unified Go agent, at-least-once commands, 50k Link and release gates | released 2026-11-23, re-cut 2026-11-24 with English documentation and pilot packages |
 
 `v4.1.0` is a **minor** because it fixes and hardens existing contracts. The
 removal of the disabled-by-default `script` playbook action will be documented
@@ -246,6 +248,36 @@ this is not yet executed for 4.3.0. `v4.2.1` remains checksummed only. See
 `services/kraken` is a separately licensed **MIT** component; its license file
 ships with the source and the release must keep both notices. The MIT grant is
 compatible with the AGPL bundle and does not relicense the rest of Aegis.
+
+## v4.3.0 publication and the pilot package policy (2026-11-24)
+
+`v4.3.0` is published. The tag was re-cut once, on 2026-11-24, onto the final
+commit of the cycle: the first cut (`ab1084c`) carried Italian documentation and
+no installable package, so the release was rebuilt from the new commit instead of
+being patched in place. Every asset now comes from that commit.
+
+**Packages.** `ci.yml` creates the release and the signed bundle; its
+`RELEASE_MANIFEST.json`, `SHA256SUMS.txt` and cosign signature stay a closed list
+that `release-smoke.py` verifies. The installable packages are attached
+separately, each with its own `.sha256` sidecar and `.signing.json`, so the
+signing mode travels with the file and never enters the signed bundle.
+
+**Why they were missing from the first cut.** `release_assets` required
+`vars.PRODUCTION_SIGNING == 'true'` plus the production signing secrets, which do
+not exist in this repository. The packaging jobs had already built the packages,
+but the publish step was skipped, so `ak update` failed closed with a 404.
+
+**The switch.** `pilot_release_assets` runs on a `v*` tag only when
+`vars.PILOT_SIGNED_PACKAGES == 'true'` and `PRODUCTION_SIGNING` is not `true`. It
+verifies that the tag matches every package version and every `.sha256` sidecar,
+records the mode of each package in `PILOT_SIGNING.txt`, collects
+`PILOT_PACKAGES_SHA256SUMS.txt`, and refuses to overwrite a published asset.
+Without the variable nothing is attached and the fail-closed default holds.
+
+**What `v4.3.0` ships today.** Pilot-signed packages: test-signed Authenticode
+for the MSIs, self-signed or unsigned GPG for the deb. They are not a production
+publisher claim. The production path is unchanged and still requires the PFX and
+GPG secrets plus `PRODUCTION_SIGNING=true`.
 
 ## Local verification update — 2026-11-20
 

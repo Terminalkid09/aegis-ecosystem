@@ -12,6 +12,7 @@ By contributing, you agree to license your contribution under
 - One commit, one type. Do not mix a refactor with a fix.
 - Do not mention vendors or products used only as internal benchmarks.
 - Do not add co-author lines or AI attribution.
+- Write commit messages, code, comments and public text in English.
 - Explain **why** the change is needed, not only what changed.
 - Reference the finding ID when the commit closes one
   (for example `KRAKEN-SEC-001`).
@@ -26,6 +27,8 @@ By contributing, you agree to license your contribution under
 - Do not commit secrets, real customer data or live malware samples.
 - Update the documentation when a contract, default or procedure changes.
 - Keep the diff focused; a separate pull request is better than a mixed one.
+- Delete the branch right after its pull request is merged. `dev` and `main`
+  are the only long-lived branches.
 
 ## Development checks
 
