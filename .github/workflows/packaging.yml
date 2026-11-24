@@ -488,10 +488,17 @@ jobs:
       - name: Wait for the release created by the tag workflow
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job has no checkout, so gh cannot infer the repository from the
+          # working directory: without GH_REPO every gh call fails and the wait
+          # loop looks like a missing release.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
-          for attempt in $(seq 1 60); do
+          # The release job in ci.yml builds the images before it creates the
+          # release, which takes more than ten minutes on a cold cache; a shorter
+          # window failed the very first tag that used this job.
+          for attempt in $(seq 1 120); do
             if gh release view "$tag" >/dev/null 2>&1; then
               echo "Release $tag exists; attaching packages"
               exit 0
@@ -503,6 +510,10 @@ jobs:
       - name: Upload without overwriting (published assets are immutable)
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job has no checkout, so gh cannot infer the repository from the
+          # working directory: without GH_REPO every gh call fails and the wait
+          # loop looks like a missing release.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
@@ -628,10 +639,17 @@ jobs:
       - name: Wait for the release created by the tag workflow
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job has no checkout, so gh cannot infer the repository from the
+          # working directory: without GH_REPO every gh call fails and the wait
+          # loop looks like a missing release.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
-          for attempt in $(seq 1 60); do
+          # The release job in ci.yml builds the images before it creates the
+          # release, which takes more than ten minutes on a cold cache; a shorter
+          # window failed the very first tag that used this job.
+          for attempt in $(seq 1 120); do
             if gh release view "$tag" >/dev/null 2>&1; then
               echo "Release $tag exists; attaching pilot packages"
               exit 0
@@ -643,6 +661,10 @@ jobs:
       - name: Upload without overwriting (published assets are immutable)
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job has no checkout, so gh cannot infer the repository from the
+          # working directory: without GH_REPO every gh call fails and the wait
+          # loop looks like a missing release.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
