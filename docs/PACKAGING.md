@@ -446,6 +446,15 @@ runs:
   server MSI is built with the operator certificate, no MSI is attached and
   `ak update` on Windows fails closed with a 404 rather than installing a test
   certificate. `ci.yml` remains the only job that creates the release.
+- **pilot tag releases** (`v*`) with the repository variable
+  `PILOT_SIGNED_PACKAGES=true` and `PRODUCTION_SIGNING` unset: job
+  `pilot_release_assets` attaches the test-signed MSI and the self-signed deb,
+  RPM and ipk that the `packaging_*` jobs already built, together with
+  `PILOT_SIGNING.txt` (the signing mode of every package) and
+  `PILOT_PACKAGES_SHA256SUMS.txt`. It never overwrites an existing asset and it
+  does not touch the signed bundle produced by `ci.yml`. The default stays
+  fail-closed: without the variable nothing is attached, so `ak update` returns
+  404 instead of installing a test certificate.
 
 `workflow_dispatch` with `production_signing=true` runs optional jobs that
 consume the operator's repository secrets (`AEGIS_WINDOWS_PFX_BASE64`,
