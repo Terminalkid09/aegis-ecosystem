@@ -491,7 +491,10 @@ jobs:
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
-          for attempt in $(seq 1 60); do
+          # The release job in ci.yml builds the images before it creates the
+          # release, which takes more than ten minutes on a cold cache; a shorter
+          # window failed the very first tag that used this job.
+          for attempt in $(seq 1 120); do
             if gh release view "$tag" >/dev/null 2>&1; then
               echo "Release $tag exists; attaching packages"
               exit 0
@@ -631,7 +634,10 @@ jobs:
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
-          for attempt in $(seq 1 60); do
+          # The release job in ci.yml builds the images before it creates the
+          # release, which takes more than ten minutes on a cold cache; a shorter
+          # window failed the very first tag that used this job.
+          for attempt in $(seq 1 120); do
             if gh release view "$tag" >/dev/null 2>&1; then
               echo "Release $tag exists; attaching pilot packages"
               exit 0
