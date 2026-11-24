@@ -14,203 +14,201 @@ the tag audit and the release policy.
 
 ## [4.3.0] - 2026-11-23
 
-### Packaging server e persistenza (2026-11-22)
+### Server packaging and persistence (2026-11-22)
 
-- `ak update` non e' piu' interattivo: apt/dpkg girano con
-  `DEBIAN_FRONTEND=noninteractive` e `--force-confdef`/`--force-confold`, quindi
-  un aggiornamento remoto non si blocca su una domanda debconf e non riscrive
-  `server.env`/`kraken.env`. Trovato testando 4.3.0 -> 4.3.1 in un container.
-- `ak start --wait` (con `--timeout`, default 300s per componente) attende che i
-  container siano running e senza health `starting`/`unhealthy`; su Windows il
-  comportamento era gia' `compose up --wait` e ora accetta gli stessi flag.
-- `ak doctor` riporta il budget memoria: RAM host, limite dell'engine Docker, uso
-  per container e, dentro WSL, il promemoria che il numero e' il tetto della VM e
-  non il consumo di Aegis.
-- CI: job `release_assets` sui tag `v*` che attende la release creata da `ci.yml`
-  e allega i pacchetti con i checksum, senza mai sovrascrivere un asset
-  pubblicato; la validazione MSI sopprime solo `ICE61` (downgrade voluto) e
-  mantiene attivi gli altri ICE.
+- `ak update` is no longer interactive: apt/dpkg run with
+  `DEBIAN_FRONTEND=noninteractive` and `--force-confdef`/`--force-confold`, so a
+  remote update does not stop on a debconf question and does not rewrite
+  `server.env`/`kraken.env`. Found while testing 4.3.0 -> 4.3.1 in a container.
+- `ak start --wait` (with `--timeout`, default 300s per component) waits for the
+  containers to be running and free of `starting`/`unhealthy` health states; on
+  Windows the behaviour was already `compose up --wait` and it now accepts the
+  same flags.
+- `ak doctor` reports the memory budget: host RAM, Docker engine limit, usage
+  per container and, inside WSL, a reminder that the number is the VM ceiling,
+  not Aegis consumption.
+- CI: a `release_assets` job on `v*` tags that waits for the release created by
+  `ci.yml` and attaches the packages with their checksums, without ever
+  overwriting a published asset; MSI validation suppresses only `ICE61`
+  (intentional downgrade) and keeps the other ICE checks active.
 
-- Aggiunti i pacchetti completi `aegis` (Brain, Link, dashboard/frontend,
-  PostgreSQL, Redis, Caddy, backup) e `kraken` (app, sensori, broker, RDP,
-  database e Redis privati), più il meta-pacchetto `aegis-suite` e il bundle
-  `aegis-suite-<version>.tar.gz` per scaricare entrambi gli stack insieme. Ogni
-  stack conserva il proprio file systemd, i propri segreti in `/etc/aegis/*.env`
-  e il proprio ciclo di vita; l'agente MSI/deb resta solo endpoint e il bundle
-  non lo installa sul server.
-- `aegis-suite` non è solo un elenco di dipendenze: il suo post-install crea la
-  rete condivisa `aegis_shared`, allinea i segreti SSO/ingest, punta Kraken a
-  `aegis-brain:8000`, abilita l'integrazione e serve la UI sotto `/kraken/`.
-  Installare i due pacchetti separatamente non li collega.
-- Aggiunto il comando operativo `ak`, esposto da entrambi i pacchetti server
-  tramite `update-alternatives` senza conflitti di file: `ak start/stop/restart`
-  gestiscono systemd, mentre `ak status/ps/logs/doctor/url` mostrano lo stato
-  reale di unit e container. `ak configure` cambia hostname pubblico, email ACME,
-  URL pubblico e porta locale senza riscrivere i segreti. `ak --help` e
-  `ak help <command>` sono la documentazione locale; il server resta headless e
-  non crea un'icona desktop. Riferimento completo in `docs/AK_CLI.md`.
-- La dashboard non è più cablata alla porta host 3000: `AEGIS_UI_PORT` è
-  configurabile, il pacchetto sceglie automaticamente il primo slot libero in
-  `3000-3099` se la porta richiesta è occupata e registra il valore in
-  `/etc/aegis/server.env`. L'installazione `aegis` usa debconf per dominio,
-  email ACME e porta; gli stessi valori sono preseedabili via ambiente o
-  modificabili con `ak configure`. Il dominio pubblico resta distinto dal
-  percorso Docker Desktop dell'agente MSI.
-- La matrice Windows ora è completa come quella deb: `aegis-server` installa
-  solo Aegis, `kraken-server` solo Kraken, `aegis-suite` entrambi; l'MSI agente
-  resta solo endpoint. Ogni pacchetto è autosufficiente, espone `ak.cmd` nel
-  `PATH` di macchina e genera il proprio `server.env`/`kraken.env` al primo
-  `ak start`. Aegis e suite chiedono FQDN/email ACME/porta; Kraken-only non ha
-  un bordo TLS pubblico. Usano Docker Desktop, quindi l'avvio è al login
-  (`ak start` o scheduled task), non pre-login.
-- Aggiunto `ak update` su Linux e Windows: risolve l'ultima release stabile o
-  una versione esplicita, verifica il checksum SHA-256, preserva FQDN/email/
-  porta, aggiorna CLI e payload e riavvia i servizi. Un downgrade richiede
-  `--allow-downgrade` e un backup del database verificato. Aggiunta la
-  [release policy](docs/RELEASE_POLICY.md): 4.3.x corrente, 4.2.x precedente,
-  <=4.1.x EOL; gli artefatti pubblicati restano immutati.
-- Validazione FQDN/email più rigorosa su Linux e Windows, con rifiuto di un
-  dominio pubblico senza email ACME, URL pubblico non coerente e label DNS
-  non valide. La configurazione Windows resta valida anche per Kraken-only,
-  che usa un env separato.
-- Verificato lo stack Aegis+Kraken su Docker Desktop/Windows: Brain, Link,
-  frontend, Caddy, Kraken, sensori e broker healthy, HTTP 200 su Brain,
-  frontend, Kraken e Caddy. Il pacchetto Windows riusa lo stesso runtime e la
-  stessa sorgente; resta la differenza di boot timing, non un componente mancante.
-- La firma di default dei pacchetti server è self-signed (chiave GPG locale
-  esportata come `aegis-pilot-signing-key.asc`): è accettata per il pilot, non è
-  una identità pubblica e non viene mai etichettata come production. La firma
-  production resta un input dell'operatore. GPG è opzionale per un pilot locale:
-  `SIGNING_MODE=unsigned` è disponibile e SHA-256 resta il controllo di
-  integrità.
-- Il soak 7 giorni è dichiarato test interno e **rinviato al ciclo successivo**,
-  dopo firewall/DNS e i miglioramenti a sensori, telemetria e processi. La 4.3.0
-  non lo aspetta: il soak v4.0.0 era passato e il delta 4.3 è piccolo; il primo
-  campione 4.3 non è un soak completato. Il runner non è nei pacchetti e non è
-  una richiesta al cliente.
-- Documentato il reset WSL2 (`wsl --shutdown`) che ha risolto il timeout
-  `HCS_E_CONNECTION_TIMEOUT` del VM condiviso con Docker Desktop.
+- Added the complete `aegis` package (Brain, Link, dashboard/frontend,
+  PostgreSQL, Redis, Caddy, backup) and `kraken` (app, sensors, broker, RDP,
+  private database and Redis), plus the `aegis-suite` meta-package and the
+  `aegis-suite-<version>.tar.gz` bundle to download both stacks together. Each
+  stack keeps its own systemd unit, its own secrets in `/etc/aegis/*.env` and
+  its own lifecycle; the MSI/deb agent stays endpoint-only and the bundle does
+  not install it on the server.
+- `aegis-suite` is not just a dependency list: its post-install creates the
+  shared `aegis_shared` network, aligns the SSO/ingest secrets, points Kraken to
+  `aegis-brain:8000`, enables the integration and serves the UI under
+  `/kraken/`. Installing the two packages separately does not connect them.
+- Added the `ak` operational command, exposed by both server packages through
+  `update-alternatives` with no file conflicts: `ak start/stop/restart` manage
+  systemd, while `ak status/ps/logs/doctor/url` show the real state of units and
+  containers. `ak configure` changes public hostname, ACME email, public URL and
+  local port without rewriting the secrets. `ak --help` and `ak help <command>`
+  are the local documentation; the server stays headless and does not create a
+  desktop icon. Full reference in `docs/AK_CLI.md`.
+- The dashboard is no longer hard-wired to host port 3000: `AEGIS_UI_PORT` is
+  configurable, the package automatically picks the first free slot in
+  `3000-3099` if the requested port is taken and records the value in
+  `/etc/aegis/server.env`. The `aegis` installation uses debconf for domain,
+  ACME email and port; the same values can be preseeded through the environment
+  or changed with `ak configure`. The public domain stays distinct from the
+  Docker Desktop path of the MSI agent.
+- The Windows matrix is now complete like the deb one: `aegis-server` installs
+  only Aegis, `kraken-server` only Kraken, `aegis-suite` both; the agent MSI
+  stays endpoint-only. Every package is self-sufficient, exposes `ak.cmd` on the
+  machine `PATH` and generates its own `server.env`/`kraken.env` on the first
+  `ak start`. Aegis and suite ask for FQDN/ACME email/port; Kraken-only has no
+  public TLS edge. They use Docker Desktop, so startup happens at login
+  (`ak start` or a scheduled task), not before login.
+- Added `ak update` on Linux and Windows: it resolves the latest stable release
+  or an explicit version, verifies the SHA-256 checksum, preserves
+  FQDN/email/port, updates the CLI and payload and restarts the services. A
+  downgrade requires `--allow-downgrade` and a verified database backup. Added
+  the [release policy](docs/RELEASE_POLICY.md): 4.3.x current, 4.2.x previous,
+  <=4.1.x EOL; published artifacts stay immutable.
+- Stricter FQDN/email validation on Linux and Windows, rejecting a public
+  domain without an ACME email, an inconsistent public URL and invalid DNS
+  labels. The Windows configuration stays valid for Kraken-only too, which uses
+  a separate env.
+- Verified the Aegis+Kraken stack on Docker Desktop/Windows: Brain, Link,
+  frontend, Caddy, Kraken, sensors and broker healthy, HTTP 200 on Brain,
+  frontend, Kraken and Caddy. The Windows package reuses the same runtime and
+  the same source; what remains is a boot-timing difference, not a missing
+  component.
+- The default signing of the server packages is self-signed (local GPG key
+  exported as `aegis-pilot-signing-key.asc`): it is accepted for the pilot, it is
+  not a public identity and it is never labelled as production. Production
+  signing remains an operator input. GPG is optional for a local pilot:
+  `SIGNING_MODE=unsigned` is available and SHA-256 remains the integrity check.
+- The 7-day soak is declared an internal test and **postponed to the next
+  cycle**, after firewall/DNS and the improvements to sensors, telemetry and
+  processes. 4.3.0 does not wait for it: the v4.0.0 soak had passed and the 4.3
+  delta is small; the first 4.3 sample is not a completed soak. The runner is
+  not in the packages and is not a request to the customer.
+- Documented the WSL2 reset (`wsl --shutdown`) that fixed the
+  `HCS_E_CONNECTION_TIMEOUT` timeout of the VM shared with Docker Desktop.
 
-### Validazione approfondita e detection hardening (2026-11-23)
+### Deep validation and detection hardening (2026-11-23)
 
-- Aggiunto `scripts/deep_simulation.py`: simulazione end-to-end contro lo stack
-  MSI reale, con 39 casi malevoli, 46 benigni e i casi dual-use inviati come
-  eventi veri attraverso il flusso di enroll. Ogni caso usa un agente dedicato,
-  così la soppressione degli alert per agente/regola/processo non falsa il
-  conteggio. Report in `docs/benchmarks/4.3/DEEP_SIMULATION.md` accanto al JSON
-  grezzo; rieseguibile senza modificare il prodotto.
-- Risultato dell'esecuzione registrata (738 s): TP 38, FN 1, FP 0, TN 46,
-  precision 1.000, recall 0.974, F1 0.987, false positive rate 0.000, severità
-  corretta 23/28, e 40/40 controlli funzionali PASS (ciclo di vita degli alert,
-  RBAC viewer, isolamento, telemetria, resolver, ingest Kraken e outbox).
-  L'unico FN è dichiarato: `/etc/shadow` (T1003.008) non ha una regola statica e
-  richiede audit di file access che questo set di eventi non raccoglie.
-- Soak 10 agenti × 120 s nella stessa esecuzione: 15.860 richieste accettate,
-  0 errori, 0 eventi persi, 132.07 rps, p50/p95/p99 74.1/98.0/178.5 ms.
-  Non sostituisce il soak di 7 giorni, che resta rinviato al ciclo successivo.
-- Rimossi quattro falsi positivi misurati su host puliti (`vssadmin list
-  shadows`, `schtasks /change`, `curl https`, `explorer → cmd`) e aggiunti 15
-  test di regressione in `aegis-brain/tests/test_detection_hardening.py`.
-- Le liste di processi, moduli e anomalie sono limitate a 500/256/200 elementi
-  e, quando il limite scatta, la risposta porta il marker `quality`. Prima un
-  payload da 600 processi veniva rifiutato con 422 e si perdeva la telemetria
-  dell'intero evento; ora l'evento passa e il troncamento è dichiarato.
-- Riaprire un alert azzera la soppressione del pattern, così la riapertura
-  manuale non lascia la detection silenziata per una settimana.
-- CI: i controlli sul contenuto dei pacchetti deb usavano `grep -q` in una
-  pipeline; il grep chiude lo stream, il produttore muore con SIGPIPE e lo step
-  falliva pur essendo il controllo corretto. Ora il grep legge il file e
-  l'exit status è quello del controllo.
-- Limite di enrollment documentato invece che corretto a ridosso del tag:
-  `/enroll` accetta 10 richieste al minuto per IP sorgente ed è un controllo
-  anti brute-force, non un parametro da alzare. Il runbook spiega come arruolare
-  una flotta in batch; il retry dell'agente che rispetta
-  `Retry-After`/`X-RateLimit-Reset` e la recovery del servizio Windows sono
-  pianificati per la 4.4.
+- Added `scripts/deep_simulation.py`: end-to-end simulation against the real MSI
+  stack, with 39 malicious cases, 46 benign ones and the dual-use cases sent as
+  real events through the enrollment flow. Every case uses a dedicated agent, so
+  alert suppression per agent/rule/process cannot skew the count. Report in
+  `docs/benchmarks/4.3/DEEP_SIMULATION.md` next to the raw JSON; reproducible
+  without changing the product.
+- Result of the recorded run (738 s): TP 38, FN 1, FP 0, TN 46, precision 1.000,
+  recall 0.974, F1 0.987, false positive rate 0.000, correct severity 23/28, and
+  40/40 functional checks PASS (alert lifecycle, viewer RBAC, isolation,
+  telemetry, resolver, Kraken ingest and outbox). The single FN is declared:
+  `/etc/shadow` (T1003.008) has no static rule and requires file-access auditing
+  that this event set does not collect.
+- Soak of 10 agents × 120 s in the same run: 15,860 requests accepted, 0 errors,
+  0 lost events, 132.07 rps, p50/p95/p99 74.1/98.0/178.5 ms. It does not replace
+  the 7-day soak, which remains postponed to the next cycle.
+- Removed four false positives measured on clean hosts (`vssadmin list
+  shadows`, `schtasks /change`, `curl https`, `explorer → cmd`) and added 15
+  regression tests in `aegis-brain/tests/test_detection_hardening.py`.
+- Process, module and anomaly lists are capped at 500/256/200 items and, when
+  the limit is hit, the response carries the `quality` marker. A 600-process
+  payload used to be rejected with 422 and the telemetry of the whole event was
+  lost; now the event goes through and the truncation is declared.
+- Reopening an alert clears the pattern suppression, so a manual reopen does not
+  leave the detection muted for a week.
+- CI: the deb content checks used `grep -q` in a pipeline; grep closes the
+  stream, the producer dies with SIGPIPE and the step failed even though the
+  check was correct. Grep now reads the file and the exit status is the check's.
+- Enrollment limit documented instead of changed just before the tag: `/enroll`
+  accepts 10 requests per minute per source IP and it is an anti-brute-force
+  control, not a parameter to raise. The runbook explains how to enroll a fleet
+  in batches; the agent retry that honours `Retry-After`/`X-RateLimit-Reset` and
+  the Windows service recovery are planned for 4.4.
 
-### Aegis Agent 4.3.0 — parità funzionale NodeTrace e Guard
+### Aegis Agent 4.3.0 — NodeTrace and Guard functional parity
 
-**Stato: release 4.3.0 per pilot controllati.** Il runtime Go e il profilo
-`unified` sono verificati contro il Brain reale; la release non è production GA
-e non dichiara la certificazione malware. Il bundle 4.3 non contiene più Guard
-Java e NodeTrace Python: restano solo nel sorgente per compatibilità 4.2.1 e non
-sono offribili per nuovi deploy. Il rollback agli agenti legacy non è un
-requisito della 4.3.0 ed è esplicitamente fuori perimetro.
+**Status: 4.3.0 release for controlled pilots.** The Go runtime and the
+`unified` profile are verified against the real Brain; the release is not
+production GA and does not claim malware certification. The 4.3 bundle no
+longer contains Guard Java and NodeTrace Python: they remain only in the source
+for 4.2.1 compatibility and cannot be offered for new deployments. Rolling back
+to the legacy agents is not a 4.3.0 requirement and is explicitly out of scope.
 
-NodeTrace (`sensor`) è stato verificato con la suite Python (82 test, 2 skip) e
-con 84 funzioni di test Go su tutti i package. Il live test del binario copre
-enroll, CSR, `token.json`, heartbeat, `/update`, comandi, ack, scan e header
-`X-Client-Cert-Hash`; è stato eseguito sia con Brain finto sia contro il Brain
-reale locale, con telemetria persistita in PostgreSQL.
+NodeTrace (`sensor`) was verified with the Python suite (82 tests, 2 skips) and
+with 84 Go test functions across all packages. The binary live test covers
+enrollment, CSR, `token.json`, heartbeat, `/update`, commands, ack, scan and the
+`X-Client-Cert-Hash` header; it ran both against a fake Brain and against the
+real local Brain, with telemetry persisted in PostgreSQL.
 
-Guard (`endpoint`) è stato portato per capacità, non come traduzione meccanica
-dei 140 JUnit: `secret.json`/`agent_id`, enrollment `/enroll/enroll`, outbox
-batch 25/500 ms con buffer 2.000, spool AES-256-GCM 50 MB con quarantena dei
-file corrotti, FIM fsnotify, YARA CLI fail-closed, consumer ETW, monitor
-processi con PID+start time, registry/servizi/persistenza/Defender/Authenticode
-e le 14 azioni (kill, kill tree, block IP e temporaneo, quarantine, remove
+Guard (`endpoint`) was ported by capability, not as a mechanical translation of
+the 140 JUnit tests: `secret.json`/`agent_id`, `/enroll/enroll` enrollment, batch
+outbox 25/500 ms with a 2,000 buffer, 50 MB AES-256-GCM spool with quarantine of
+corrupt files, fsnotify FIM, fail-closed YARA CLI, ETW consumer, process monitor
+with PID+start time, registry/services/persistence/Defender/Authenticode and the
+14 actions (kill, kill tree, block IP and temporary block, quarantine, remove
 persistence, DNS sinkhole, collect IOC, verify, isolate/deisolate, FIM, YARA,
-update delegato). Il live test del binario copre identità, heartbeat/metriche,
-comandi, ack e header `X-Client-Cert-Hash`; sul Brain reale il profilo endpoint
-ha riportato FIM e response actions attivi, con ETW/YARA dichiarati non
-disponibili su questo host.
+delegated update). The binary live test covers identity, heartbeat/metrics,
+commands, ack and the `X-Client-Cert-Hash` header; against the real Brain the
+endpoint profile reported FIM and response actions active, with ETW/YARA
+declared unavailable on this host.
 
-Il profilo `unified` usa una sola identità Guard e un solo outbox, ma avvia
-anche i collector sensor. Il Brain/UI lo accettano in enrollment, token di
-deploy, job, OTA, Discovery e telemetria recente. Il bundle 4.3.0 contiene solo
-l'agente Go per Windows e Linux: `unified-latest.zip`, `unified-latest.tar.gz` e
-le copie versionate `unified-4.3.0.*`. L'archivio Windows include
-`aegis-agent.exe` e `aegis-etw.exe`; quello Linux include `aegis-agent`,
-`aegis-collector` e `aegis_exec.bpf.o`. `release-smoke.py --require-agent`
-rifiuta un bundle senza questi file e rifiuta esplicitamente Guard/NodeTrace e i
-binari grezzi. Il servizio/installer drop-in firmato è nella 4.3; resta fuori
-il rollback Java/JRE/Python, insieme alla certificazione reale di malware e
-corpus.
+The `unified` profile uses a single Guard identity and a single outbox, but also
+starts the sensor collectors. The Brain/UI accept it in enrollment, deploy
+tokens, jobs, OTA, Discovery and recent telemetry. The 4.3.0 bundle contains
+only the Go agent for Windows and Linux: `unified-latest.zip`,
+`unified-latest.tar.gz` and the versioned copies `unified-4.3.0.*`. The Windows
+archive includes `aegis-agent.exe` and `aegis-etw.exe`; the Linux one includes
+`aegis-agent`, `aegis-collector` and `aegis_exec.bpf.o`. `release-smoke.py
+--require-agent` rejects a bundle without these files and explicitly rejects
+Guard/NodeTrace and the raw binaries. The signed drop-in service/installer is in
+4.3; the Java/JRE/Python rollback remains out of scope, together with real
+malware and corpus certification.
 
-Evidenza eseguita il 2026-11-18 (fake) e il 2026-11-19 (stack reale):
+Evidence run on 2026-11-18 (fake) and 2026-11-19 (real stack):
 
-| Gate | Risultato |
+| Gate | Result |
 |---|---|
-| `go test ./... -count=1` | 84 funzioni di test Go, tutti i package verdi |
-| `go vet ./...` | verde |
-| build Go Windows e Linux | verde, Go 1.27.4 |
-| `mvn test` Guard Java | 140 test JUnit, 0 failure/error (Temurin 25.0.5.8) |
-| NodeTrace Python | 82 test, 0 failure, 2 skip |
-| live sensor/Guard con Brain finto | verdi; contratto di rete e comandi osservato |
-| live sensor/endpoint/unified con Brain reale | verdi; righe telemetria 1/18/17, capabilities popolate |
-| primo avvio unified con token monouso | token consumato, agent_type=unified, telemetria presente |
-| deploy API unified | token 200, install.ps1/sh 200, job `manual_required`; only `oneline` accepted, no SSH/WinRM executor |
-| bundle agent runtime | `unified-latest.zip` scaricato dal Brain 4.3, eseguito come `agent_type=unified`, telemetria persistita e agente revocato |
-| A/B locale 2×8 s | NodeTrace 27.28 MB RSS vs Go sensor 18.43 MB; Guard Java 126.45 MB vs Go endpoint 18.77 MB |
+| `go test ./... -count=1` | 84 Go test functions, all packages green |
+| `go vet ./...` | green |
+| Go build on Windows and Linux | green, Go 1.27.4 |
+| `mvn test` Guard Java | 140 JUnit tests, 0 failure/error (Temurin 25.0.5.8) |
+| NodeTrace Python | 82 tests, 0 failure, 2 skips |
+| live sensor/Guard against a fake Brain | green; network and command contract observed |
+| live sensor/endpoint/unified against the real Brain | green; telemetry rows 1/18/17, capabilities populated |
+| first unified start with a single-use token | token consumed, agent_type=unified, telemetry present |
+| unified deploy API | token 200, install.ps1/sh 200, job `manual_required`; only `oneline` accepted, no SSH/WinRM executor |
+| agent runtime bundle | `unified-latest.zip` downloaded from the 4.3 Brain, run as `agent_type=unified`, telemetry persisted and agent revoked |
+| local 2×8 s A/B | NodeTrace 27.28 MB RSS vs Go sensor 18.43 MB; Guard Java 126.45 MB vs Go endpoint 18.77 MB |
 
-Il benchmark è in `docs/BENCHMARK.md` e i dati grezzi in
-`docs/benchmarks/4.3/agents-ab.json`. È una misura di footprint e startup su
-Brain finto, non di ingestione PostgreSQL, mTLS/Caddy o flotta. Il vantaggio
-misurato è la riduzione di RSS e artefatto; la CPU dell'endpoint Go è
-comparabile a Java e non viene dichiarata più bassa. Durante la misura è stata
-corretta una regressione reale del polling Windows (WMI/Authenticode per tutti
-i processi ogni secondo), che saturava un core.
+The benchmark is in `docs/BENCHMARK.md` and the raw data in
+`docs/benchmarks/4.3/agents-ab.json`. It measures footprint and startup against
+a fake Brain, not PostgreSQL ingestion, mTLS/Caddy or fleet behaviour. The
+measured advantage is the reduction in RSS and artifact size; the CPU of the Go
+endpoint is comparable to Java and is not claimed to be lower. During the
+measurement a real Windows polling regression was fixed (WMI/Authenticode for
+every process every second), which saturated a core.
 
-**Perimetro dichiarato:** la 4.3.0 include i percorsi packaging firmati
-MSI/deb/RPM/ipk, il servizio nativo, la firma Authenticode provider-agnostica,
-la modalità GPG production e la firma cosign keyless del tag. Restano fuori il
-rollback Java/JRE/Python e la certificazione reale di malware/corpus, che
-richiede un laboratorio autorizzato. Lo smoke contro il Brain reale è reale, ma
-non è un test di flotta né di servizio installato. Il bundle non contiene più
-Guard/NodeTrace, che restano solo nel sorgente per i 4.2.1 già installati.
+**Declared scope:** 4.3.0 includes the signed MSI/deb/RPM/ipk packaging paths,
+the native service, provider-agnostic Authenticode signing, GPG production mode
+and cosign keyless signing of the tag. Out of scope: the Java/JRE/Python
+rollback and real malware/corpus certification, which require an authorised
+laboratory. The smoke test against the real Brain is real, but it is not a fleet
+test or an installed-service test. The bundle no longer contains Guard/NodeTrace,
+which remain only in the source for already installed 4.2.1 deployments.
 
-**Evidenza di release:** clean install isolata da sorgente senza artefatti
-(`aegis-clean43`) con volumi nuovi, bootstrap admin, enrollment reale,
-heartbeat, evento agente, alert Sigma `T1110.001`, frontend e Link health;
-`api_smoke.py` **21/21 ALL PASS**. La clean install del gate 6 è stata eseguita
-sull'archivio `31962cd`; il bundle finale aggiunge il fix del download e i
-default `unified`, è verificato con smoke 24/24 e con il download/run live
-dell'agente Go contro un Brain 4.3. Il bundle ha 24 file: quattro archivi
-`unified-*` e i tre helper kernel dentro gli archivi;
-l'upgrade del database 4.2.1 ha preservato 68 agenti e 321 alert, con smoke
-21/21. Il 50k Link, il restart del consumer comandi e i gate restano registrati
-in `docs/RELEASE_GATE_4.3.md`. La CI hosted al tag è l'unico passo ancora
-esterno al repository locale.
+**Release evidence:** isolated clean install from source with no artifacts
+(`aegis-clean43`) with new volumes, admin bootstrap, real enrollment, heartbeat,
+agent event, Sigma alert `T1110.001`, frontend and Link health;
+`api_smoke.py` **21/21 ALL PASS**. The gate-6 clean install ran on archive
+`31962cd`; the final bundle adds the download fix and the `unified` defaults, and
+is verified with a 24/24 smoke plus the live download/run of the Go agent
+against a 4.3 Brain. The bundle has 24 files: four `unified-*` archives and the
+three kernel helpers inside the archives; the 4.2.1 database upgrade preserved
+68 agents and 321 alerts, with a 21/21 smoke. The 50k Link load, the command
+consumer restart and the gates remain recorded in `docs/RELEASE_GATE_4.3.md`.
+The hosted CI at the tag is the only step still external to the local repository.
 
 ### Changed
 
@@ -232,11 +230,11 @@ esterno al repository locale.
   a non-root user with the Docker socket group added explicitly.
 - CI now runs on `dev`, `main`, `feat/**` and pull requests as well as tags. The
   release/publish job remains tag-only; a branch run is not Gate 5.
-- Toolchain Go portata a **1.27.4** (ultima stabile, inclusi i fix di sicurezza
-  del 2 novembre 2026) in `aegis-agent/go.mod`, nel piano 4.3 e nella CI, che ora
-  esegue `go test`, `go vet` e build del binario su Ubuntu e Windows. La macchina
-  di sviluppo è stata portata da Go 1.26.5 a 1.27.4 tramite il pacchetto ufficiale;
-  `go version` e `go env GOROOT` ora puntano alla nuova installazione.
+- Go toolchain bumped to **1.27.4** (latest stable, including the security fixes
+  of 2 November 2026) in `aegis-agent/go.mod`, in the 4.3 plan and in CI, which
+  now runs `go test`, `go vet` and a binary build on Ubuntu and Windows. The
+  development machine was moved from Go 1.26.5 to 1.27.4 through the official
+  package; `go version` and `go env GOROOT` now point to the new installation.
 
 ### Added
 
@@ -265,49 +263,49 @@ esterno al repository locale.
   `production` or `unsigned`. Test-signed CI artifacts cannot be mistaken for a
   release artifact, and a production release requires a `Valid` Authenticode
   signature with timestamp (MSI) or the operator GPG key (deb).
-- Test di integrazione live del sensor Go con Brain finto: enrollment, CSR
-  firmata da una CA di test, salvataggio identità, heartbeat/telemetria,
-  comandi batch, ack, scan Discovery e verifica dell'header `X-Client-Cert-Hash`.
-- Live reale dei profili `sensor`, `endpoint` e `unified` contro il Brain
-  locale: `scripts/live_agent_profiles.py`; primo avvio unified con token
-  monouso e install.ps1/install.sh generati e verificati sintatticamente.
-- Base del profilo `endpoint` Guard: `secret.json`/`agent_id`, enrollment
-  `aegis-guard`, report legacy e layer di validazione comandi; test di
-  integrazione con Brain finto e test sulle funzioni pure.
+- Live integration test of the Go sensor against a fake Brain: enrollment, CSR
+  signed by a test CA, identity persistence, heartbeat/telemetry, batch
+  commands, ack, Discovery scan and verification of the `X-Client-Cert-Hash`
+  header.
+- Real live runs of the `sensor`, `endpoint` and `unified` profiles against the
+  local Brain: `scripts/live_agent_profiles.py`; first unified start with a
+  single-use token and generated install.ps1/install.sh, both syntax-checked.
+- Guard `endpoint` profile baseline: `secret.json`/`agent_id`, `aegis-guard`
+  enrollment, legacy reporting and the command validation layer; integration
+  tests against a fake Brain and tests of the pure functions.
 
 ### Fixed
 
-- `scripts/setup.py` inizializza la PKI (CA + chiave manifest) dopo la
-  readiness e prima dell'admin/smoke. Senza questo passo un clone pulito
-  serviva l'installer one-liner con `503`, pur essendo lo stack sano.
-- Persistenza: l'MSI configura il recovery del servizio `AegisAgent` (tre
-  restart a 5 s, reset dopo un giorno) oltre all'avvio automatico; l'unità
-  Linux usa `Restart=always` e `StartLimitIntervalSec=0`; il one-liner Windows
-  verifica `AUTOMATIC` e le failure action prima di dichiarare il successo, e
-  attende la chiusura di un servizio marcato per la cancellazione. I pacchetti
-  deb/RPM e l'ipk falliscono l'installazione se non riescono ad abilitare il
-  servizio al boot. I container Compose usano `restart: unless-stopped`, ma
-  richiedono che il demone Docker sia abilitato. `docs/PERSISTENCE.md` separa
-  ciò che riparte davvero da ciò che dipende dall'host o dal lab.
-- Il soak `scripts/soak_7d.py` tiene sveglio Windows con
-  `ES_SYSTEM_REQUIRED` e fallisce se il wall-clock ha un buco superiore a due
-  intervalli di campionamento. Un portatile sospeso non produce più un falso
-  "7 giorni": il report dichiara `sleep_guard`, i gap e `require_continuous`.
-- Rimosso il prototipo sperimentale `scripts/self_improvement.py` e il suo
-  test. La 4.3 non contiene più componenti di auto-modifica delle detection;
-  AP-126/AP-127 restano gate di evidenza esterna, non auto-improvement.
+- `scripts/setup.py` initialises the PKI (CA + manifest key) after readiness and
+  before the admin/smoke step. Without this step a clean clone served the
+  one-liner installer with `503` even though the stack was healthy.
+- Persistence: the MSI configures recovery for the `AegisAgent` service (three
+  restarts at 5 s, reset after a day) in addition to automatic startup; the
+  Linux unit uses `Restart=always` and `StartLimitIntervalSec=0`; the Windows
+  one-liner verifies `AUTOMATIC` and the failure actions before declaring
+  success, and waits for a service marked for deletion to finish. The deb/RPM
+  packages and the ipk fail the installation if they cannot enable the service
+  at boot. Compose containers use `restart: unless-stopped`, but require the
+  Docker daemon to be enabled. `docs/PERSISTENCE.md` separates what really comes
+  back from what depends on the host or the lab.
+- The `scripts/soak_7d.py` soak keeps Windows awake with `ES_SYSTEM_REQUIRED`
+  and fails if the wall clock has a gap larger than two sampling intervals. A
+  sleeping laptop no longer produces a fake "7 days": the report declares
+  `sleep_guard`, the gaps and `require_continuous`.
+- Removed the experimental `scripts/self_improvement.py` prototype and its test.
+  4.3 no longer contains any self-modifying detection component; AP-126/AP-127
+  remain external-evidence gates, not self-improvement.
 - CI now derives the Docker socket GID for the non-root Kraken broker and
   validates Vault addresses before `urlopen`; the Vault SSL context still uses
   the verified constructor with an explicit lab-only opt-out. Live telemetry
   tests skip on Darwin, where the collector is unsupported, while the macOS
   build/vet gate remains. Branch run 44916543187 is green for all non-release
   jobs; the release job remains tag-only.
-- I client legacy NodeTrace e Guard ora inviano solo `X-Client-Cert-Hash`,
-  coerenti con il rifiuto di `X-Client-Cert` nel Brain; il test NodeTrace
-  blocca il ritorno dell'header completo.
-- Gli handler Guard/Go non riportano più `ok` quando quarantena, blocco
-  firewall, kill o raccolta IOC non riescono: l'errore viene propagato all'ack
-  come `failed`.
+- The legacy NodeTrace and Guard clients now send only `X-Client-Cert-Hash`,
+  consistent with the Brain rejecting `X-Client-Cert`; the NodeTrace test blocks
+  the return of the full header.
+- Guard/Go handlers no longer report `ok` when quarantine, firewall block, kill
+  or IOC collection fail: the error is propagated to the ack as `failed`.
 - Kraken SSH now advertises an Ubuntu OpenSSH banner instead of the AsyncSSH
   default. FTP passive mode advertises a reachable host and a published passive
   range, and uploads complete on the data channel instead of a fixed sleep.
@@ -315,12 +313,11 @@ esterno al repository locale.
   or 65+ tests; it documents six sensors, the broker-only socket and 154 tests.
 - HA documentation no longer reports AP-122/AP-123 as open; both are PASS in
   the 4.3 release gate. Threat-model migrations now cite `0001..0025`.
-- Il download degli artefatti (`/deploy/artifacts` e
-  `/deploy/bootstrap-artifacts`) restituiva un `200` con `Content-Length`
-  corretto ma zero byte: `FileResponse` attraverso il `BaseHTTPMiddleware`
-  di Starlette 1.10.0 perdeva il body, quindi nessun one-liner poteva
-  scaricare l'agente. La risposta ora legge l'artefatto in memoria (file da
-  pochi MB) e un test di regressione copre il caso.
+- The artifact download (`/deploy/artifacts` and `/deploy/bootstrap-artifacts`)
+  returned a `200` with a correct `Content-Length` but zero bytes:
+  `FileResponse` through Starlette 1.10.0's `BaseHTTPMiddleware` lost the body,
+  so no one-liner could download the agent. The response now reads the artifact
+  into memory (a few MB) and a regression test covers the case.
 
 ## [4.2.1] - 2026-11-18
 

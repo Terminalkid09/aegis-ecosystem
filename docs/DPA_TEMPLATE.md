@@ -1,113 +1,113 @@
 # Data Processing Agreement — template
 
-**Template, non parere legale.** Da adattare alla legge applicabile e far
-verificare a un legale prima della firma. I campi tra `[ ]` vanno compilati.
+**Template, not legal advice.** Adapt it to the applicable law and have it
+reviewed by a lawyer before signing. Fields in `[ ]` must be filled in.
 
-## 1. Parti
+## 1. Parties
 
-- **Titolare:** [RAGIONE SOCIALE], sede [ ], P.IVA [ ], rappresentata da [ ].
-- **Responsabile:** [RAGIONE SOCIALE], sede [ ], P.IVA [ ], rappresentata da [ ].
+- **Controller:** [COMPANY NAME], registered office [ ], VAT no. [ ],
+  represented by [ ].
+- **Processor:** [COMPANY NAME], registered office [ ], VAT no. [ ],
+  represented by [ ].
 
-## 2. Oggetto e durata
+## 2. Subject and duration
 
-Il Responsabile tratta i dati personali necessari a [installare/gestire/
-assistere] il deployment Aegis presso il Titolare, per la durata del contratto
-[X] e fino alla restituzione/cancellazione dei dati.
+The Processor processes the personal data necessary to [install/manage/
+support] the Aegis deployment at the Controller, for the duration of the
+contract [X] and until return/deletion of the data.
 
-## 3. Ruoli e istruzioni
+## 3. Roles and instructions
 
-Il Titolare è il titolare del trattamento. Il Responsabile tratta i dati solo
-su istruzioni documentate del Titolare, salvo obblighi di legge. Le istruzioni
-iniziali sono nell'Allegato A (categorie di dati, finalità, retention).
+The Controller is the data controller. The Processor processes data only on
+documented instructions from the Controller, except where required by law. The
+initial instructions are in Annex A (data categories, purposes, retention).
 
-Il Responsabile informa immediatamente il Titolare se un'istruzione viola la
-normativa applicabile.
+The Processor informs the Controller immediately if an instruction breaches
+applicable law.
 
-## 4. Riservatezza
+## 4. Confidentiality
 
-Il personale autorizzato è vincolato a riservatezza, riceve accesso minimo e
-formazione, e usa credenziali nominali. L'accesso remoto è registrato e
-revocabile.
+Authorised personnel are bound by confidentiality, receive minimum access and
+training, and use named credentials. Remote access is logged and revocable.
 
-## 5. Misure di sicurezza
+## 5. Security measures
 
-Al minimo:
+At a minimum:
 
-- cifratura in transito (TLS; mTLS per gli agent in produzione);
-- cifratura dei backup e delle credenziali;
-- RBAC, autenticazione forte per gli amministratori e audit log;
-- segregazione degli ambienti e dei dati Kraken;
-- minimizzazione, retention e cancellazione verificabile;
-- gestione degli incidenti e delle vulnerabilità;
-- nessun segreto o dato personale non necessario nei log.
+- encryption in transit (TLS; mTLS for agents in production);
+- encryption of backups and credentials;
+- RBAC, strong authentication for administrators and audit logging;
+- segregation of environments and of Kraken data;
+- minimisation, retention and verifiable deletion;
+- incident and vulnerability management;
+- no secrets or unnecessary personal data in logs.
 
-## 6. Sub-responsabili
+## 6. Sub-processors
 
-Il Responsabile non nomina sub-responsabili senza autorizzazione scritta del
-Titolare. Autorizzati: [ELENCO; “nessuno” se non applicabile]. Per ciascuno
-valgono obblighi equivalenti; il Responsabile resta responsabile verso il
-Titolare.
+The Processor does not appoint sub-processors without the Controller's written
+authorisation. Authorised: [LIST; "none" if not applicable]. Equivalent
+obligations apply to each of them; the Processor remains liable to the
+Controller.
 
-## 7. Trasferimenti
+## 7. Transfers
 
-I dati restano nel deployment on-premise del Titolare. Eventuali trasferimenti
-extra-UE richiedono istruzione scritta, base giuridica e garanzie adeguate
-(SCC/decisione di adeguatezza). Provider cloud opzionali: [NESSUNO / ELENCO].
+Data stays in the Controller's on-premise deployment. Any transfers outside the
+EU require a written instruction, a legal basis and appropriate safeguards
+(SCCs/adequacy decision). Optional cloud providers: [NONE / LIST].
 
-## 8. Assistenza
+## 8. Assistance
 
-Il Responsabile assiste il Titolare, per quanto possibile, nel rispondere alle
-richieste degli interessati, nelle valutazioni d'impatto e nelle consultazioni
-con l'autorità. Le richieste vanno inoltrate a [CONTATTO PRIVACY] entro [5]
-giorni lavorativi.
+The Processor assists the Controller, as far as possible, in responding to data
+subject requests, in impact assessments and in consultations with the
+authority. Requests must be sent to [PRIVACY CONTACT] within [5] working days.
 
 ## 9. Data breach
 
-Il Responsabile notifica al Titolare senza ingiustificato ritardo e comunque
-entro **24 ore** dalla conferma, con:
+The Processor notifies the Controller without undue delay and in any case
+within **24 hours** of confirmation, including:
 
-- natura dell'evento e categorie di dati interessate;
-- host/utenti e volume stimato;
-- misure di contenimento adottate;
-- rischio residuo e raccomandazioni.
+- nature of the event and affected data categories;
+- hosts/users and estimated volume;
+- containment measures taken;
+- residual risk and recommendations.
 
-Il Titolare decide la notifica all'autorità entro 72 ore, salvo diverso obbligo
-di legge.
+The Controller decides on notification to the authority within 72 hours, unless
+the law requires otherwise.
 
-## 10. Restituzione e cancellazione
+## 10. Return and deletion
 
-Alla cessazione il Responsabile restituisce i dati in formato [JSON/SQL/altro]
-e cancella quelli presenti nei propri sistemi entro [30] giorni, salvo
-conservazione obbligatoria. I backup ruotano entro [7] giorni. La cancellazione
-è attestata per iscritto; restano possibili copie immutabili di sicurezza fino
-alla scadenza della retention.
+On termination the Processor returns the data in [JSON/SQL/other] format and
+deletes the data held in its systems within [30] days, except where retention is
+mandatory. Backups rotate within [7] days. Deletion is certified in writing;
+immutable security copies may remain until retention expires.
 
 ## 11. Audit
 
-Il Titolare può verificare il rispetto del DPA con [questionario/audit] e
-preavviso di [10] giorni, senza accedere a dati di altri clienti. Il
-Responsabile fornisce evidenze di configurazione, backup/restore e audit.
+The Controller may verify compliance with the DPA through a
+[questionnaire/audit] with [10] days' notice, without accessing other customers'
+data. The Processor provides evidence of configuration, backup/restore and
+audit.
 
-## 12. Responsabilità e legge applicabile
+## 12. Liability and applicable law
 
-Responsabilità: [LIMITI COERENTI CON IL CONTRATTO PRINCIPALE]. Legge: [LEGGE].
-Foro: [FORO]. In caso di conflitto tra DPA e contratto principale prevale il
-DPA per il trattamento dei dati personali.
+Liability: [LIMITS CONSISTENT WITH THE MAIN CONTRACT]. Law: [LAW]. Venue:
+[VENUE]. In the event of conflict between the DPA and the main contract, the
+DPA prevails for the processing of personal data.
 
-## Allegato A — Dettagli del trattamento
+## Annex A — Processing details
 
-| Voce | Valore |
+| Item | Value |
 |---|---|
-| Categorie di interessati | Dipendenti, collaboratori, utenti degli endpoint, attaccanti esterni (Kraken) |
-| Categorie di dati | Identificativi, telemetria endpoint, log, credenziali tentate, sample malware |
-| Finalità | Sicurezza informatica, rilevamento e risposta agli incidenti |
-| Retention | Telemetria 14 gg; alert 90 gg; audit 365 gg; syslog 30 gg; Kraken 30 gg/5 GiB; backup 7 gg |
-| Localizzazione | [PAESE/DATA CENTER] |
-| Sub-responsabili | [NESSUNO / ELENCO] |
-| Misure ulteriori | [mTLS, isolamento Kraken, cifratura backup, accesso minimo] |
+| Categories of data subjects | Employees, contractors, endpoint users, external attackers (Kraken) |
+| Categories of data | Identifiers, endpoint telemetry, logs, attempted credentials, malware samples |
+| Purposes | Information security, incident detection and response |
+| Retention | Telemetry 14 days; alerts 90 days; audit 365 days; syslog 30 days; Kraken 30 days/5 GiB; backups 7 days |
+| Location | [COUNTRY/DATA CENTER] |
+| Sub-processors | [NONE / LIST] |
+| Additional measures | [mTLS, Kraken isolation, backup encryption, minimum access] |
 
-Firme:
+Signatures:
 
-Titolare ____________________  Data ________
+Controller ____________________  Date ________
 
-Responsabile ________________  Data ________
+Processor ________________  Date ________

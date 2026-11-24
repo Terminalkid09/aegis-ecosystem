@@ -1,20 +1,19 @@
 # Deep simulation — Aegis/Kraken 4.3
 
-Eseguita: `2026-11-23T17:36:24.297737+00:00` → `2026-11-23T17:48:41.780671+00:00`  
-Stack: `http://127.0.0.1:8000` (Windows, pacchetti MSI 4.3.0, self-signed)  
-Durata totale: **738s**
+Executed: `2026-11-23T17:36:24.297737+00:00` → `2026-11-23T17:48:41.780671+00:00`  
+Stack: `http://127.0.0.1:8000` (Windows, MSI packages 4.3.0, self-signed)  
+Total duration: **738s**
 
-> Simulazione di comportamento, non esecuzione di malware. Ogni caso è
-> inviato come evento reale al Brain con il flusso di enroll di un agente.
-> Un agente dedicato per caso evita che la soppressione degli alert
-> (per agente/regola/processo) falsi il conteggio.
+> Behaviour simulation, not malware execution. Every case is sent to the Brain
+> as a real event through an agent enrollment flow. A dedicated agent per case
+> prevents alert suppression (per agent/rule/process) from skewing the count.
 
 ## Detection
 
-| Metrica | Valore |
+| Metric | Value |
 |---|---:|
-| Casi malevoli | 39 |
-| Casi benigni | 46 |
+| Malicious cases | 39 |
+| Benign cases | 46 |
 | True positive | 38 |
 | False negative | 1 |
 | False positive | 0 |
@@ -23,17 +22,17 @@ Durata totale: **738s**
 | Recall | 0.974 |
 | F1 | 0.987 |
 | False positive rate | 0.000 |
-| Severità corretta | 23/28 |
+| Correct severity | 23/28 |
 
-### Falsi negativi (comportamento non rilevato)
+### False negatives (behaviour not detected)
 
-| Caso | Tecnica | Nota |
+| Case | Technique | Note |
 |---|---|---|
-| `mal-linux-shadow` — lettura shadow | T1003.008 | T1003.008 non ha una regola statica: FN atteso |
+| `mal-linux-shadow` — shadow read | T1003.008 | T1003.008 has no static rule: expected FN |
 
-### Severità diversa dall'atteso
+### Severity differing from expected
 
-| Caso | Attesa | Ottenuta |
+| Case | Expected | Obtained |
 |---|---|---|
 | `mal-psh-encoded` | HIGH | CRITICAL |
 | `mal-rundll32-js` | HIGH | LOW |
@@ -41,9 +40,9 @@ Durata totale: **738s**
 | `mal-double-ext` | HIGH | CRITICAL |
 | `mal-lolbin-temp` | HIGH | CRITICAL |
 
-## Regole che hanno generato alert
+## Rules that raised alerts
 
-| Regola | Alert |
+| Rule | Alerts |
 |---|---:|
 | AEGIS-S012 | 12 |
 | AEGIS-S004 | 11 |
@@ -66,46 +65,46 @@ Durata totale: **738s**
 
 ## Soak
 
-| Metrica | Valore |
+| Metric | Value |
 |---|---:|
-| Agenti | 10 |
-| Durata | 120.1s |
-| Richieste | 15860 |
-| Accettate | 15860 |
-| Duplicati | 0 |
-| Errori | 0 |
+| Agents | 10 |
+| Duration | 120.1s |
+| Requests | 15860 |
+| Accepted | 15860 |
+| Duplicates | 0 |
+| Errors | 0 |
 | Throughput | 132.07 rps |
 | p50 / p95 / p99 | 74.1 / 98.0 / 178.5 ms |
-| Eventi persi (server) | None |
+| Lost events (server) | None |
 
-## Controlli funzionali
+## Functional checks
 
-| Controllo | Esito | Dettaglio |
+| Check | Result | Detail |
 |---|---|---|
-| tutti i casi inviati con 200 | PASS | esempi=[] |
+| all cases sent with 200 | PASS | examples=[] |
 | heartbeat 200 | PASS | 200 |
-| event_id duplicato riconosciuto | PASS | 200 status=duplicate |
-| payload senza event_type rifiutato 422 | PASS | 422 |
-| segreto agente errato rifiutato | PASS | 401 |
-| command_line oltre il limite troncata, non 422 | PASS | 200 |
-| 600 processi accettati (lista troncata, non 422) | PASS | 200 |
-| lista processi troncata a 500 nel DB | PASS | righe=500 |
-| NUL nella command line non rompe la scrittura | PASS | 200 |
-| agente sconosciuto rifiutato | PASS | 401 |
-| alert presente tra i non risolti | PASS |  |
+| duplicate event_id recognised | PASS | 200 status=duplicate |
+| payload without event_type rejected 422 | PASS | 422 |
+| wrong agent secret rejected | PASS | 401 |
+| command_line over the limit truncated, not 422 | PASS | 200 |
+| 600 processes accepted (list truncated, not 422) | PASS | 200 |
+| process list truncated to 500 in the DB | PASS | rows=500 |
+| NUL in the command line does not break the write | PASS | 200 |
+| unknown agent rejected | PASS | 401 |
+| alert present among the unresolved | PASS |  |
 | PATCH resolve 200 | PASS | {"id":645,"agent_id":"be6c6d1c-ed3e-4004-95d9-30efd0305f5e","agent_hostname":null,"timestamp":"2026-11-23T17:41:22.47323 |
-| resolve riporta il muting attivo | PASS | triage_muted_seconds=604800 |
-| resolve imposta is_resolved | PASS | True |
-| risolto fuori dai non risolti | PASS |  |
-| risolto presente nei risolti | PASS |  |
-| dettaglio coerente con il resolve | PASS |  |
-| detection identica silenziata dopo il resolve | PASS | 1->1 |
-| riapertura alert 200 | PASS | {"id":645,"agent_id":"be6c6d1c-ed3e-4004-95d9-30efd0305f5e","agent_hostname":null,"timestamp":"2026-11-23T17:41:22.47323 |
-| dopo la riapertura la detection torna visibile | PASS | 1->2 |
+| resolve reports active muting | PASS | triage_muted_seconds=604800 |
+| resolve sets is_resolved | PASS | True |
+| resolved alert no longer among unresolved | PASS |  |
+| resolved alert present among resolved | PASS |  |
+| detail consistent with the resolve | PASS |  |
+| identical detection muted after resolve | PASS | 1->1 |
+| alert reopen 200 | PASS | {"id":645,"agent_id":"be6c6d1c-ed3e-4004-95d9-30efd0305f5e","agent_hostname":null,"timestamp":"2026-11-23T17:41:22.47323 |
+| after reopening, the detection is visible again | PASS | 1->2 |
 | resolve-all 200 | PASS | {"resolved":59,"triage_muted":59,"detail":"Resolved 59 alerts; similar detections muted ~7d for triaged patterns"} |
-| resolve-all idempotente (seconda chiamata 0) | PASS | second=0 |
-| viewer non puo' fare resolve-all (403) | PASS | 403 |
-| viewer non puo' cancellare gli alert (403) | PASS | 403 |
+| resolve-all idempotent (second call 0) | PASS | second=0 |
+| viewer cannot run resolve-all (403) | PASS | 403 |
+| viewer cannot delete alerts (403) | PASS | 403 |
 | Kraken health 200 | PASS | 200 |
 | Kraken ingest ssh 201 | PASS | 201 |
 | Kraken ingest http 201 | PASS | 201 |
@@ -113,24 +112,24 @@ Durata totale: **738s**
 | Kraken ingest telnet 201 | PASS | 201 |
 | Kraken ingest smb 201 | PASS | 201 |
 | Kraken ingest rdp 201 | PASS | 201 |
-| Kraken retry idempotente: nessuna seconda riga | PASS | status=201 rows=315->315 |
-| Kraken rifiuta chiave interna errata | PASS | 403 |
-| Aegis vede le sessioni deception Kraken | PASS | +6 |
-| Aegis crea l'incidente Kraken | PASS | +6 |
-| outbox Kraken consegnata | PASS | pending=0 |
-| alert Kraken risolvibile dalla dashboard Aegis | PASS | {"id":659,"agent_id":"02c99b74-b95e-4b2a-8ac2-b68180df0d16","agent_hostname":null,"timestamp":"2026-11-23T17:44:43.67710 |
-| nessuna password in chiaro negli incidenti Aegis | PASS | rows=0 |
-| soak senza errori HTTP | PASS | errors=0 |
-| soak senza eventi persi | PASS | lost=None |
+| Kraken retry is idempotent: no second row | PASS | status=201 rows=315->315 |
+| Kraken rejects a wrong internal key | PASS | 403 |
+| Aegis sees the Kraken deception sessions | PASS | +6 |
+| Aegis creates the Kraken incident | PASS | +6 |
+| Kraken outbox delivered | PASS | pending=0 |
+| Kraken alert resolvable from the Aegis dashboard | PASS | {"id":659,"agent_id":"02c99b74-b95e-4b2a-8ac2-b68180df0d16","agent_hostname":null,"timestamp":"2026-11-23T17:44:43.67710 |
+| no plaintext password in Aegis incidents | PASS | rows=0 |
+| soak without HTTP errors | PASS | errors=0 |
+| soak without lost events | PASS | lost=None |
 
-## Limiti
+## Limitations
 
-- Eventi costruiti, non traffico reale né malware eseguito.
-- La severità attesa è quella del contratto delle regole statiche 4.3.
-- Il soak misura il percorso HTTP+DB su un singolo host; non è una
-  capacità di flotta né una prova di scalabilità.
-- Kraken è esercitato sul contratto sensori→app→Aegis; non è un
-  test di esposizione honeypot su rete reale.
-- La persistenza non è dedotta dal delta della tabella `telemetry`
-  (tabella delle metriche, condivisa con altri agenti): è verificata
-  dagli snapshot degli scenari e da probe diretti sull'agente.
+- Constructed events, not real traffic and no malware executed.
+- The expected severity is the one defined by the 4.3 static-rule contract.
+- The soak measures the HTTP+DB path on a single host; it is not a fleet
+  capacity or a scalability proof.
+- Kraken is exercised on the sensors→app→Aegis contract; it is not a honeypot
+  exposure test on a real network.
+- Persistence is not inferred from the delta of the `telemetry` table (a metrics
+  table shared with other agents): it is verified through scenario snapshots and
+  direct probes of the agent.
