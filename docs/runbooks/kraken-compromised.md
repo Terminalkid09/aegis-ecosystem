@@ -1,57 +1,57 @@
-# Runbook — Kraken compromesso
+# Runbook — compromised Kraken
 
-**Obiettivo:** contenere un compromise di Kraken senza dare all'attaccante un
-pivot verso il Brain, il database Aegis o la rete dell'host.
+**Objective:** contain a Kraken compromise without giving the attacker a pivot
+into the Brain, the Aegis database or the host network.
 
-Kraken è un microservizio separato. Il Brain non deve mai diventare un canale
-di comando per ripristinarlo.
+Kraken is a separate microservice. The Brain must never become a command channel
+for restoring it.
 
-## 1. Isolamento
+## 1. Isolation
 
-1. ferma `aegis-kraken-sensors`, `aegis-kraken` e `aegis-kraken-broker`;
-2. scollega il servizio dalla rete `default` e lascia solo la rete interna
-   `kraken_internal` per l'analisi, se possible;
-3. revoca le chiavi SSO e l'`INTERNAL_API_KEY` di Kraken;
-4. disabilita l'ingest Kraken nel Brain (`KRAKEN_INGEST_ENABLED=false`) e
-   ruota `KRAKEN_INGEST_SECRET`;
-5. se il broker ha il socket Docker, considera l'host Docker compromesso:
-   isola l'host, non solo il container.
+1. stop `aegis-kraken-sensors`, `aegis-kraken` and `aegis-kraken-broker`;
+2. disconnect the service from the `default` network and leave only the internal
+   `kraken_internal` network for analysis, if possible;
+3. revoke the SSO keys and Kraken's `INTERNAL_API_KEY`;
+4. disable Kraken ingestion in the Brain (`KRAKEN_INGEST_ENABLED=false`) and
+   rotate `KRAKEN_INGEST_SECRET`;
+5. if the broker has the Docker socket, treat the Docker host as compromised:
+   isolate the host, not just the container.
 
 ```bash
 docker compose --profile kraken stop aegis-kraken aegis-kraken-sensors aegis-kraken-broker
 docker compose --profile kraken logs --no-color aegis-kraken > evidence/kraken.log
 ```
 
-## 2. Evidenza
+## 2. Evidence
 
-- dump del DB Kraken e del volume `kraken_data`;
-- log di sessione, comandi, credenziali (già hash) e sample con SHA-256;
-- configurazione del broker e allowlist delle chiamate Docker;
-- eventi outbox e stato di consegna al Brain;
-- access log di Caddy per `/kraken/*`;
-- hash dei sample e dei file esca, senza copiare malware nei ticket.
+- dump of the Kraken DB and of the `kraken_data` volume;
+- session logs, commands, credentials (already hashed) and samples with SHA-256;
+- broker configuration and the Docker call allowlist;
+- outbox events and their delivery status to the Brain;
+- Caddy access logs for `/kraken/*`;
+- hashes of the samples and decoy files, without copying malware into tickets.
 
 ## 3. Triage
 
-- L'attaccante ha eseguito comandi sull'host tramite il broker?
-- Ha ottenuto il socket Docker o il token del broker?
-- Ha letto sample, credenziali o dati GeoIP?
-- Ha alterato sessioni, campagne, topologie o run Lab?
-- Ha usato l'SSO per creare un utente `aegis:*` o ha rubato una sessione?
-- L'outbox ha inviato eventi falsi al Brain? Confronta `event_id` e HMAC.
+- Did the attacker execute commands on the host through the broker?
+- Did they obtain the Docker socket or the broker token?
+- Did they read samples, credentials or GeoIP data?
+- Did they alter sessions, campaigns, topologies or Lab runs?
+- Did they use SSO to create an `aegis:*` user or steal a session?
+- Did the outbox send fake events to the Brain? Compare `event_id` and HMAC.
 
-## 4. Ripristino
+## 4. Recovery
 
-1. ricostruisci Kraken e broker da immagini pulite;
-2. ripristina il DB e il volume da un backup verificato, oppure riparti vuoto
-   se l'integrità non è dimostrabile;
-3. ruota DB, Redis, `SECRET_KEY`, `INTERNAL_API_KEY`, SSO e ingest secret;
-4. riabilita l'ingest solo dopo aver verificato HMAC e allowlist;
-5. esegui uno smoke: evento sensore → outbox → evento Brain → vista Aegis;
-6. verifica che il broker non possa creare container privilegiati.
+1. rebuild Kraken and the broker from clean images;
+2. restore the DB and the volume from a verified backup, or start empty if
+   integrity cannot be demonstrated;
+3. rotate DB, Redis, `SECRET_KEY`, `INTERNAL_API_KEY`, SSO and ingest secrets;
+4. re-enable ingestion only after verifying HMAC and the allowlist;
+5. run a smoke test: sensor event → outbox → Brain event → Aegis view;
+6. verify that the broker cannot create privileged containers.
 
-## 5. Chiusura
+## 5. Closure
 
-Registra quale rete era raggiungibile, quali sample sono stati esposti, quali
-secret sono stati ruotati e se il Brain ha ricevuto eventi non autentici. La
-chiusura include un test negativo: un evento con HMAC errato deve restare 401.
+Record which network was reachable, which samples were exposed, which secrets
+were rotated and whether the Brain received unauthenticated events. Closure
+includes a negative test: an event with a wrong HMAC must stay 401.

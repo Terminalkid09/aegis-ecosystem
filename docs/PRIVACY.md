@@ -1,153 +1,154 @@
-# Privacy e GDPR — Aegis Ecosystem
+# Privacy and GDPR — Aegis Ecosystem
 
-Stato: bozza tecnica per Gate 0 (AP-20), 2026-11-15. **Non è un parere
-legale.** Prima della distribuzione a clienti il documento e il DPA devono
-essere verificati da un legale/DPO competente.
+Status: technical draft for Gate 0 (AP-20), 2026-11-15. **This is not legal
+advice.** Before distribution to customers, the document and the DPA must be
+reviewed by a competent lawyer/DPO.
 
-Aegis è distribuito on-premise: il cliente che installa la piattaforma decide
-perché e come trattare i dati. Il progetto non gestisce un servizio SaaS e non
-riceve telemetria dai deployment dei clienti.
+Aegis is distributed on-premise: the customer who installs the platform decides
+why and how data is processed. The project does not run a SaaS service and does
+not receive telemetry from customer deployments.
 
-## 1. Ruoli
+## 1. Roles
 
-| Scenario | Titolare | Responsabile | Note |
+| Scenario | Controller | Processor | Notes |
 |---|---|---|---|
-| Cliente installa Aegis sui propri endpoint | Cliente | Cliente (o fornitore IT del cliente) | Il progetto non tratta i dati |
-| Fornitore IT installa e gestisce Aegis per un cliente | Cliente | Fornitore IT | Serve un DPA tra cliente e fornitore |
-| Manutenzione remota del deployment | Cliente | Soggetto che accede su autorizzazione | Accesso minimo, loggato e revocabile |
+| Customer installs Aegis on its own endpoints | Customer | Customer (or the customer's IT provider) | The project does not process the data |
+| IT provider installs and manages Aegis for a customer | Customer | IT provider | A DPA between customer and provider is required |
+| Remote maintenance of the deployment | Customer | Party accessing under authorisation | Minimum access, logged and revocable |
 
-Il fornitore del software non è responsabile del trattamento solo perché il
-codice è installato. Un eventuale supporto remoto va coperto da un accordo
-separato e da un accesso tracciato.
+The software vendor is not a processor merely because the code is installed.
+Any remote support must be covered by a separate agreement and by traced
+access.
 
-## 2. Registro dei trattamenti
+## 2. Processing register
 
-| Dato | Finalità | Base giuridica (indicativa) | Conservazione default | Dove |
+| Data | Purpose | Legal basis (indicative) | Default retention | Where |
 |---|---|---|---|---|
-| Telemetria endpoint: processi, path, hash, username, comandi, rete | Rilevazione e risposta a incidenti di sicurezza | Legittimo interesse alla sicurezza; obblighi di legge se applicabili | 14 giorni | PostgreSQL `telemetry` |
-| Alert, incidenti, timeline, note analyst | Triage e risposta | Sicurezza; obblighi di legge | 90 giorni | PostgreSQL `alerts`, `incidents` |
-| Audit log di accessi e azioni | Accountability e indagini | Obblighi di sicurezza; legittimo interesse | 365 giorni | PostgreSQL `audit_logs` |
-| Syslog | Correlazione sicurezza | Legittimo interesse | 30 giorni | PostgreSQL `syslog_events` |
-| Credenziali agent (device secret) | Autenticazione degli endpoint | Esecuzione del contratto/sicurezza | Fino a revoca | Hash in PostgreSQL; cache Redis solo hash |
-| Token di enrollment | Registrazione di un host | Sicurezza | 15 minuti, monouso | Hash in PostgreSQL |
-| Note VaultX | Segreti operativi del cliente | Esecuzione del contratto | Fino a cancellazione | PostgreSQL cifrato |
-| Backup | Continuità operativa e recupero | Sicurezza | 7 giorni | Volume backup cifrato |
-| Kraken: eventi di attacco, IP, username/password tentate, comandi | Analisi di attacchi contro honeypot | Legittimo interesse alla sicurezza | 30 giorni / quota 5 GiB | Istanza Kraken separata |
-| Kraken: sample malware caricati | Analisi tecnica | Sicurezza; consenso del cliente per dati non necessari | 30 giorni / quota 5 GiB | Archivio sample separato |
+| Endpoint telemetry: processes, paths, hashes, usernames, commands, network | Security incident detection and response | Legitimate interest in security; legal obligations where applicable | 14 days | PostgreSQL `telemetry` |
+| Alerts, incidents, timeline, analyst notes | Triage and response | Security; legal obligations | 90 days | PostgreSQL `alerts`, `incidents` |
+| Audit log of access and actions | Accountability and investigations | Security obligations; legitimate interest | 365 days | PostgreSQL `audit_logs` |
+| Syslog | Security correlation | Legitimate interest | 30 days | PostgreSQL `syslog_events` |
+| Agent credentials (device secret) | Endpoint authentication | Contract performance/security | Until revocation | Hash in PostgreSQL; Redis cache stores hashes only |
+| Enrollment tokens | Host registration | Security | 15 minutes, single use | Hash in PostgreSQL |
+| VaultX notes | Customer operational secrets | Contract performance | Until deletion | Encrypted PostgreSQL |
+| Backups | Operational continuity and recovery | Security | 7 days | Encrypted backup volume |
+| Kraken: attack events, IPs, attempted usernames/passwords, commands | Analysis of attacks against honeypots | Legitimate interest in security | 30 days / 5 GiB quota | Separate Kraken instance |
+| Kraken: uploaded malware samples | Technical analysis | Security; customer consent for unnecessary data | 30 days / 5 GiB quota | Separate sample archive |
 
-I campi “username”, indirizzi IP, hostname e command line possono identificare
-persone fisiche. Non sono quindi “dati non personali” solo perché tecnici.
+The fields "username", IP addresses, hostname and command line can identify
+natural persons. They are therefore not "non-personal data" merely because they
+are technical.
 
-## 3. Minimizzazione e log
+## 3. Minimisation and logs
 
-- Non registrare password, token, chiavi API o contenuto di file nei log
-  applicativi.
-- Le password tentate su Kraken sono conservate solo come HMAC con chiave; il
-  valore in chiaro non viene scritto su DB, JSONL, SIEM o alert Telegram.
-- La telemetria è configurabile e può essere ridotta dal cliente; la retention
-  è un limite massimo, non un obbligo a conservare tutto.
-- I sample Kraken sono accettati solo entro i limiti di dimensione, numero di
-  file e quota; il contenuto non viene eseguito dal Brain.
-- I log di debug non vanno abilitati in produzione (`DEBUG=false`).
+- Do not record passwords, tokens, API keys or file contents in application
+  logs.
+- Passwords attempted against Kraken are stored only as a keyed HMAC; the
+  plaintext value is never written to the DB, JSONL, SIEM or Telegram alerts.
+- Telemetry is configurable and can be reduced by the customer; retention is a
+  maximum bound, not an obligation to keep everything.
+- Kraken samples are accepted only within the limits on size, file count and
+  quota; the content is never executed by the Brain.
+- Debug logging must not be enabled in production (`DEBUG=false`).
 
-## 4. Retention e cancellazione
+## 4. Retention and deletion
 
-Default:
+Defaults:
 
-- telemetria 14 giorni;
-- alert e incidenti 90 giorni;
-- audit 365 giorni;
-- syslog 30 giorni;
-- backup 7 giorni;
-- Kraken 30 giorni e quota 5 GiB, con overwrite prima dell'unlink.
+- telemetry 14 days;
+- alerts and incidents 90 days;
+- audit 365 days;
+- syslog 30 days;
+- backups 7 days;
+- Kraken 30 days and 5 GiB quota, with overwrite before unlink.
 
-La retention è configurabile, ma non può essere infinita per default. La purge
-deve essere eseguita dopo un backup verificato; l'audit non viene cancellato
-automaticamente senza conferma esplicita. Alla cessazione del contratto il
-cliente può esportare e cancellare i dati del proprio deployment. I backup
-ruotano secondo la retention e vanno distrutti con la stessa procedura.
+Retention is configurable, but it cannot be infinite by default. Purge must run
+after a verified backup; the audit log is not deleted automatically without
+explicit confirmation. On contract termination the customer can export and
+delete the data of its own deployment. Backups rotate according to retention
+and must be destroyed with the same procedure.
 
-## 5. Residenza e trasferimenti
+## 5. Residency and transfers
 
-- Il deployment è on-premise: i dati restano nell'infrastruttura scelta dal
-  cliente.
-- Non c'è telemetria inviata al progetto.
-- I provider AI cloud sono spenti per default e l'arricchimento automatico è
-  disabilitato; se il cliente li abilita, deve verificare sede e garanzie del
-  fornitore.
-- Le integrazioni OSINT opzionali inviano solo indicatori (IP/dominio), non la
-  telemetria completa. Il cliente deve comunque valutarle nel proprio registro.
-- I backup vanno conservati nella giurisdizione richiesta dal cliente.
+- The deployment is on-premise: data stays in the infrastructure chosen by the
+  customer.
+- No telemetry is sent to the project.
+- Cloud AI providers are off by default and automatic enrichment is disabled;
+  if the customer enables them, it must verify the provider's location and
+  guarantees.
+- Optional OSINT integrations send only indicators (IP/domain), not the full
+  telemetry. The customer must still assess them in its own register.
+- Backups must be stored in the jurisdiction required by the customer.
 
-## 6. Diritti degli interessati
+## 6. Data subject rights
 
-Il cliente, in qualità di titolare, gestisce accesso, rettifica, cancellazione,
-limitazione, opposizione e portabilità. Il deployment deve permettere almeno:
+The customer, as controller, handles access, rectification, erasure,
+restriction, objection and portability. The deployment must allow at least:
 
-- ricerca e export dei dati per host/utente e intervallo temporale;
-- cancellazione dei dati non più necessari, nel rispetto degli obblighi di
-  legge e della catena di custodia;
-- anonimizzazione o pseudonimizzazione quando la sicurezza lo consente.
+- search and export of data by host/user and time range;
+- deletion of data that is no longer necessary, subject to legal obligations
+  and the chain of custody;
+- anonymisation or pseudonymisation where security allows it.
 
-Le richieste vanno indirizzate al titolare del deployment, non al progetto.
+Requests must be addressed to the deployment controller, not to the project.
 
-## 7. Sicurezza
+## 7. Security
 
-Misure presenti o richieste al deployment:
+Measures present in, or required from, the deployment:
 
-- TLS in transito; mTLS per gli agent in profilo prod;
-- RBAC e audit delle azioni;
-- cifratura dei segreti e dei backup (GPG con passphrase esterna);
-- hashing delle credenziali e HMAC delle password tentate su Kraken;
-- isolamento della sandbox Kraken e del broker Docker;
-- minimizzazione dei dati e retention attiva;
-- log senza segreti e senza payload sensibili.
+- TLS in transit; mTLS for agents in the prod profile;
+- RBAC and action auditing;
+- encryption of secrets and backups (GPG with an external passphrase);
+- credential hashing and HMAC of attempted Kraken passwords;
+- isolation of the Kraken sandbox and of the Docker broker;
+- data minimisation and active retention;
+- logs free of secrets and sensitive payloads.
 
 ## 8. Data breach
 
-Il fornitore del deployment deve avere una procedura per:
+The deployment provider must have a procedure to:
 
-1. contenere e verificare l'evento;
-2. preservare le evidenze senza raccogliere dati ulteriori;
-3. notificare il titolare senza ingiustificato ritardo e comunque entro 24 ore
-   dalla conferma, per consentire la notifica all'autorità entro 72 ore;
-4. documentare impatto, categorie di dati, misure e comunicazioni.
+1. contain and verify the event;
+2. preserve evidence without collecting further data;
+3. notify the controller without undue delay and in any case within 24 hours of
+   confirmation, so that notification to the authority can be made within 72
+   hours;
+4. document impact, data categories, measures and communications.
 
-Il progetto riceve segnalazioni di vulnerabilità tramite `SECURITY.md`, non
-tramite issue pubbliche con dati personali.
+The project receives vulnerability reports through `SECURITY.md`, not through
+public issues containing personal data.
 
 ## 9. DPIA
 
-Valutare una DPIA quando il deployment comporta:
+Assess a DPIA when the deployment involves:
 
-- monitoraggio sistematico su larga scala dei dipendenti;
-- trattamenti innovativi o ad alto rischio;
-- dati particolari o giudiziari;
-- interconnessione di fonti o trasferimenti extra-UE;
-- decisioni automatizzate con effetti significativi.
+- systematic large-scale monitoring of employees;
+- innovative or high-risk processing;
+- special-category or judicial data;
+- interconnection of sources or transfers outside the EU;
+- automated decisions with significant effects.
 
-La DPIA è responsabilità del titolare; questa bozza fornisce l'inventario di
-partenza, non la conclusione.
+The DPIA is the controller's responsibility; this draft provides the starting
+inventory, not the conclusion.
 
-## 10. Kraken: separazione
+## 10. Kraken: separation
 
-Kraken è un servizio distinto con database e archivio sample propri. Non
-condivide il database Aegis e non deve essere esposto sulla stessa rete
-dell'istanza di management. I dati degli attaccanti sono conservati solo per
-l'analisi dell'attacco, con retention e quota, e non vanno usati per finalità
-diverse (per esempio marketing o addestramento di modelli) senza una base
-giuridica autonoma.
+Kraken is a distinct service with its own database and sample archive. It does
+not share the Aegis database and must not be exposed on the same network as the
+management instance. Attacker data is kept only for attack analysis, with
+retention and quota, and must not be used for different purposes (for example
+marketing or model training) without an independent legal basis.
 
-## 11. Documenti collegati
+## 11. Related documents
 
 - [`DPA_TEMPLATE.md`](DPA_TEMPLATE.md)
 - [`archive/TRADEMARK_RESEARCH.md`](archive/TRADEMARK_RESEARCH.md)
-- [`OPERATIONS.md`](OPERATIONS.md) — retention e backup
-- [`../SECURITY.md`](../SECURITY.md) — segnalazione vulnerabilità
+- [`OPERATIONS.md`](OPERATIONS.md) — retention and backups
+- [`../SECURITY.md`](../SECURITY.md) — vulnerability reporting
 
-## 12. Limiti di questa bozza
+## 12. Limits of this draft
 
-Non sostituisce un registro dei trattamenti firmato, una DPIA, un parere
-legale o un DPA negoziato. I retention default vanno confermati dal cliente e
-allineati agli obblighi locali. Le integrazioni cloud opzionali richiedono una
-valutazione separata.
+It does not replace a signed processing register, a DPIA, legal advice or a
+negotiated DPA. The default retention periods must be confirmed by the customer
+and aligned with local obligations. Optional cloud integrations require a
+separate assessment.

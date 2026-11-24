@@ -1,41 +1,41 @@
-# Runbook operativi Aegis 4.2
+# Aegis 4.2 operations runbooks
 
-Questi runbook sono parte del gate di release: non sono note generiche, sono
-le azioni che un operatore deve poter eseguire senza inventare comandi durante
-un incidente. Ogni runbook indica cosa preservare, cosa isolare, come
-verificare il ripristino e cosa registrare nell'audit.
+These runbooks are part of the release gate: they are not generic notes, they
+are the actions an operator must be able to perform without inventing commands
+during an incident. Every runbook states what to preserve, what to isolate, how
+to verify recovery and what to record in the audit log.
 
-| Runbook | Quando usarlo |
+| Runbook | When to use it |
 |---|---|
-| [Agente compromesso](agent-compromised.md) | Un endpoint invia telemetria o comandi che non riconosci, oppure un secret device può essere stato letto. |
-| [Brain compromesso](brain-compromised.md) | API, database, PKI o audit del piano di controllo sono sospetti. |
-| [Kraken compromesso](kraken-compromised.md) | Honeypot, sandbox, broker o DB Kraken sono sospetti. |
-| [Malware fuori sandbox](malware-escape.md) | Un campione o un comando è uscito dalla sandbox isolate. |
-| [Backup e ripristino](backup-restore.md) | Backup fallito, corrotto, non verificato o ripristino richiesto. |
+| [Compromised agent](agent-compromised.md) | An endpoint sends telemetry or commands you do not recognise, or a device secret may have been read. |
+| [Compromised Brain](brain-compromised.md) | The API, database, PKI or control-plane audit log is suspect. |
+| [Compromised Kraken](kraken-compromised.md) | The honeypot, sandbox, broker or Kraken DB is suspect. |
+| [Malware outside the sandbox](malware-escape.md) | A sample or command has left the isolated sandbox. |
+| [Backup and restore](backup-restore.md) | A backup failed, is corrupt, is unverified or a restore is required. |
 
-## Regole comuni
+## Common rules
 
-1. **Preserva prima di cancellare.** Copia log, audit, `docker inspect`, stato
-   dei container e hash dei file su un supporto separato. La cancellazione
-   distrugge la catena di evidenza.
-2. **Non fare copia-incolla di secret nella chat o nei ticket.** Ruota i
-   segreti coinvolti e registra solo l'identificatore della rotazione.
-3. **Isola per rete, non solo per applicazione.** Un container compromesso può
-   avere il socket Docker: fermare il processo non basta se il socket è ancora
-   raggiungibile.
-4. **Ogni azione va auditata.** Annota ora, operatore, comando, host,
-   risultato e motivo. Se l'audit applicativo è compromesso, usa un registro
-   esterno.
-5. **Verifica il ripristino con un test, non con un'occhiata.** Un servizio
-   che risponde 200 non prova che il DB sia integro: esegui il controllo di
-   readiness, una query di conteggio e uno smoke di login/ingest.
+1. **Preserve before deleting.** Copy logs, audit records, `docker inspect`,
+   container state and file hashes to separate media. Deletion destroys the
+   chain of evidence.
+2. **Never copy-paste secrets into chat or tickets.** Rotate the affected
+   secrets and record only the rotation identifier.
+3. **Isolate by network, not only by application.** A compromised container may
+   have the Docker socket: stopping the process is not enough if the socket is
+   still reachable.
+4. **Every action must be audited.** Note the time, operator, command, host,
+   result and reason. If the application audit log is compromised, use an
+   external register.
+5. **Verify recovery with a test, not with a glance.** A service that answers
+   200 does not prove the DB is intact: run the readiness check, a count query
+   and a login/ingest smoke test.
 
-## Contatti e autorità
+## Contacts and authorities
 
-- Incident commander: il responsabile SOC di turno.
-- Autorità per revoca PKI e rotazione `JWT_SECRET`: amministratore della
-  piattaforma.
-- Autorità per eliminare dati o ripristinare un backup: proprietario del
-  deployment, con conferma scritta.
-- Per un sospetto malware: non allegare il campione ai ticket; conserva solo
-  SHA-256 e posizione nel volume isolato.
+- Incident commander: the SOC lead on duty.
+- Authority for PKI revocation and `JWT_SECRET` rotation: the platform
+  administrator.
+- Authority to delete data or restore a backup: the deployment owner, with
+  written confirmation.
+- For suspected malware: do not attach the sample to tickets; keep only the
+  SHA-256 and its location in the isolated volume.
