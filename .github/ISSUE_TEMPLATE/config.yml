@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Terminalkid09/aegis-ecosystem/blob/main/SECURITY.md
+    about: Report a vulnerability privately; do not open a public issue.
+  - name: Release and upgrade questions
+    url: https://github.com/Terminalkid09/aegis-ecosystem/blob/main/docs/RELEASES.md
+    about: Read the release audit and the upgrade policy before filing a bug.
