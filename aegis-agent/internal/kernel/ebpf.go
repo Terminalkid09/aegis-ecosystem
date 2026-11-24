@@ -33,11 +33,11 @@ func ParseLine(line string) (map[string]any, error) {
 		return nil, err
 	}
 	if event == nil || !validEventTypes[toString(event["event_type"])] {
-		return nil, fmt.Errorf("event_type non valido")
+		return nil, fmt.Errorf("invalid event_type")
 	}
 	pid, ok := toInt(event["pid"])
 	if !ok || pid < 1 {
-		return nil, fmt.Errorf("pid non valido")
+		return nil, fmt.Errorf("invalid pid")
 	}
 	return event, nil
 }

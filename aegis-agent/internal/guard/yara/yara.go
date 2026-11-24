@@ -53,7 +53,7 @@ func (s *Scanner) Available() bool {
 // some YARA builds, while preserving paths containing spaces.
 func (s *Scanner) Scan(ctx context.Context, rules string, targets []string) ([]Match, error) {
 	if s == nil || !s.Available() {
-		return nil, fmt.Errorf("yara64 non disponibile: %s", s.binaryName())
+		return nil, fmt.Errorf("yara64 unavailable: %s", s.binaryName())
 	}
 	if strings.TrimSpace(rules) == "" {
 		return nil, fmt.Errorf("regole YARA vuote")

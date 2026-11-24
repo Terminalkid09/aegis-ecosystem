@@ -20,8 +20,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The build steps embed the product version as literals (VERSION=4.3.0,
+  # aegis-agent-4.3.0-x64.msi, ...). A tag that does not match them would publish
+  # artifacts for the wrong version, so every packaging job waits for this guard.
+  version_guard:
+    name: Tag matches the packaged version
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Tag matches the version literals
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          if ! grep -qE "VERSION=${tag}([^0-9.]|$)" .github/workflows/packaging.yml; then
+            echo "::error::tag v${tag} does not match the version literals in packaging.yml; bump them before tagging"
+            exit 1
+          fi
+          echo "tag v${tag} matches the packaged version"
+
   packaging_windows:
     name: Packaging Windows (test-signed MSI)
+    needs: version_guard
     timeout-minutes: 25
     runs-on: windows-latest
     steps:
@@ -229,6 +250,7 @@ jobs:
 
   packaging_linux:
     name: Packaging Linux (test-signed deb)
+    needs: version_guard
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -284,6 +306,7 @@ jobs:
 
   packaging_server:
     name: Packaging server (self-signed pilot)
+    needs: version_guard
     timeout-minutes: 25
     runs-on: ubuntu-latest
     steps:
@@ -330,6 +353,7 @@ jobs:
 
   packaging_rpm:
     name: Packaging Linux (RPM)
+    needs: version_guard
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -384,6 +408,7 @@ jobs:
 
   packaging_opkg:
     name: Packaging OpenWrt (ipk)
+    needs: version_guard
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:

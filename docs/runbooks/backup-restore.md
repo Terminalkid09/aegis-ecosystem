@@ -1,55 +1,54 @@
-# Runbook — backup e ripristino
+# Runbook — backup and restore
 
-**Obiettivo:** dimostrare che un backup è integro e ripristinabile, non solo
-che il job è terminato con exit 0.
+**Objective:** demonstrate that a backup is intact and restorable, not just that
+the job exited 0.
 
-## 1. Verifica periodica
+## 1. Periodic verification
 
-1. il job di backup deve produrre un file con checksum e timestamp;
-2. il checksum va verificato sul file appena scritto, non solo a fine mese;
-3. esegui un restore su un database usa-e-getta con nome che contiene
-   `test`;
-4. confronta tabelle e conteggi principali (utenti, agenti, eventi, audit);
-5. registra l'esito con data, durata e dimensione.
+1. the backup job must produce a file with a checksum and a timestamp;
+2. the checksum must be verified on the file just written, not only at the end
+   of the month;
+3. run a restore on a disposable database whose name contains `test`;
+4. compare the main tables and counts (users, agents, events, audit);
+5. record the result with date, duration and size.
 
 ```bash
 sha256sum -c backup.sha256
 pg_restore --clean --if-exists --no-owner -d "$TEST_DATABASE_URL" backup.dump
 ```
 
-Non ripristinare su un database di produzione per "provare". Il nome del DB
-deve contenere `test` e la connessione deve essere separata.
+Do not restore onto a production database "to try it". The DB name must contain
+`test` and the connection must be separate.
 
-## 2. Backup fallito
+## 2. Failed backup
 
-1. non cancellare il backup precedente;
-2. controlla spazio, permessi, credenziali e lock del DB;
-3. verifica che la passphrase non sia in un file leggibile da altri;
-4. riesegui in un percorso temporaneo e verifica il checksum;
-5. se il fallimento è ricorrente, apri un incidente: un backup non
-   verificato equivale a nessun backup.
+1. do not delete the previous backup;
+2. check space, permissions, credentials and DB locks;
+3. verify that the passphrase is not in a world-readable file;
+4. re-run into a temporary path and verify the checksum;
+5. if the failure is recurring, open an incident: an unverified backup is the
+   same as no backup.
 
-## 3. Ripristino di emergenza
+## 3. Emergency restore
 
-1. dichiara la finestra e ferma i consumer/worker;
-2. salva il DB corrente, anche se corrotto, per l'analisi;
-3. ripristina il backup scelto su un DB nuovo;
-4. esegui le migrazioni solo se il backup è precedente allo schema corrente;
-5. avvia Brain con il DB nuovo e verifica `/health/ready`;
-6. esegui login, una query di audit e uno smoke di ingestione;
-7. riapri il traffico e monitora errori e lag.
+1. declare the window and stop the consumers/workers;
+2. save the current DB, even if corrupt, for analysis;
+3. restore the chosen backup onto a new DB;
+4. run migrations only if the backup predates the current schema;
+5. start the Brain against the new DB and verify `/health/ready`;
+6. run a login, an audit query and an ingestion smoke test;
+7. reopen traffic and monitor errors and lag.
 
-## 4. Dopo il ripristino
+## 4. After the restore
 
-- ruota le credenziali se il backup conteneva secret o se l'ambiente è
-  sospetto;
-- verifica che gli agenti non abbiano duplicato eventi o comandi durante la
-  finestra;
-- confronta il numero di eventi e alert attesi con quelli ripristinati;
-- annota il punto di ripristino (timestamp e checksum) nell'audit.
+- rotate credentials if the backup contained secrets or the environment is
+  suspect;
+- verify that agents did not duplicate events or commands during the window;
+- compare the expected number of events and alerts with the restored ones;
+- record the restore point (timestamp and checksum) in the audit log.
 
-## 5. Criterio di chiusura
+## 5. Closure criterion
 
-Il ripristino è chiuso solo quando un test automatico ha verificato checksum,
-conteggi, readiness e uno smoke end-to-end. Un backup senza restore provato
-non è un backup: è solo un file.
+A restore is closed only when an automated test has verified the checksum, the
+counts, readiness and an end-to-end smoke test. A backup without a proven
+restore is not a backup: it is only a file.

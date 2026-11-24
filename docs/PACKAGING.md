@@ -211,6 +211,14 @@ sudoedit /etc/aegis-agent/aegis-agent.env
 sudo systemctl enable --now aegis-agent
 ```
 
+Before enabling the unit, `aegis-agent -check` runs the same validation the
+service does without touching the network: it exits 1 when the server URL is
+missing or malformed and when an explicitly passed `-config` file does not
+exist, so it can gate an MDM or Ansible step. A missing enrollment token is
+reported as a warning because that is the expected state before the first
+start. `AEGIS_BRAIN_URL` (or `BRAIN_URL` in the MSI) is enough: the heartbeat,
+update, command, ack and report endpoints are derived from it.
+
 The package enables but does not start the unit in `postinst`. The unit runs as
 root because eBPF/auditd require it; `ProtectHome` and `PrivateTmp` are enabled
 and `NoNewPrivileges` is deliberately not forced until the eBPF path has a
@@ -430,6 +438,10 @@ runs:
 - **RPM install/uninstall** in a disposable `rockylinux:9` container;
 - **ipk structure** validation (`debian-binary`, `control.tar.gz`,
   `data.tar.gz`);
+- **compose overlays** (`prod`, `ha`, `mtls`, `observability`,
+  `kraken-honeypot`) merged with the base file through `docker compose config`
+  in the lint job, so an overlay that cannot be merged fails the pull request
+  instead of the operator's first `up`;
 - **server packages** build, metadata/signature/checksum verification, dashboard
   and Kraken payload checks, and bundle inspection on a clean `ubuntu-latest`
   runner. Actual Docker start/reboot remains a host test.

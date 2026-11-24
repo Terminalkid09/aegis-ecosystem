@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var ErrNotFound = errors.New("agent token non trovato")
+var ErrNotFound = errors.New("agent token not found")
 
 // Token is the legacy NodeTrace identity format. Keeping it byte-compatible
 // lets the Go sensor replace the Python runtime without a new Brain record.
@@ -48,7 +48,7 @@ func (s *Store) Load() (Token, error) {
 		if os.IsNotExist(err) {
 			return Token{}, ErrNotFound
 		}
-		return Token{}, fmt.Errorf("token %s non leggibile: %w", s.Path, err)
+		return Token{}, fmt.Errorf("token %s is not readable: %w", s.Path, err)
 	}
 	var token Token
 	if err := json.Unmarshal(data, &token); err != nil {
@@ -121,7 +121,7 @@ func (s *Store) Save(token Token) error {
 func CheckServerPin(stored, current string) error {
 	current = strings.TrimSpace(current)
 	if current == "" {
-		return fmt.Errorf("server URL non configurato")
+		return fmt.Errorf("server URL is not configured")
 	}
 	stored = strings.TrimSpace(stored)
 	if stored == "" {

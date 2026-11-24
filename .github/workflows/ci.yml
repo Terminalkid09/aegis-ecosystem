@@ -65,6 +65,8 @@ jobs:
           python-version: '3.15'
       - name: Compose resource limits are configurable
         run: python scripts/check_compose_limits.py
+      - name: Compose overlays merge into valid projects
+        run: python scripts/check_compose_overlays.py
       - name: Lint Brain
         run: |
           cd aegis-brain
