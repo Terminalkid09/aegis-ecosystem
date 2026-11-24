@@ -545,6 +545,129 @@ jobs:
             echo "Skipped (not production signed):$skipped"
           fi
 
+  pilot_release_assets:
+    name: Attach pilot-signed packages to the release
+    # Opt-in path for pilot tags. release_assets refuses test-signed artifacts on
+    # purpose (docs/PACKAGING.md: a public release requires the production signing
+    # path), so a pilot tag ships no package at all and ak update fails closed with
+    # a 404. This job publishes the same packages only when the repository variable
+    # PILOT_SIGNED_PACKAGES is 'true' and PRODUCTION_SIGNING is not, and it always
+    # adds PILOT_SIGNING.txt so the build cannot be mistaken for production.
+    if: >-
+      ${{ startsWith(github.ref, 'refs/tags/v')
+          && vars.PRODUCTION_SIGNING != 'true'
+          && vars.PILOT_SIGNED_PACKAGES == 'true' }}
+    needs:
+      - packaging_windows
+      - packaging_windows_server
+      - packaging_linux
+      - packaging_server
+      - packaging_rpm
+      - packaging_opkg
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download pilot artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: '{aegis-agent-msi-test-signed,aegis-agent-deb-test-signed,aegis-server-msis,aegis-server-packages,aegis-agent-rpm,aegis-agent-opkg}'
+          path: dist
+          merge-multiple: true
+      - name: Verify the tag matches the pilot artifacts
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          ls -1 dist
+          for expected in \
+            "aegis-agent-$tag-x64.msi" \
+            "aegis-agent_${tag}_amd64.deb" \
+            "aegis-agent-$tag-1.x86_64.rpm" \
+            "aegis-agent_${tag}_x86_64.ipk" \
+            "aegis-server-$tag-x64.msi" \
+            "kraken-server-$tag-x64.msi" \
+            "aegis-suite-$tag-x64.msi" \
+            "aegis_${tag}_amd64.deb" \
+            "kraken_${tag}_amd64.deb" \
+            "aegis-suite_${tag}_all.deb" \
+            "aegis-suite-$tag.tar.gz"; do
+            test -f "dist/$expected" || {
+              echo "::error::missing $expected; the tag does not match the built version"
+              exit 1
+            }
+            test -f "dist/$expected.sha256" || {
+              echo "::error::missing $expected.sha256; ak update verifies sidecars"
+              exit 1
+            }
+          done
+      - name: Record the pilot signing mode
+        run: |
+          set -euo pipefail
+          {
+            echo "PILOT-SIGNED PACKAGES — NOT PRODUCTION SIGNED"
+            echo
+            echo "Release: $GITHUB_REF_NAME"
+            echo
+            echo "These packages are built with the repository pilot signing profile:"
+            echo "test-signed Authenticode for MSI, self-signed or unsigned GPG for deb."
+            echo "They exist so ak update and manual installs work in a controlled pilot."
+            echo "They do not carry the operator certificate and are not a trusted"
+            echo "publisher claim; do not redistribute them as a production build."
+            echo
+            echo "Signing modes recorded by the build:"
+            for record in dist/*.signing.json; do
+              [ -f "$record" ] || continue
+              mode="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('mode','unknown'))" "$record")"
+              printf '  %-45s %s\n' "$(basename "$record")" "$mode"
+            done
+          } > dist/PILOT_SIGNING.txt
+          find dist -maxdepth 1 -name '*.sha256' -type f -print0 \
+            | sort -z | xargs -0 cat > dist/PILOT_PACKAGES_SHA256SUMS.txt
+          cat dist/PILOT_SIGNING.txt
+      - name: Wait for the release created by the tag workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          for attempt in $(seq 1 60); do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release $tag exists; attaching pilot packages"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::release $tag was not created by the tag workflow; nothing was uploaded"
+          exit 1
+      - name: Upload without overwriting (published assets are immutable)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          existing="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+          files=()
+          for file in dist/*.msi dist/*.msi.sha256 dist/*.msi.signing.json \
+                      dist/*.deb dist/*.deb.asc dist/*.deb.sha256 dist/*.deb.signing.json \
+                      dist/*.rpm dist/*.rpm.sha256 \
+                      dist/*.ipk dist/*.ipk.sha256 \
+                      dist/aegis-suite-*.tar.gz dist/aegis-suite-*.tar.gz.sha256 \
+                      dist/aegis-pilot-signing-key.asc \
+                      dist/PILOT_SIGNING.txt dist/PILOT_PACKAGES_SHA256SUMS.txt; do
+            [ -f "$file" ] || continue
+            name="$(basename "$file")"
+            if printf '%s\n' "$existing" | grep -qxF "$name"; then
+              echo "::error::release $tag already has $name; published assets are immutable"
+              exit 1
+            fi
+            files+=("$file")
+          done
+          [ "${#files[@]}" -gt 0 ] || { echo "::error::nothing to upload"; exit 1; }
+          gh release upload "$tag" "${files[@]}"
+          echo "Attached ${#files[@]} pilot artifacts to $tag"
+          echo "::warning::$tag carries pilot-signed packages; they are not production signed"
+
   production_windows:
     name: Production Windows signature
     # A production tag must be signed, otherwise release_assets has nothing
